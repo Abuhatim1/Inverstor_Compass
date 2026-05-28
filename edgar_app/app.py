@@ -174,7 +174,115 @@ with st.sidebar:
     _n_cached = cache_size()
     st.caption(f"{_n_cached} filing(s) cached — repeat analyses are instant and free.")
 
+    # ── Market Price Auto-Refresh ─────────────────────────────────────────────
+    st.divider()
+    st.caption("📡 **Market Price Auto-Refresh**")
+    from market_prices import market_session_label as _msl, is_us_market_open as _mko
+    _si, _sl = _msl()
+    st.caption(f"{_si} {_sl}")
+
+    mp_auto_on = st.toggle(
+        "Auto-refresh prices",
+        value=False,
+        key="mp_auto_on",
+        help="Automatically re-fetches live prices at the chosen interval. "
+             "Never triggers AI analysis.",
+    )
+    mp_interval = st.selectbox(
+        "Interval",
+        ["1 minute", "5 minutes", "15 minutes"],
+        index=1,
+        key="mp_interval",
+        disabled=not mp_auto_on,
+    )
+    _last_ts = st.session_state.get("mp_last_refresh")
+    if _last_ts:
+        st.caption(f"Last refresh: **{_last_ts}**")
+        if mp_auto_on:
+            import time as _t
+            _ivl_secs = {"1 minute": 60, "5 minutes": 300, "15 minutes": 900}.get(
+                mp_interval, 300
+            )
+            _ep       = st.session_state.get("mp_last_refresh_epoch", 0.0)
+            _secs_left = max(0, int(_ep + _ivl_secs - _t.time()))
+            if _secs_left > 0:
+                st.caption(f"Next refresh: ~{_secs_left}s")
+            else:
+                st.caption("Next refresh: imminent")
+    else:
+        st.caption("Prices not yet fetched this session.")
+
+    if mp_auto_on and not _mko():
+        st.caption("🔴 Market closed — prices may be delayed")
+
 _analyze_enabled = _ai_ready or demo_mode
+
+
+# ── Market price auto-refresh logic ──────────────────────────────────────────
+# Placed here (top-level, after sidebar) so it runs on every page render
+# before any tab content.  AI calls only happen inside explicit button handlers
+# lower in this file — auto-refresh reruns will never reach them.
+
+_MP_INTERVAL_MS = {
+    "1 minute":   60_000,
+    "5 minutes":  300_000,
+    "15 minutes": 900_000,
+}
+
+
+def _collect_all_tickers() -> list[str]:
+    """Return sorted list of all tickers from watchlist + holdings (no AI calls)."""
+    from portfolio import load_portfolio, load_holdings
+    try:
+        return sorted(
+            set(list(load_portfolio().keys()) + list(load_holdings().keys()))
+        )
+    except Exception:
+        return []
+
+
+def _run_price_refresh(*, force: bool = True) -> int:
+    """
+    Refresh market prices for every known ticker.
+    Safe to call on every rerun — never triggers AI analysis.
+    Returns the count of tickers fetched successfully.
+    """
+    from market_prices import refresh_all_prices, save_to_session
+    try:
+        tickers = _collect_all_tickers()
+        if not tickers:
+            return 0
+        results = refresh_all_prices(tickers, force=force)
+        save_to_session(results)
+        return sum(1 for d in results.values() if d.is_ok)
+    except Exception:
+        return 0
+
+
+# 1. Automatic fetch on first load of this browser session
+if "mp_initial_done" not in st.session_state:
+    st.session_state["mp_initial_done"] = True
+    if _collect_all_tickers():          # only if the user has tickers already
+        _run_price_refresh(force=False) # use cache if still warm (60 s TTL)
+
+# 2. Periodic auto-refresh via st_autorefresh (hidden component)
+if st.session_state.get("mp_auto_on", False):
+    try:
+        from streamlit_autorefresh import st_autorefresh
+        _ar_interval_ms = _MP_INTERVAL_MS.get(
+            st.session_state.get("mp_interval", "5 minutes"), 300_000
+        )
+        _ar_count = st_autorefresh(interval=_ar_interval_ms, key="mp_ar",
+                                   debounce=False)
+        # st_autorefresh increments its counter each time it fires a rerun.
+        # Compare with stored count to detect auto-rerun vs user interaction.
+        _prev_ar = st.session_state.get("mp_last_ar_count", -1)
+        if _ar_count != _prev_ar:
+            st.session_state["mp_last_ar_count"] = _ar_count
+            if _ar_count > 0:           # skip count=0 (initial page render)
+                _run_price_refresh(force=True)
+    except ImportError:
+        pass   # streamlit-autorefresh not installed — degrade gracefully
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

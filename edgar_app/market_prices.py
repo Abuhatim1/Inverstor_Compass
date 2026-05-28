@@ -321,10 +321,10 @@ def save_to_session(results: dict[str, "MarketData"]) -> None:
         import streamlit as st
         existing: dict = st.session_state.get(_SESSION_CACHE_KEY, {})
         existing.update(results)          # store everything, including failures
-        st.session_state[_SESSION_CACHE_KEY]     = existing
-        st.session_state[_SESSION_LAST_REFRESH_KEY] = (
-            datetime.now().strftime("%H:%M:%S")
-        )
+        now_str = datetime.now().strftime("%H:%M:%S")
+        st.session_state[_SESSION_CACHE_KEY]          = existing
+        st.session_state[_SESSION_LAST_REFRESH_KEY]   = now_str
+        st.session_state["mp_last_refresh_epoch"]     = time.time()
     except Exception:
         pass
 
