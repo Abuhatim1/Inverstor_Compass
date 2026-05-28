@@ -42,6 +42,14 @@ class ImportError_(Exception):
     """Raised when the upload cannot be read or parsed."""
 
 
+class ThesisQuotaExceeded(ImportError_):
+    """Raised when the OpenAI account has no remaining quota / billing.
+
+    The UI catches this specifically to offer the rule-based fallback,
+    which works fully offline on DOCX/TXT/PDF-extracted text.
+    """
+
+
 # ── File → text extraction ───────────────────────────────────────────────────
 
 def detect_kind(filename: str) -> str:
@@ -343,9 +351,279 @@ def extract_thesis_from_text(
         raw = resp.choices[0].message.content or "{}"
         data = json.loads(raw)
     except Exception as e:
+        # Detect quota / billing failure and surface a specific exception so
+        # the UI can offer the rule-based fallback (Demo Mode for import).
+        err = str(e).lower()
+        if (
+            "insufficient_quota" in err
+            or "exceeded your current quota" in err
+            or "billing" in err and "quota" in err
+            or type(e).__name__ in ("RateLimitError", "APIStatusError")
+            and ("quota" in err or "429" in err)
+        ):
+            raise ThesisQuotaExceeded(
+                "OpenAI quota exhausted — no remaining credits on this API key."
+            ) from e
         raise ImportError_(f"AI extraction failed: {e}") from e
 
     return _normalize_extraction(data)
+
+
+# ── Rule-based fallback (Demo Mode for thesis import) ────────────────────────
+
+# Map of label → canonical section key. Match is case-insensitive and uses
+# the longest label first so "key risks" wins over "risks".
+_SECTION_LABELS: list[tuple[str, str]] = sorted([
+    # rationale / summary
+    ("investment thesis",      "rationale"),
+    ("thesis summary",         "rationale"),
+    ("recommendation",         "rationale"),
+    ("rating",                 "rationale"),
+    ("summary",                "rationale"),
+    ("thesis",                 "rationale"),
+    ("overview",               "rationale"),
+    ("action",                 "rationale"),
+    # drivers
+    ("expected value drivers", "value_drivers"),
+    ("value drivers",          "value_drivers"),
+    ("thesis drivers",         "drivers"),
+    ("key drivers",            "drivers"),
+    ("drivers",                "drivers"),
+    # catalysts
+    ("near-term catalysts",    "catalysts"),
+    ("near term catalysts",    "catalysts"),
+    ("expected catalysts",     "catalysts"),
+    ("catalysts",              "catalysts"),
+    ("catalyst",               "catalysts"),
+    # risks
+    ("key risks",              "risks"),
+    ("risk factors",           "risks"),
+    ("downside risks",         "risks"),
+    ("principal risks",        "risks"),
+    ("risks",                  "risks"),
+    ("risk",                   "risks"),
+    # scenarios
+    ("bull scenario",          "bull_case"),
+    ("bull case",              "bull_case"),
+    ("upside scenario",        "bull_case"),
+    ("upside case",            "bull_case"),
+    ("upside",                 "bull_case"),
+    ("bull",                   "bull_case"),
+    ("base scenario",          "base_case"),
+    ("base case",              "base_case"),
+    ("base",                   "base_case"),
+    ("bear scenario",          "bear_case"),
+    ("bear case",              "bear_case"),
+    ("downside scenario",      "bear_case"),
+    ("downside case",          "bear_case"),
+    ("downside",               "bear_case"),
+    ("bear",                   "bear_case"),
+    # valuation / targets
+    ("12-month target",        "target_price"),
+    ("price target",           "target_price"),
+    ("target price",           "target_price"),
+    ("fair value",             "target_price"),
+    ("intrinsic value",        "target_price"),
+    ("valuation",              "valuation_thesis"),
+    # other
+    ("competitive advantage",  "moat"),
+    ("competitive moat",       "moat"),
+    ("moat",                   "moat"),
+    ("management execution",   "mgmt_assumptions"),
+    ("management",             "management"),
+    ("time horizon",           "horizon"),
+    ("holding period",         "horizon"),
+    ("horizon",                "horizon"),
+    ("margin profile",         "margin_profile"),
+    ("growth profile",         "growth_profile"),
+], key=lambda kv: -len(kv[0]))
+
+_BULLET_PREFIX_RE = re.compile(r"^\s*(?:[-*•·●▪◦]|\d+[.)])\s+")
+_PRICE_RE         = re.compile(
+    r"(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:bn|mn|m|b|k))?", re.IGNORECASE
+)
+
+
+def _strip_bullet(line: str) -> str:
+    return _BULLET_PREFIX_RE.sub("", line).strip()
+
+
+def _detect_section_label(line: str) -> tuple[str, str] | None:
+    """If `line` looks like a section header, return (canonical_key, body_on_same_line)."""
+    s = _strip_bullet(line).strip()
+    if not s:
+        return None
+    # Markdown style heading
+    md = re.match(r"^#{1,6}\s+(.+?)\s*:?$", s)
+    if md:
+        s = md.group(1).strip()
+    # Match against known labels: `<Label>:` or `<Label>` alone-ish
+    low = s.lower().rstrip(":.").strip()
+    for label, key in _SECTION_LABELS:
+        # Either exact match (heading on its own line) or "<label>:" then body
+        if low == label:
+            return key, ""
+        if low.startswith(label):
+            rest = low[len(label):].lstrip(" :-—–\t")
+            # Require a colon/dash separator so we don't match prose
+            sep_present = bool(re.match(rf"^{re.escape(label)}\s*[:\-—–]", s, re.I))
+            if sep_present:
+                # Capture body from original-case s
+                body = re.split(r"[:\-—–]", s, maxsplit=1)[1].strip() if re.search(r"[:\-—–]", s) else ""
+                return key, body
+    return None
+
+
+def _split_sections(text: str) -> dict[str, str]:
+    """Parse raw text into a {canonical_key: section_body} dict using
+    label-based heuristics. Later occurrences append (newline-joined)."""
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    buf: list[str] = []
+    intro_buf: list[str] = []
+
+    def flush():
+        nonlocal buf
+        if current and buf:
+            sections.setdefault(current, []).append("\n".join(buf).strip())
+        buf = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        hit = _detect_section_label(line)
+        if hit is not None:
+            flush()
+            current, body = hit
+            if body:
+                buf.append(body)
+        else:
+            if current is None:
+                # Pre-header content — kept as candidate "rationale" intro
+                if line.strip():
+                    intro_buf.append(line.strip())
+            else:
+                buf.append(line)
+    flush()
+
+    out = {k: "\n".join(v).strip() for k, v in sections.items()}
+    if "rationale" not in out and intro_buf:
+        out["rationale"] = " ".join(intro_buf[:5])[:600]
+    return out
+
+
+def _split_bullets(body: str) -> list[str]:
+    """Split a section body into bullet items. Recognises explicit bullets,
+    numbered lists, line breaks, and semicolons."""
+    if not body:
+        return []
+    # Prefer line-based splitting when bullets/newlines present
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    if any(_BULLET_PREFIX_RE.match(ln) for ln in lines) or len(lines) > 1:
+        items = [_strip_bullet(ln) for ln in lines]
+        return [i for i in items if i]
+    # Otherwise split on sentence/semicolon boundaries
+    parts = [p.strip(" .;–—-") for p in re.split(r"[;\n]+", body)]
+    return [p for p in parts if p and len(p) > 2]
+
+
+def _extract_first_price(s: str) -> str:
+    if not s: return ""
+    m = _PRICE_RE.search(s)
+    return m.group(0).strip() if m else ""
+
+
+def _coerce_horizon_from_text(text: str) -> str:
+    # Search the whole document for an explicit horizon phrase
+    for phrase in (
+        "6-12 months", "6 to 12 months",
+        "1-3 years", "1 to 3 years",
+        "3-5 years", "3 to 5 years",
+        "5+ years", "five plus years", "5 plus years",
+    ):
+        if phrase in text.lower():
+            return _coerce_horizon(phrase)
+    return "1-3 years"
+
+
+def extract_thesis_rule_based(text: str) -> dict:
+    """Offline / no-AI extractor used as Demo Mode fallback when OpenAI quota
+    is exhausted. Best-effort: parses common research-note section headers
+    (recommendation, drivers, catalysts, risks, bull/base/bear, target price).
+    Returns the same normalized dict shape as `extract_thesis_from_text`.
+    """
+    sections = _split_sections(text or "")
+
+    # Rationale: prefer explicit Recommendation / Thesis section, else intro
+    rationale = sections.get("rationale", "").strip()
+    # Trim rationale to a couple sentences for readability
+    if rationale:
+        sent_split = re.split(r"(?<=[.!?])\s+", rationale)
+        rationale = " ".join(sent_split[:3]).strip()
+
+    drivers       = _split_bullets(sections.get("drivers", ""))
+    value_drivers = _split_bullets(sections.get("value_drivers", ""))
+    catalysts     = _split_bullets(sections.get("catalysts", ""))
+    risks         = _split_bullets(sections.get("risks", ""))
+    mgmt_items    = _split_bullets(sections.get("mgmt_assumptions", ""))
+
+    bull_body = sections.get("bull_case", "")
+    base_body = sections.get("base_case", "")
+    bear_body = sections.get("bear_case", "")
+    global_target = _extract_first_price(sections.get("target_price", ""))
+
+    def _scn(body: str, fallback_target: str = "") -> dict:
+        if not body:
+            return {"description": "", "probability": 0,
+                    "valuation_target": "", "key_assumptions": []}
+        first_para = body.split("\n\n", 1)[0]
+        target = _extract_first_price(body) or fallback_target
+        # Pull probability if doc states it (e.g. "Probability: 30%")
+        prob = 0.0
+        pm = re.search(r"probability[^0-9]{0,15}(\d{1,3})\s*%?", body, re.IGNORECASE)
+        if pm:
+            try: prob = max(0.0, min(100.0, float(pm.group(1))))
+            except ValueError: prob = 0.0
+        # Key assumptions from bullets in the body
+        bullets = _split_bullets(body)
+        assumptions = [b for b in bullets if b != first_para.strip()][:6]
+        return {
+            "description":      first_para.strip(),
+            "probability":      prob,
+            "valuation_target": target,
+            "key_assumptions":  assumptions,
+        }
+
+    bull = _scn(bull_body, global_target)
+    base = _scn(base_body, global_target)
+    bear = _scn(bear_body)
+
+    moat       = sections.get("moat", "").splitlines()[0].strip() if sections.get("moat") else ""
+    management = sections.get("management", "").splitlines()[0].strip() if sections.get("management") else ""
+    margin     = sections.get("margin_profile", "").splitlines()[0].strip() if sections.get("margin_profile") else ""
+    growth     = sections.get("growth_profile", "").splitlines()[0].strip() if sections.get("growth_profile") else ""
+    valuation  = sections.get("valuation_thesis", "").splitlines()[0].strip() if sections.get("valuation_thesis") else ""
+    if not valuation and global_target:
+        valuation = f"Target ≈ {global_target}"
+
+    raw = {
+        "rationale":                        rationale,
+        "thesis_drivers":                   drivers,
+        "expected_value_drivers":           value_drivers,
+        "expected_catalysts":               catalysts,
+        "key_risks":                        risks,
+        "management_execution_assumptions": mgmt_items,
+        "expected_moat":                    moat,
+        "expected_management":              management,
+        "expected_margin_profile":          margin,
+        "expected_growth_profile":          growth,
+        "time_horizon":                     _coerce_horizon_from_text(text or ""),
+        "valuation_thesis":                 valuation,
+        "bull_case":                        bull,
+        "base_case":                        base,
+        "bear_case":                        bear,
+        "risk_matrix":                      [],  # rule-based does not build matrix
+    }
+    return _normalize_extraction(raw)
 
 
 def _normalize_extraction(data: dict) -> dict:

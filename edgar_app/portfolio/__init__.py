@@ -137,9 +137,11 @@ from .core_thesis import (
 )
 from .thesis_importer import (
     ImportError_ as ThesisImportError,
+    ThesisQuotaExceeded,
     build_preview_thesis,
     extract_text as extract_text_from_document,
     extract_thesis_from_text,
+    extract_thesis_rule_based,
     normalize_scenario_probabilities,
     preview_summary as thesis_preview_summary,
 )
@@ -244,8 +246,10 @@ __all__ = [
     "apply_evaluation",
     # Thesis import (PDF / DOCX / TXT → CoreThesis)
     "ThesisImportError",
+    "ThesisQuotaExceeded",
     "extract_text_from_document",
     "extract_thesis_from_text",
+    "extract_thesis_rule_based",
     "build_preview_thesis",
     "thesis_preview_summary",
     "normalize_scenario_probabilities",

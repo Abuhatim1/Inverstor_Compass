@@ -1611,9 +1611,11 @@ def render_thesis_memory_tab() -> None:
         THESIS_STATUS_STABLE, THESIS_STATUS_STRENGTHENING,
         THESIS_STATUS_WEAKENING, TIME_HORIZONS,
         ThesisImportError,
+        ThesisQuotaExceeded,
         build_preview_thesis,
         delete_core_thesis, delete_risk_item, load_all_core_theses, load_holdings,
         extract_text_from_document, extract_thesis_from_text,
+        extract_thesis_rule_based,
         save_core_thesis,
         thesis_preview_summary,
         upsert_core_thesis_fields, upsert_risk_item,
@@ -1677,10 +1679,12 @@ def render_thesis_memory_tab() -> None:
         holdings=holdings, existing_theses=theses,
         extract_text=extract_text_from_document,
         extract_thesis=extract_thesis_from_text,
+        extract_thesis_rule_based=extract_thesis_rule_based,
         build_preview=build_preview_thesis,
         preview_summary_fn=thesis_preview_summary,
         save_thesis=save_core_thesis,
         ImportError_=ThesisImportError,
+        QuotaExceeded=ThesisQuotaExceeded,
     )
     st.divider()
 
@@ -1795,11 +1799,17 @@ def render_thesis_memory_tab() -> None:
 
 def _render_thesis_import_section(
     *, holdings, existing_theses,
-    extract_text, extract_thesis, build_preview, preview_summary_fn,
-    save_thesis, ImportError_,
+    extract_text, extract_thesis, extract_thesis_rule_based,
+    build_preview, preview_summary_fn,
+    save_thesis, ImportError_, QuotaExceeded,
 ) -> None:
-    """📥 Import Thesis From Report — upload PDF/DOCX/TXT and extract via AI."""
+    """📥 Import Thesis From Report — upload PDF/DOCX/TXT and extract via AI.
+
+    When OpenAI quota is exhausted, surfaces a friendly Demo Mode fallback
+    that runs a rule-based section parser on the document instead.
+    """
     PENDING_KEY = "pending_thesis_import"
+    QUOTA_KEY   = "pending_thesis_quota_fallback"
 
     with st.expander("📥 Import Thesis From Report", expanded=False):
         st.caption(
@@ -1810,7 +1820,62 @@ def _render_thesis_import_section(
             "nothing is auto-applied to your holdings."
         )
 
-        pending = st.session_state.get(PENDING_KEY)
+        pending  = st.session_state.get(PENDING_KEY)
+        quota_fb = st.session_state.get(QUOTA_KEY)
+
+        # ── Quota-exhausted state → offer Demo Mode rule-based fallback ──
+        if pending is None and quota_fb is not None:
+            st.warning(
+                "🪫 **OpenAI quota exhausted** — the AI extractor couldn't "
+                "run because there are no remaining credits on the API key.\n\n"
+                "You can still import this document using **Demo Mode**: a "
+                "lightweight rule-based parser that scans for standard "
+                "research-note section headers (recommendation, drivers, "
+                "catalysts, risks, bull/base/bear cases, target prices). "
+                "Results may be less complete than AI extraction — review "
+                "carefully in the preview before saving.",
+                icon="🪫",
+            )
+            st.caption(
+                f"Document: `{quota_fb['filename']}` ({quota_fb['kind']}) · "
+                f"Ticker: **{quota_fb['ticker']}** · "
+                f"{len(quota_fb['text']):,} characters extracted."
+            )
+            qc1, qc2 = st.columns([2, 1])
+            with qc1:
+                use_fallback = st.button(
+                    "🛟 Use Demo Mode (rule-based extraction)",
+                    type="primary", use_container_width=True,
+                    key="use_rule_fallback",
+                )
+            with qc2:
+                cancel_qf = st.button(
+                    "❌ Cancel", use_container_width=True,
+                    key="cancel_quota_fb",
+                )
+            if cancel_qf:
+                del st.session_state[QUOTA_KEY]
+                st.rerun()
+            if use_fallback:
+                try:
+                    extracted = extract_thesis_rule_based(quota_fb["text"])
+                    preview = build_preview(
+                        quota_fb["ticker"], quota_fb["company_name"], extracted,
+                        filename=quota_fb["filename"],
+                        source_kind=quota_fb["kind"],
+                    )
+                    st.session_state[PENDING_KEY] = {
+                        "ticker":   quota_fb["ticker"],
+                        "filename": quota_fb["filename"],
+                        "kind":     quota_fb["kind"],
+                        "preview":  preview,
+                        "demo_mode": True,
+                    }
+                    del st.session_state[QUOTA_KEY]
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Rule-based extraction failed: {e}", icon="❌")
+            return
 
         # ── No pending import → show upload form ─────────────────────────
         if pending is None:
@@ -1868,6 +1933,19 @@ def _render_thesis_import_section(
                         "filename": uploaded.name,
                         "kind":     kind,
                         "preview":  preview,
+                        "demo_mode": False,
+                    }
+                    st.rerun()
+                except QuotaExceeded:
+                    # Quota path: stash extracted text so the user can opt
+                    # into the rule-based Demo Mode fallback without
+                    # re-uploading the document.
+                    st.session_state[QUOTA_KEY] = {
+                        "ticker":       ticker_sel,
+                        "company_name": holding.company_name,
+                        "filename":     uploaded.name,
+                        "kind":         kind,
+                        "text":         text,
                     }
                     st.rerun()
                 except ImportError_ as e:
@@ -1883,11 +1961,20 @@ def _render_thesis_import_section(
         kind     = pending["kind"]
         existing = existing_theses.get(ticker)
 
-        st.success(
-            f"✅ Extracted thesis for **{ticker}** from `{filename}` ({kind}). "
-            "Review the preview below before saving.",
-            icon="📥",
-        )
+        if pending.get("demo_mode"):
+            st.info(
+                f"🛟 **Demo Mode extraction** for **{ticker}** from "
+                f"`{filename}` ({kind}). Built from document headers using "
+                "the rule-based parser (no AI was called). Some fields may "
+                "be missing — fill them in below before saving.",
+                icon="🛟",
+            )
+        else:
+            st.success(
+                f"✅ Extracted thesis for **{ticker}** from `{filename}` "
+                f"({kind}). Review the preview below before saving.",
+                icon="📥",
+            )
 
         # Preview summary metrics (read-only counters above the form)
         summ = preview_summary_fn(preview)
