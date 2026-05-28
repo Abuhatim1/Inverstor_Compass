@@ -31,36 +31,87 @@ st.set_page_config(
 
 # ── Filing type definitions ───────────────────────────────────────────────────
 FILING_TYPES = {
-    "10-K": {"label": "10-K — Annual Report", "limit": 3},
-    "10-Q": {"label": "10-Q — Quarterly Report", "limit": 5},
-    "8-K":  {"label": "8-K — Current Report (material events)", "limit": 5},
+    "10-K": {"label": "10-K — Annual Report",              "limit": 3},
+    "10-Q": {"label": "10-Q — Quarterly Report",           "limit": 5},
+    "8-K":  {"label": "8-K — Current Report",              "limit": 5},
 }
 
 _IMPACT_COLOR = {"Strong": "🟢", "Stable": "🔵", "Weak": "🟡", "Broken": "🔴"}
-_ACTION_COLOR  = {"Buy": "🟢", "Hold": "🔵", "Reduce": "🟡", "Exit": "🔴"}
+_ACTION_COLOR  = {"Buy": "🟢",   "Hold": "🔵",  "Reduce": "🟡", "Exit": "🔴"}
 
 
-# ── Resolve API key (checked fresh on every page load) ───────────────────────
+# ── Helpers: secrets + API key (evaluated fresh each page load) ───────────────
 def _st_secrets():
     try:
         return st.secrets
     except Exception:
         return None
 
-_api_key = get_api_key(_st_secrets())
+_api_key  = get_api_key(_st_secrets())
 _ai_ready = bool(_api_key)
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("⚙️ Settings")
+
+    demo_mode = st.toggle(
+        "Demo Analysis Mode",
+        value=not _ai_ready,   # default ON when no key is present
+        help=(
+            "Returns a sample analysis instantly without calling OpenAI. "
+            "Useful for testing the UI or when your quota is exhausted."
+        ),
+    )
+
+    if demo_mode:
+        st.info("Demo mode is **on** — clicking Analyze Filing returns sample data.", icon="🧪")
+    elif _ai_ready:
+        st.success("API key found — live AI analysis is active.", icon="✅")
+    else:
+        st.warning("API key missing.", icon="🔑")
+
+    st.divider()
+    st.caption("🔑 **API Key Status**")
+    if _ai_ready:
+        st.success("OPENAI_API_KEY found", icon="✅")
+    else:
+        st.error("OPENAI_API_KEY missing", icon="❌")
+        st.markdown(
+            "Add it in **Replit Secrets** (lock icon) with key name `OPENAI_API_KEY`, "
+            "then click below."
+        )
+        if st.button("🔄 Reload secrets", use_container_width=True):
+            st.rerun()
+
+
+# ── Whether the Analyze button should be enabled ─────────────────────────────
+_analyze_enabled = _ai_ready or demo_mode
 
 
 # ── Helper: render AI analysis result ────────────────────────────────────────
 def render_analysis(result: AnalysisResult) -> None:
-    if result.error:
+    # Demo / quota-fallback banner
+    if result.is_demo:
+        label = "🧪 Demo result"
+        if result.error:
+            label += f" — {result.error}"
+        st.info(label)
+    elif result.error:
+        # Hard failure (no partial data)
         st.error(f"**Analysis failed:** {result.error}")
         return
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Thesis Impact",    f"{_IMPACT_COLOR.get(result.thesis_impact, '⚪')} {result.thesis_impact}")
-    col2.metric("Suggested Action", f"{_ACTION_COLOR.get(result.suggested_action, '⚪')} {result.suggested_action}")
-    col3.metric("Confidence",       f"{result.confidence_score} / 100")
+    col1.metric(
+        "Thesis Impact",
+        f"{_IMPACT_COLOR.get(result.thesis_impact, '⚪')} {result.thesis_impact}",
+    )
+    col2.metric(
+        "Suggested Action",
+        f"{_ACTION_COLOR.get(result.suggested_action, '⚪')} {result.suggested_action}",
+    )
+    col3.metric("Confidence", f"{result.confidence_score} / 100")
 
     st.markdown("**What changed**")
     st.write(result.what_changed)
@@ -91,21 +142,30 @@ def render_filing_card(filing: Filing, company_name: str, index: int) -> None:
         with col_right:
             analyze_key = f"analyze_{filing.accession}"
             result_key  = f"result_{filing.accession}"
-            btn = st.button(
-                "Analyze Filing",
+
+            btn_label = "🧪 Demo Analysis" if (demo_mode and not _ai_ready) else "Analyze Filing"
+            btn_help  = None if _analyze_enabled else "Enable Demo Mode or add OPENAI_API_KEY"
+
+            if st.button(
+                btn_label,
                 key=analyze_key,
                 use_container_width=True,
-                disabled=not _ai_ready,
-                help=None if _ai_ready else "Add OPENAI_API_KEY to Replit Secrets to enable",
-            )
-            if btn:
+                disabled=not _analyze_enabled,
+                help=btn_help,
+            ):
                 st.session_state[result_key] = None
-                with st.spinner("Fetching filing and running AI analysis…"):
+                spinner_msg = (
+                    "Loading demo analysis…"
+                    if demo_mode
+                    else "Fetching filing and running AI analysis…"
+                )
+                with st.spinner(spinner_msg):
                     st.session_state[result_key] = analyze_filing(
-                        filing.url,
-                        filing.form_type,
-                        company_name,
+                        filing_url=filing.url,
+                        form_type=filing.form_type,
+                        company_name=company_name,
                         st_secrets=_st_secrets(),
+                        demo_mode=demo_mode,
                     )
 
         if st.session_state.get(result_key) is not None:
@@ -114,7 +174,7 @@ def render_filing_card(filing: Filing, company_name: str, index: int) -> None:
 
 
 # ── Helper: render a filing section ──────────────────────────────────────────
-def render_section(form_type, filings, company_name, label):
+def render_section(form_type: str, filings: list[Filing], company_name: str, label: str) -> None:
     st.subheader(label)
     if not filings:
         st.warning(f"No {form_type} filings found for this company.")
@@ -129,21 +189,6 @@ st.caption(
     "Look up the latest SEC filings for any publicly traded US company. "
     "Data is sourced directly from [SEC EDGAR](https://www.sec.gov/cgi-bin/browse-edgar)."
 )
-
-# ── Debug: API key status (does not reveal the key value) ────────────────────
-with st.expander("🔑 API Key Status (debug)", expanded=not _ai_ready):
-    if _ai_ready:
-        st.success("API key found — AI analysis is enabled.", icon="✅")
-    else:
-        st.error("API key missing — OPENAI_API_KEY not found in environment or Replit Secrets.", icon="❌")
-        st.markdown(
-            "**To fix:**\n"
-            "1. Open the **Secrets** panel (lock icon in the left sidebar)\n"
-            "2. Add a secret named exactly `OPENAI_API_KEY`\n"
-            "3. Click **Restart app** below to reload with the new secret"
-        )
-        if st.button("🔄 Restart app to reload secrets"):
-            st.rerun()
 
 st.divider()
 
@@ -181,15 +226,15 @@ if search_clicked or ticker_input:
 
     with st.spinner("Fetching filings from SEC EDGAR…"):
         results: dict[str, list[Filing]] = {}
-        errors: dict[str, str] = {}
+        fetch_errors: dict[str, str] = {}
         for form_type, cfg in FILING_TYPES.items():
             try:
                 results[form_type] = get_filings(company, form_type, limit=cfg["limit"])
             except EdgarAPIError as e:
                 results[form_type] = []
-                errors[form_type] = str(e)
+                fetch_errors[form_type] = str(e)
 
-    for form_type, msg in errors.items():
+    for form_type, msg in fetch_errors.items():
         st.warning(f"Could not fetch {form_type} filings: {msg}")
 
     tabs = st.tabs([cfg["label"] for cfg in FILING_TYPES.values()])
