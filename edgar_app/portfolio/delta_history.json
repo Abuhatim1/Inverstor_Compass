@@ -3,6 +3,78 @@
     "ticker": "CPRX",
     "company_name": "CATALYST PHARMACEUTICALS, INC.",
     "filing_type": "10-K",
+    "timestamp": "2026-05-28T15:41:05",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T15:40:51",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T15:40:32",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
     "timestamp": "2026-05-28T12:44:29",
     "thesis_prev": "Strong",
     "thesis_new": "Strong",

@@ -468,6 +468,7 @@ def _render_catalysts(theses, watchlist_by, pd):
         .drop_duplicates(subset=["Holding", "Item"])
         .sort_values(["Type", "Holding"])
         .reset_index(drop=True)
+        .astype(str)
     )
     st.dataframe(df, hide_index=True, use_container_width=True)
 
@@ -556,5 +557,5 @@ def _render_action_checklist(dq_result, risk_result, theses, holdings,
             seen.add(key)
             unique.append(a)
 
-    df = pd.DataFrame(unique)
+    df = pd.DataFrame(unique).astype(str)
     st.dataframe(df, hide_index=True, use_container_width=True)

@@ -3,6 +3,93 @@
     "ticker": "CPRX",
     "company_name": "CATALYST PHARMACEUTICALS, INC.",
     "filing_type": "10-K",
+    "accession": "0001193125-24-050908",
+    "timestamp": "2026-05-28T15:41:05",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "accession": "0000950170-25-027714",
+    "timestamp": "2026-05-28T15:40:51",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "accession": "0001193125-26-071525",
+    "timestamp": "2026-05-28T15:40:32",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
     "accession": "0000950170-25-027714",
     "timestamp": "2026-05-28T12:44:29",
     "what_improved": [

@@ -758,16 +758,54 @@ def render_portfolio_dashboard() -> None:
             icon="💡",
         )
     else:
+        from market_prices import (
+            get_all_from_session, market_session_label,
+            refresh_all_prices, save_to_session,
+        )
+        wl_tickers = list(portfolio.keys())
+        sess_icon, sess_label = market_session_label()
+
+        wl_r1, wl_r2, wl_r3 = st.columns([1, 2, 3])
+        with wl_r1:
+            if st.button(
+                "🔄 Refresh Market Prices",
+                use_container_width=True,
+                key="refresh_mp_watchlist",
+                help="Fetch live prices for all watchlist tickers.",
+            ):
+                with st.spinner("Fetching live prices…"):
+                    fetched = refresh_all_prices(wl_tickers)
+                save_to_session(fetched)
+                ok = [t for t, d in fetched.items() if d.is_ok]
+                if ok:
+                    st.toast(f"Fetched prices for {len(ok)} ticker(s)", icon="📡")
+                st.rerun()
+        with wl_r2:
+            st.caption(f"{sess_icon} {sess_label}")
+        with wl_r3:
+            last_ref = st.session_state.get("mp_last_refresh")
+            if last_ref:
+                st.caption(f"Last refreshed at {last_ref}")
+
+        wl_live = get_all_from_session()
         st.caption(f"{len(portfolio)} ticker(s) on watchlist")
         for ticker, entry in sorted(portfolio.items()):
             t_icon = _IMPACT_COLOR.get(entry.thesis_status, "⚪")
             a_icon = _ACTION_COLOR.get(entry.recommended_action, "⚪")
+            md     = wl_live.get(ticker)
 
             with st.container(border=True):
                 hcol1, hcol2, hcol3 = st.columns([2, 3, 1])
                 with hcol1:
                     st.markdown(f"### {ticker}")
                     st.caption(entry.company_name)
+                    if md and md.is_ok:
+                        st.caption(
+                            f"{md.day_indicator} **${md.current_price:.2f}** "
+                            f"{md.currency}  ·  {md.change_str}"
+                        )
+                    elif md and not md.is_ok:
+                        st.caption("⚪ Market data unavailable")
                 with hcol2:
                     mc1, mc2, mc3 = st.columns(3)
                     mc1.metric("Thesis",     f"{t_icon} {entry.thesis_status}")
@@ -1350,11 +1388,14 @@ def render_portfolio_risk_tab() -> None:
                 "Conviction":  p.conviction_score,
                 "Action":      p.recommended_action,
                 "Valuation":   p.valuation_impact,
-                "Priority":    p.priority_score if p.priority_score > 0 else "—",
+                "Priority":    f"{p.priority_score}/100" if p.priority_score > 0 else "—",
                 "Uncertainty": p.uncertainty_level,
                 "Mkt Align":   mi_score,
             })
-        st.dataframe(pd.DataFrame(detail_rows), hide_index=True, use_container_width=True)
+        st.dataframe(
+            pd.DataFrame(detail_rows).astype(str),
+            hide_index=True, use_container_width=True,
+        )
 
     st.caption(f"Computed at {result.computed_at}")
 
@@ -1444,6 +1485,92 @@ def render_holdings_tab() -> None:
             },
             key="holdings_price_editor",
         )
+
+        # ── Live market prices panel ────────────────────────────────────────
+        from market_prices import (
+            get_all_from_session, market_session_label,
+            refresh_all_prices, save_to_session,
+        )
+        sess_icon, sess_label = market_session_label()
+        mp1, mp2, mp3 = st.columns([1, 2, 2])
+        with mp1:
+            if st.button(
+                "🔄 Refresh Market Prices",
+                use_container_width=True,
+                key="refresh_mp_holdings",
+                help="Fetch live prices from yfinance for all holdings.",
+            ):
+                with st.spinner("Fetching live prices…"):
+                    fetched = refresh_all_prices(list(holdings.keys()))
+                save_to_session(fetched)
+                ok   = [t for t, d in fetched.items() if d.is_ok]
+                fail = [t for t, d in fetched.items() if not d.is_ok]
+                if ok:
+                    st.toast(f"Fetched prices for {len(ok)} ticker(s)", icon="📡")
+                for t in fail:
+                    st.toast(f"{t}: market data unavailable", icon="⚠️")
+                st.rerun()
+        with mp2:
+            st.caption(f"{sess_icon} {sess_label}")
+        with mp3:
+            last_ref = st.session_state.get("mp_last_refresh")
+            if last_ref:
+                st.caption(f"Last refreshed at {last_ref}")
+
+        live_cache   = get_all_from_session()
+        live_rows    = []
+        live_ok_map: dict[str, float] = {}    # ticker → confirmed live price
+        for t_key in sorted(holdings.keys()):
+            md     = live_cache.get(t_key)
+            stored = holdings[t_key].current_price
+            if md and md.is_ok:
+                live_ok_map[t_key] = md.current_price
+                live_rows.append({
+                    "Status":     md.day_indicator,
+                    "Ticker":     t_key,
+                    "Source":     "📡 Live",
+                    "Price":      round(md.current_price, 2),
+                    "Stored":     round(stored, 2),
+                    "Day Change": md.change_str,
+                    "Market Cap": (f"${md.market_cap / 1e9:.1f}B"
+                                   if md.market_cap else "—"),
+                    "Beta":       (f"{md.beta:.2f}" if md.beta else "—"),
+                    "Currency":   md.currency,
+                })
+            elif md and not md.is_ok:
+                live_rows.append({
+                    "Status":     "⚪",
+                    "Ticker":     t_key,
+                    "Source":     "⚠️ Fetch failed",
+                    "Price":      round(stored, 2),
+                    "Stored":     round(stored, 2),
+                    "Day Change": f"Unavailable — {md.error or 'unknown'}",
+                    "Market Cap": "—",
+                    "Beta":       "—",
+                    "Currency":   "—",
+                })
+
+        if live_rows:
+            ok_count = len(live_ok_map)
+            with st.expander(
+                f"📡 Live Market Prices ({ok_count}/{len(live_rows)} fetched successfully)",
+                expanded=True,
+            ):
+                live_df = pd.DataFrame(live_rows)
+                st.dataframe(live_df, hide_index=True, use_container_width=True)
+                if ok_count:
+                    if st.button(
+                        "✅ Apply live prices to holdings",
+                        type="primary", key="apply_live_prices_btn",
+                        help="Writes fetched prices to holdings. "
+                             "Only tickers with a successful fetch are updated — "
+                             "manually-entered prices are preserved when fetch failed.",
+                    ):
+                        for t_key, price in live_ok_map.items():
+                            update_current_price(t_key, price)
+                        st.toast(f"Applied {ok_count} live price(s)", icon="✅")
+                        st.rerun()
+
         save_cols = st.columns([1, 1, 4])
         with save_cols[0]:
             if st.button("💾 Save prices", type="primary", use_container_width=True):
