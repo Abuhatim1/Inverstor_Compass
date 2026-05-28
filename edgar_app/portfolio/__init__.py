@@ -33,6 +33,24 @@ from .state import (
     save_portfolio,
     update_portfolio,
 )
+from .risk import (
+    MARKETS,
+    DEFAULT_SECTORS,
+    RISK_REGIME_BADGE,
+    RISK_CATEGORIES,
+    PortfolioPosition,
+    PositionMetadata,
+    PortfolioRiskResult,
+    RiskCategoryScore,
+    build_positions,
+    compute_portfolio_risk,
+    load_position_metadata,
+    save_position_metadata,
+    upsert_position_metadata,
+    delete_position_metadata,
+    load_market_intel_state,
+    save_market_intel_for_ticker,
+)
 
 __all__ = [
     # State
@@ -61,4 +79,21 @@ __all__ = [
     "build_comparison_record",
     "load_comparison_history",
     "save_comparison",
+    # Risk Engine
+    "MARKETS",
+    "DEFAULT_SECTORS",
+    "RISK_REGIME_BADGE",
+    "RISK_CATEGORIES",
+    "PortfolioPosition",
+    "PositionMetadata",
+    "PortfolioRiskResult",
+    "RiskCategoryScore",
+    "build_positions",
+    "compute_portfolio_risk",
+    "load_position_metadata",
+    "save_position_metadata",
+    "upsert_position_metadata",
+    "delete_position_metadata",
+    "load_market_intel_state",
+    "save_market_intel_for_ticker",
 ]

@@ -31,6 +31,11 @@ class PortfolioEntry:
     last_updated:       str     # ISO date
     analyses_count:     int = 1
     source_label:       str = "SEC"  # "SEC", "Uploaded Report", "Tadawul Announcement", etc.
+    # Optional intelligence-layer signals — used by the Portfolio Risk Engine.
+    # Default to safe values so legacy state JSON loads cleanly.
+    valuation_impact:   str = "Unknown"  # from Damodaran engine
+    priority_score:     int = 0          # from Damodaran engine
+    uncertainty_level:  str = "Unknown"  # from Explainability layer
 
 
 def load_portfolio() -> dict[str, PortfolioEntry]:
@@ -41,7 +46,20 @@ def load_portfolio() -> dict[str, PortfolioEntry]:
             raw: dict = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
-    return {t: PortfolioEntry(**e) for t, e in raw.items()}
+    # Filter out unknown keys so adding new optional fields in this schema
+    # never breaks loading legacy state files.
+    import dataclasses
+    valid_fields = {f.name for f in dataclasses.fields(PortfolioEntry)}
+    out: dict[str, PortfolioEntry] = {}
+    for ticker, entry in raw.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            filtered = {k: v for k, v in entry.items() if k in valid_fields}
+            out[ticker] = PortfolioEntry(**filtered)
+        except Exception:
+            continue
+    return out
 
 
 def save_portfolio(portfolio: dict[str, PortfolioEntry]) -> None:
@@ -82,6 +100,14 @@ def update_portfolio(
     delta = detect_delta(existing, analysis, ticker, company_name, filing_type)
     save_delta(delta)
 
+    # Safely extract optional intelligence-layer signals
+    valuation_obj = getattr(analysis, "valuation", None)
+    val_impact = getattr(valuation_obj, "valuation_impact", "Unknown") if valuation_obj else "Unknown"
+    priority   = int(getattr(valuation_obj, "priority_score", 0) or 0) if valuation_obj else 0
+
+    uncertainty_obj = getattr(analysis, "uncertainty", None)
+    unc_level = getattr(uncertainty_obj, "overall_uncertainty", "Unknown") if uncertainty_obj else "Unknown"
+
     entry = PortfolioEntry(
         ticker=ticker.upper(),
         company_name=company_name,
@@ -94,6 +120,9 @@ def update_portfolio(
         last_updated=date.today().isoformat(),
         analyses_count=count,
         source_label=source_label,
+        valuation_impact=val_impact,
+        priority_score=priority,
+        uncertainty_level=unc_level,
     )
     portfolio[ticker.upper()] = entry
     save_portfolio(portfolio)

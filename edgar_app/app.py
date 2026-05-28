@@ -1111,6 +1111,20 @@ def render_market_intel_tab() -> None:
                 demo_mode=(demo_mode and not _ai_ready),
             )
         st.session_state["market_intel_result"] = mi_result
+        # Persist alignment score per ticker so the Portfolio Risk Engine can
+        # use it across sessions. Best-effort; never crash the UI.
+        if mi_ticker:
+            try:
+                from portfolio import save_market_intel_for_ticker
+                save_market_intel_for_ticker(
+                    ticker=mi_ticker,
+                    alignment_score=int(getattr(mi_result.reconciliation,
+                                                "consensus_alignment_score", 0) or 0),
+                    alignment_label=getattr(mi_result.reconciliation,
+                                            "alignment_label", "No Baseline"),
+                )
+            except Exception:
+                pass
         st.toast(f"Intelligence classified for {mi_ticker or 'DEMO'}", icon="🌐")
 
     # ── Results ───────────────────────────────────────────────────────────────
@@ -1158,6 +1172,195 @@ _UPLOAD_SOURCES = {
     "Analyst Report":           "analyst_report",
     "Earnings Presentation":    "earnings_presentation",
 }
+
+
+def render_portfolio_risk_tab() -> None:
+    """Portfolio Risk Engine dashboard."""
+    from portfolio import (
+        DEFAULT_SECTORS,
+        MARKETS,
+        RISK_REGIME_BADGE,
+        build_positions,
+        compute_portfolio_risk,
+        load_market_intel_state,
+        load_portfolio,
+        load_position_metadata,
+        save_position_metadata,
+        PositionMetadata,
+    )
+    import pandas as pd
+
+    st.header("🛡️ Portfolio Risk Engine")
+    st.caption(
+        "Investment-risk view (not price volatility). Combines thesis status, "
+        "conviction, Damodaran valuation, uncertainty, and market intel."
+    )
+
+    portfolio = load_portfolio()
+    if not portfolio:
+        st.info(
+            "No portfolio positions yet. Analyse a filing in the **Filing Search** "
+            "or **Upload Filing** tab and add it to your portfolio first."
+        )
+        return
+
+    metadata     = load_position_metadata()
+    mi_state     = load_market_intel_state()
+
+    # ── 1. Position metadata editor ───────────────────────────────────────────
+    st.subheader("📋 Positions — Weight · Sector · Market")
+    st.caption(
+        "Edit the table below and click **Save metadata**. Weights are in % of "
+        "portfolio. Unset positions default to weight 0 (excluded from risk)."
+    )
+
+    rows = []
+    for ticker, entry in portfolio.items():
+        m = metadata.get(ticker)
+        rows.append({
+            "Ticker":      ticker,
+            "Company":     getattr(entry, "company_name", "Unknown"),
+            "Weight %":    float(m.weight_pct) if m else 0.0,
+            "Market":      m.market if m else "US",
+            "Sector":      m.sector if m else "Other",
+        })
+    df = pd.DataFrame(rows)
+
+    edited = st.data_editor(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        disabled=["Ticker", "Company"],
+        column_config={
+            "Weight %": st.column_config.NumberColumn(
+                "Weight %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f"
+            ),
+            "Market":   st.column_config.SelectboxColumn("Market", options=MARKETS, required=True),
+            "Sector":   st.column_config.SelectboxColumn("Sector", options=DEFAULT_SECTORS, required=True),
+        },
+        key="risk_position_editor",
+    )
+
+    total_w = float(edited["Weight %"].sum()) if not edited.empty else 0.0
+    cols = st.columns([2, 1, 1])
+    with cols[0]:
+        if abs(total_w - 100.0) < 0.5:
+            st.success(f"Total weight: **{total_w:.1f}%** ✓")
+        elif total_w == 0.0:
+            st.warning("Total weight: **0%** — assign weights to compute risk.")
+        else:
+            st.info(f"Total weight: **{total_w:.1f}%** (doesn't need to sum to 100; normalised internally)")
+    with cols[1]:
+        save_clicked = st.button("💾 Save metadata", type="primary", use_container_width=True)
+    with cols[2]:
+        recompute_clicked = st.button("🔄 Recompute risk", use_container_width=True)
+
+    if save_clicked:
+        new_meta: dict[str, PositionMetadata] = {}
+        for _, row in edited.iterrows():
+            new_meta[row["Ticker"]] = PositionMetadata(
+                ticker=row["Ticker"],
+                market=row["Market"],
+                sector=row["Sector"],
+                weight_pct=float(row["Weight %"]),
+            )
+        save_position_metadata(new_meta)
+        st.toast("Position metadata saved", icon="💾")
+        st.rerun()
+
+    _ = recompute_clicked  # rerun happens automatically on click
+
+    # Use the LIVE edited values for the risk computation (so users see
+    # impact instantly even before they click Save).
+    live_metadata: dict[str, PositionMetadata] = {}
+    for _, row in edited.iterrows():
+        live_metadata[row["Ticker"]] = PositionMetadata(
+            ticker=row["Ticker"],
+            market=row["Market"],
+            sector=row["Sector"],
+            weight_pct=float(row["Weight %"]),
+        )
+
+    positions = build_positions(portfolio, live_metadata, mi_state)
+    result    = compute_portfolio_risk(positions)
+
+    # ── 2. Risk score header ──────────────────────────────────────────────────
+    st.divider()
+    icon, label = RISK_REGIME_BADGE.get(result.risk_regime, ("⚪", result.risk_regime))
+    score_cols = st.columns([1, 1, 1, 1])
+    with score_cols[0]:
+        st.metric("Portfolio Risk Score", f"{result.risk_score}/100")
+    with score_cols[1]:
+        st.metric("Risk Regime", f"{icon} {label}")
+    with score_cols[2]:
+        st.metric("Positions", result.n_positions)
+    with score_cols[3]:
+        st.metric("Total Weight", f"{result.total_weight:.1f}%")
+
+    st.progress(result.risk_score / 100.0)
+
+    # ── 3. Category breakdown ─────────────────────────────────────────────────
+    st.subheader("🧮 Risk Category Breakdown")
+    cat_rows = []
+    for c in result.categories:
+        cat_rows.append({
+            "Category": c.name,
+            "Score":    c.score,
+            "Detail":   c.detail,
+        })
+    cat_df = pd.DataFrame(cat_rows)
+    st.dataframe(
+        cat_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Score": st.column_config.ProgressColumn(
+                "Score", min_value=0, max_value=100, format="%d",
+            ),
+        },
+    )
+
+    with st.expander("🔎 Per-category contributors", expanded=False):
+        for c in result.categories:
+            st.markdown(f"**{c.name}** — score {c.score}/100")
+            if c.contributors:
+                for note in c.contributors:
+                    st.markdown(f"  · {note}")
+            else:
+                st.markdown("  · _No data available for this category yet._")
+
+    # ── 4. Top 5 risks ────────────────────────────────────────────────────────
+    st.subheader("⚠️ Top 5 Portfolio Risks")
+    for i, risk in enumerate(result.top_risks, start=1):
+        st.markdown(f"**{i}.** {risk}")
+
+    # ── 5. Top 5 actions ──────────────────────────────────────────────────────
+    st.subheader("🎯 Top 5 Required Actions")
+    for i, action in enumerate(result.required_actions, start=1):
+        st.markdown(f"**{i}.** {action}")
+
+    # ── 6. Position detail table ──────────────────────────────────────────────
+    with st.expander("📊 Full position detail (all intelligence signals)", expanded=False):
+        detail_rows = []
+        for p in positions:
+            mi_score = (f"{p.market_alignment_score}/100"
+                        if p.market_alignment_score >= 0 else "—")
+            detail_rows.append({
+                "Ticker":      p.ticker,
+                "Weight %":    round(p.weight_pct, 2),
+                "Market":      p.market,
+                "Sector":      p.sector,
+                "Thesis":      p.thesis_status,
+                "Conviction":  p.conviction_score,
+                "Action":      p.recommended_action,
+                "Valuation":   p.valuation_impact,
+                "Priority":    p.priority_score if p.priority_score > 0 else "—",
+                "Uncertainty": p.uncertainty_level,
+                "Mkt Align":   mi_score,
+            })
+        st.dataframe(pd.DataFrame(detail_rows), hide_index=True, use_container_width=True)
+
+    st.caption(f"Computed at {result.computed_at}")
 
 
 def render_upload_tab() -> None:
@@ -1326,11 +1529,12 @@ st.caption(
     "Look up SEC filings · Upload reports · AI analysis · Portfolio state · Delta intelligence"
 )
 
-tab_search, tab_upload, tab_market_intel, tab_portfolio = st.tabs([
+tab_search, tab_upload, tab_market_intel, tab_portfolio, tab_risk = st.tabs([
     "🔍 Filing Search",
     "📂 Upload Filing",
     "🌐 Market Intel",
     "📊 Portfolio & Changes",
+    "🛡️ Portfolio Risk",
 ])
 
 with tab_portfolio:
@@ -1341,6 +1545,9 @@ with tab_upload:
 
 with tab_market_intel:
     render_market_intel_tab()
+
+with tab_risk:
+    render_portfolio_risk_tab()
 
 with tab_search:
     st.divider()
