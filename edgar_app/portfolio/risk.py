@@ -3,39 +3,37 @@ portfolio/risk.py
 -----------------
 Portfolio Risk Engine.
 
-Combines existing intelligence layers (thesis status, conviction, Damodaran
-valuation, explainability uncertainty, external market intelligence) with
-user-supplied portfolio metadata (weight, sector, market) to compute a
-holistic INVESTMENT risk score for the whole portfolio.
+Sources of truth:
+  · **Actual Holdings** (`holdings.py`)  — weight, market, sector, ticker identity.
+    Weights are derived from market value (quantity × current_price).
+  · **Research Watchlist** (`state.py`)  — thesis, conviction, action,
+    Damodaran valuation, explainability uncertainty — joined by ticker
+    when available; missing data degrades to "Unknown".
+  · **Market intel state** (`market_intel_state.json`) — per-ticker
+    alignment score from the External Market Intelligence layer.
 
-This is NOT a price-volatility engine. Risk here means:
+This is NOT a price-volatility engine. Risk categories:
   · Concentration (single position too large)
   · Sector concentration
   · Country / market exposure
-  · Valuation fragility (low priority score)
-  · Thesis deterioration (Weak / Broken status)
+  · Valuation fragility (low Damodaran priority score)
+  · Thesis deterioration (Weak / Broken status in watchlist)
   · External market disagreement (low alignment score)
   · High-uncertainty exposure (Low / Speculative confidence)
-
-Persistence is in two small JSON files alongside `portfolio_state.json`:
-  · `position_metadata.json`   — per-ticker weight, sector, market
-  · `market_intel_state.json`  — per-ticker latest alignment score + label
-
-Missing data never crashes the engine. Each risk category degrades to
-"Unknown" with a 0 score when its inputs are absent.
 """
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
+
+from .holdings import Holding, portfolio_weights
 
 
 # ── Storage locations ─────────────────────────────────────────────────────────
 
-_DIR                  = os.path.dirname(__file__)
-_POSITION_META_FILE   = os.path.join(_DIR, "position_metadata.json")
-_MARKET_INTEL_FILE    = os.path.join(_DIR, "market_intel_state.json")
+_DIR               = os.path.dirname(__file__)
+_MARKET_INTEL_FILE = os.path.join(_DIR, "market_intel_state.json")
 
 
 # ── Taxonomy ──────────────────────────────────────────────────────────────────
@@ -74,7 +72,6 @@ RISK_CATEGORIES: dict[str, str] = {
     "uncertainty_exposure": "High-Uncertainty Exposure",
 }
 
-# Relative weighting of each category in the final portfolio score
 _CATEGORY_WEIGHTS: dict[str, float] = {
     "concentration":        1.5,
     "sector_concentration": 1.0,
@@ -89,130 +86,52 @@ _CATEGORY_WEIGHTS: dict[str, float] = {
 # ── Dataclasses ───────────────────────────────────────────────────────────────
 
 @dataclass
-class PositionMetadata:
-    """User-supplied position metadata (weight, sector, market)."""
-    ticker:     str
-    market:     str = "US"        # "US" | "Saudi" | "Other"
-    sector:     str = "Other"
-    weight_pct: float = 0.0       # 0-100
-
-
-@dataclass
 class PortfolioPosition:
-    """One portfolio position — joins state + metadata + intelligence signals."""
-    # Identity
+    """One risk-engine row — joins Holding + Watchlist + Market Intel."""
     ticker:                 str
     company_name:           str
-    # User-supplied metadata
+    # From Holding
     market:                 str
     sector:                 str
-    weight_pct:             float
-    # State from PortfolioEntry
-    thesis_status:          str             # "Strong" | "Stable" | "Weak" | "Broken" | "Unknown"
-    conviction_score:       int             # 0-100
-    recommended_action:     str             # "Buy" | "Hold" | "Reduce" | "Exit" | "Unknown"
-    # Intelligence-layer signals (optional, populated when available)
-    valuation_impact:       str = "Unknown" # "Value Accretive" | "Neutral" | "Value Destructive" | "Unknown"
-    priority_score:         int = 0         # 0-100 from Damodaran engine (0 = no data)
-    uncertainty_level:      str = "Unknown" # "High Confidence" | ... | "Speculative" | "Unknown"
-    market_alignment_score: int = -1        # 0-100 from market intel (-1 = no data)
+    weight_pct:             float           # derived from market value
+    market_value:           float
+    # From PortfolioEntry (research watchlist) — Unknown if no analysis yet
+    thesis_status:          str = "Unknown"
+    conviction_score:       int = 0
+    recommended_action:     str = "Unknown"
+    valuation_impact:       str = "Unknown"
+    priority_score:         int = 0
+    uncertainty_level:      str = "Unknown"
+    # From market intel state
+    market_alignment_score: int = -1
     market_alignment_label: str = "No Baseline"
 
 
 @dataclass
 class RiskCategoryScore:
-    """One category of the portfolio risk breakdown."""
     key:          str
     name:         str
     score:        int           # 0-100
-    detail:       str           # human-readable summary
-    contributors: list[str] = field(default_factory=list)  # ticker-level notes
+    detail:       str
+    contributors: list[str] = field(default_factory=list)
 
 
 @dataclass
 class PortfolioRiskResult:
-    """Result of compute_portfolio_risk()."""
-    risk_score:        int                  # 0-100
-    risk_regime:       str                  # Low | Medium | High | Critical
-    total_weight:      float                # sum of weight_pct
-    n_positions:       int
-    categories:        list[RiskCategoryScore]
-    top_risks:         list[str]
-    required_actions:  list[str]
-    computed_at:       str                  # ISO timestamp
-
-
-# ── Position metadata persistence ─────────────────────────────────────────────
-
-def load_position_metadata() -> dict[str, PositionMetadata]:
-    """Load position metadata; return empty dict on missing or corrupt file."""
-    if not os.path.exists(_POSITION_META_FILE):
-        return {}
-    try:
-        with open(_POSITION_META_FILE, "r", encoding="utf-8") as f:
-            raw: dict = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
-    out: dict[str, PositionMetadata] = {}
-    for ticker, entry in raw.items():
-        if not isinstance(entry, dict):
-            continue
-        try:
-            out[ticker] = PositionMetadata(
-                ticker=ticker,
-                market=entry.get("market", "US"),
-                sector=entry.get("sector", "Other"),
-                weight_pct=float(entry.get("weight_pct", 0.0)),
-            )
-        except Exception:
-            continue
-    return out
-
-
-def save_position_metadata(meta: dict[str, PositionMetadata]) -> None:
-    """Persist position metadata to disk."""
-    os.makedirs(_DIR, exist_ok=True)
-    with open(_POSITION_META_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            {t: asdict(p) for t, p in meta.items()},
-            f, indent=2, ensure_ascii=False,
-        )
-
-
-def upsert_position_metadata(
-    ticker: str,
-    market: str | None = None,
-    sector: str | None = None,
-    weight_pct: float | None = None,
-) -> PositionMetadata:
-    """Insert or update one position's metadata."""
-    meta = load_position_metadata()
-    existing = meta.get(ticker)
-    new_entry = PositionMetadata(
-        ticker=ticker,
-        market=market     if market     is not None else (existing.market     if existing else "US"),
-        sector=sector     if sector     is not None else (existing.sector     if existing else "Other"),
-        weight_pct=weight_pct if weight_pct is not None else (existing.weight_pct if existing else 0.0),
-    )
-    meta[ticker] = new_entry
-    save_position_metadata(meta)
-    return new_entry
-
-
-def delete_position_metadata(ticker: str) -> bool:
-    """Remove one position's metadata."""
-    meta = load_position_metadata()
-    if ticker in meta:
-        del meta[ticker]
-        save_position_metadata(meta)
-        return True
-    return False
+    risk_score:       int
+    risk_regime:      str
+    total_weight:     float          # always 100.0 when holdings have market value
+    n_positions:      int
+    total_market_value: float
+    categories:       list[RiskCategoryScore]
+    top_risks:        list[str]
+    required_actions: list[str]
+    computed_at:      str
 
 
 # ── Market intel state persistence ────────────────────────────────────────────
 
 def load_market_intel_state() -> dict[str, dict]:
-    """Load latest market-intel alignment per ticker."""
     if not os.path.exists(_MARKET_INTEL_FILE):
         return {}
     try:
@@ -227,7 +146,6 @@ def save_market_intel_for_ticker(
     alignment_score: int,
     alignment_label: str,
 ) -> None:
-    """Record the latest market-intel alignment score for one ticker."""
     state = load_market_intel_state()
     state[ticker] = {
         "alignment_score": int(alignment_score),
@@ -239,41 +157,45 @@ def save_market_intel_for_ticker(
         json.dump(state, f, indent=2, ensure_ascii=False)
 
 
-# ── Position assembly ─────────────────────────────────────────────────────────
+# ── Position assembly: join holdings + watchlist + market intel ───────────────
 
 def build_positions(
-    portfolio:          dict,            # {ticker: PortfolioEntry}
-    position_metadata:  dict[str, PositionMetadata] | None = None,
-    market_intel_state: dict[str, dict]  | None = None,
+    holdings:           dict[str, Holding],
+    watchlist:          dict,                 # {ticker: PortfolioEntry}
+    market_intel_state: dict[str, dict] | None = None,
 ) -> list[PortfolioPosition]:
     """
-    Join portfolio state + position metadata + market intel state into a
-    unified list of PortfolioPosition objects. All field reads use safe
-    fallbacks so missing data shows as 'Unknown' / 0 / -1 without crashing.
+    Build the risk-engine view from Actual Holdings, enriched with
+    Research Watchlist data and market intel where the ticker matches.
     """
-    meta = position_metadata if position_metadata is not None else load_position_metadata()
-    mi   = market_intel_state if market_intel_state is not None else load_market_intel_state()
+    mi      = market_intel_state if market_intel_state is not None else load_market_intel_state()
+    weights = portfolio_weights(holdings)
 
     positions: list[PortfolioPosition] = []
-    for ticker, entry in portfolio.items():
-        m = meta.get(ticker)
-        mi_entry = mi.get(ticker, {})
+    for ticker, h in holdings.items():
+        entry      = watchlist.get(ticker)        # may be None
+        mi_entry   = mi.get(ticker, {})
+
+        thesis    = getattr(entry, "thesis_status", "Unknown") if entry else "Unknown"
+        convict   = int(getattr(entry, "conviction_score", 0) or 0) if entry else 0
+        action    = getattr(entry, "recommended_action", "Unknown") if entry else "Unknown"
+        val_imp   = getattr(entry, "valuation_impact", "Unknown") if entry else "Unknown"
+        priority  = int(getattr(entry, "priority_score", 0) or 0) if entry else 0
+        unc_level = getattr(entry, "uncertainty_level", "Unknown") if entry else "Unknown"
 
         positions.append(PortfolioPosition(
             ticker=ticker,
-            company_name=getattr(entry, "company_name", "Unknown"),
-            market=(m.market if m else "US"),
-            sector=(m.sector if m else "Other"),
-            weight_pct=(m.weight_pct if m else 0.0),
-            thesis_status=getattr(entry, "thesis_status",
-                                  getattr(entry, "thesis_impact", "Unknown")),
-            conviction_score=int(getattr(entry, "conviction_score",
-                                         getattr(entry, "confidence_score", 0)) or 0),
-            recommended_action=getattr(entry, "recommended_action",
-                                       getattr(entry, "suggested_action", "Unknown")),
-            valuation_impact=getattr(entry, "valuation_impact", "Unknown"),
-            priority_score=int(getattr(entry, "priority_score", 0) or 0),
-            uncertainty_level=getattr(entry, "uncertainty_level", "Unknown"),
+            company_name=h.company_name,
+            market=h.market,
+            sector=h.sector,
+            weight_pct=weights.get(ticker, 0.0),
+            market_value=h.market_value,
+            thesis_status=thesis,
+            conviction_score=convict,
+            recommended_action=action,
+            valuation_impact=val_imp,
+            priority_score=priority,
+            uncertainty_level=unc_level,
             market_alignment_score=int(mi_entry.get("alignment_score", -1)),
             market_alignment_label=mi_entry.get("alignment_label", "No Baseline"),
         ))
@@ -283,73 +205,77 @@ def build_positions(
 # ── Risk engine ───────────────────────────────────────────────────────────────
 
 def _regime_from_score(score: int) -> str:
-    if score < 25:
-        return "Low"
-    if score < 50:
-        return "Medium"
-    if score < 75:
-        return "High"
+    if score < 25:  return "Low"
+    if score < 50:  return "Medium"
+    if score < 75:  return "High"
     return "Critical"
 
 
-def _empty_result() -> PortfolioRiskResult:
+def _empty_result(
+    n_positions: int = 0,
+    total_market_value: float = 0.0,
+    top_risks: list[str] | None = None,
+    required_actions: list[str] | None = None,
+) -> PortfolioRiskResult:
     return PortfolioRiskResult(
         risk_score=0,
         risk_regime="Low",
         total_weight=0.0,
-        n_positions=0,
+        n_positions=n_positions,
+        total_market_value=total_market_value,
         categories=[],
-        top_risks=["No portfolio positions yet — add tickers and weights to compute risk."],
-        required_actions=["Open the Portfolio Risk tab and enter weight, sector, and market for each ticker."],
+        top_risks=top_risks or [
+            "No holdings yet — add actual positions in the Holdings tab to compute risk."
+        ],
+        required_actions=required_actions or [
+            "Open the **Holdings** tab and record your positions with quantity and average cost."
+        ],
         computed_at=datetime.now().isoformat(),
     )
 
 
 def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskResult:
-    """
-    Compute the full portfolio-level risk picture from a list of positions.
-
-    Score is a weighted average of 7 category scores. Each category is
-    independently computed and returns 0 when its inputs are missing
-    (rather than penalising the user for not having data yet).
-    """
+    """Compute the full portfolio-level risk picture from holdings-derived positions."""
     if not positions:
         return _empty_result()
 
-    total_weight = sum(p.weight_pct for p in positions)
-    if total_weight <= 0:
-        # Positions exist but no weights assigned — score nothing
-        empty = _empty_result()
-        empty.n_positions = len(positions)
-        empty.top_risks = ["Positions added but no weights assigned — risk cannot be computed."]
-        empty.required_actions = ["Assign a non-zero weight % to at least one position."]
-        return empty
+    total_market_value = sum(p.market_value for p in positions)
+    if total_market_value <= 0:
+        return _empty_result(
+            n_positions=len(positions),
+            total_market_value=0.0,
+            top_risks=[
+                "Holdings exist but no current prices set — risk cannot be computed."
+            ],
+            required_actions=[
+                "Open the **Holdings** tab and enter a current price for each position."
+            ],
+        )
+
+    total_weight = sum(p.weight_pct for p in positions)  # should be ~100
 
     # ── 1. Concentration risk (HHI) ───────────────────────────────────────────
-    norm = [(p.weight_pct / total_weight) * 100 for p in positions]
-    hhi = sum(w * w for w in norm)  # 0–10000 range
+    hhi = sum(p.weight_pct * p.weight_pct for p in positions)
     concentration_score = min(100, int(hhi / 50))
     largest = max(positions, key=lambda p: p.weight_pct)
     concentration_detail = (
-        f"Largest position: {largest.ticker} at "
-        f"{(largest.weight_pct / total_weight * 100):.1f}% of portfolio weight."
+        f"Largest position: {largest.ticker} at {largest.weight_pct:.1f}% of portfolio value."
     )
     sorted_positions = sorted(positions, key=lambda p: -p.weight_pct)
     concentration_contribs = [
-        f"{p.ticker}: {(p.weight_pct / total_weight * 100):.1f}%"
-        for p in sorted_positions[:3]
+        f"{p.ticker}: {p.weight_pct:.1f}%" for p in sorted_positions[:3]
     ]
 
     # ── 2. Sector concentration ───────────────────────────────────────────────
     sector_weights: dict[str, float] = {}
     for p in positions:
         sector_weights[p.sector] = sector_weights.get(p.sector, 0.0) + p.weight_pct
-    max_sector_pct = (max(sector_weights.values()) / total_weight * 100) if sector_weights else 0.0
+    max_sector_pct = max(sector_weights.values()) if sector_weights else 0.0
     sector_score = min(100, int(max_sector_pct * 1.5))
     top_sector = max(sector_weights, key=sector_weights.get) if sector_weights else "—"
-    sector_detail = f"Top sector: {top_sector} ({max_sector_pct:.1f}% of portfolio weight)."
+    sector_detail = f"Top sector: {top_sector} ({max_sector_pct:.1f}% of portfolio value)."
     sector_contribs = [
-        f"{s}: {(w / total_weight * 100):.1f}%"
+        f"{s}: {w:.1f}%"
         for s, w in sorted(sector_weights.items(), key=lambda x: -x[1])[:3]
     ]
 
@@ -357,13 +283,12 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
     market_weights: dict[str, float] = {}
     for p in positions:
         market_weights[p.market] = market_weights.get(p.market, 0.0) + p.weight_pct
-    max_market_pct = (max(market_weights.values()) / total_weight * 100) if market_weights else 0.0
-    # Score rises only above 50% single-market exposure
+    max_market_pct = max(market_weights.values()) if market_weights else 0.0
     market_score = max(0, min(100, int((max_market_pct - 50) * 2)))
     top_market = max(market_weights, key=market_weights.get) if market_weights else "—"
-    market_detail = f"Top market: {top_market} ({max_market_pct:.1f}% of portfolio weight)."
+    market_detail = f"Top market: {top_market} ({max_market_pct:.1f}% of portfolio value)."
     market_contribs = [
-        f"{m}: {(w / total_weight * 100):.1f}%"
+        f"{m}: {w:.1f}%"
         for m, w in sorted(market_weights.items(), key=lambda x: -x[1])
     ]
 
@@ -383,23 +308,20 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
         ][:3]
     else:
         valuation_score = 0
-        valuation_detail = "Unknown — no Damodaran valuation data for any position yet."
+        valuation_detail = "Unknown — no Damodaran valuation data for any held position."
         valuation_contribs = []
 
     # ── 5. Thesis deterioration ───────────────────────────────────────────────
-    deteriorated_positions = [
-        p for p in positions if p.thesis_status in ("Weak", "Broken")
-    ]
-    deteriorated_weight = sum(p.weight_pct for p in deteriorated_positions)
-    deteriorated_pct = deteriorated_weight / total_weight * 100
-    thesis_score = min(100, int(deteriorated_pct * 2))
+    deteriorated = [p for p in positions if p.thesis_status in ("Weak", "Broken")]
+    deteriorated_weight = sum(p.weight_pct for p in deteriorated)
+    thesis_score = min(100, int(deteriorated_weight * 2))
     thesis_detail = (
-        f"{len(deteriorated_positions)} of {len(positions)} positions in "
-        f"Weak/Broken status — {deteriorated_pct:.1f}% of portfolio weight."
+        f"{len(deteriorated)} of {len(positions)} positions in Weak/Broken status — "
+        f"{deteriorated_weight:.1f}% of portfolio value."
     )
     thesis_contribs = [
         f"{p.ticker}: {p.thesis_status} · action: {p.recommended_action}"
-        for p in deteriorated_positions[:3]
+        for p in deteriorated[:3]
     ]
 
     # ── 6. External market disagreement ───────────────────────────────────────
@@ -421,30 +343,22 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
         ][:3]
     else:
         disagreement_score = 0
-        disagreement_detail = "Unknown — no external market intelligence run for any position."
+        disagreement_detail = "Unknown — no external market intelligence run for any held position."
         disagreement_contribs = []
 
     # ── 7. High-uncertainty exposure ──────────────────────────────────────────
-    high_unc_positions = [
-        p for p in positions
-        if p.uncertainty_level in ("Low Confidence", "Speculative")
-    ]
-    high_unc_weight = sum(p.weight_pct for p in high_unc_positions)
+    high_unc = [p for p in positions if p.uncertainty_level in ("Low Confidence", "Speculative")]
     any_unc_data = any(p.uncertainty_level != "Unknown" for p in positions)
     if any_unc_data:
-        high_unc_pct = high_unc_weight / total_weight * 100
+        high_unc_pct = sum(p.weight_pct for p in high_unc)
         uncertainty_score = min(100, int(high_unc_pct * 2))
         uncertainty_detail = (
-            f"{high_unc_pct:.1f}% of portfolio weight in "
-            f"Low / Speculative confidence positions."
+            f"{high_unc_pct:.1f}% of portfolio value in Low / Speculative confidence positions."
         )
-        uncertainty_contribs = [
-            f"{p.ticker}: {p.uncertainty_level}"
-            for p in high_unc_positions[:3]
-        ]
+        uncertainty_contribs = [f"{p.ticker}: {p.uncertainty_level}" for p in high_unc[:3]]
     else:
         uncertainty_score = 0
-        uncertainty_detail = "Unknown — no explainability uncertainty data for any position yet."
+        uncertainty_detail = "Unknown — no explainability uncertainty data for any held position."
         uncertainty_contribs = []
 
     categories = [
@@ -464,12 +378,10 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
                           uncertainty_score, uncertainty_detail, uncertainty_contribs),
     ]
 
-    # ── Weighted final score ──────────────────────────────────────────────────
     total_w = sum(_CATEGORY_WEIGHTS[c.key] for c in categories)
     risk_score = int(sum(c.score * _CATEGORY_WEIGHTS[c.key] for c in categories) / total_w)
     risk_regime = _regime_from_score(risk_score)
 
-    # ── Top 5 risks (specific, ticker-aware) ──────────────────────────────────
     sorted_cats = sorted(categories, key=lambda c: -c.score)
     top_risks: list[str] = []
     for c in sorted_cats:
@@ -480,12 +392,10 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
     if not top_risks:
         top_risks = ["No significant portfolio-level risks detected at the current weighting."]
 
-    # ── Top 5 required actions (prescriptive) ─────────────────────────────────
     required_actions: list[str] = []
     if concentration_score >= 50:
         required_actions.append(
-            f"Trim **{largest.ticker}** "
-            f"({(largest.weight_pct / total_weight * 100):.1f}% of portfolio) — "
+            f"Trim **{largest.ticker}** ({largest.weight_pct:.1f}% of portfolio) — "
             "single-position concentration risk."
         )
     if sector_score >= 50:
@@ -497,7 +407,7 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
             f"Reduce **{top_market}** market exposure ({max_market_pct:.1f}%) — "
             "consider adding other markets."
         )
-    for p in deteriorated_positions[:2]:
+    for p in deteriorated[:2]:
         required_actions.append(
             f"Re-evaluate **{p.ticker}** — thesis is {p.thesis_status}, "
             f"recommended action: {p.recommended_action}."
@@ -511,8 +421,8 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
             f"Investigate market disagreement on **{worst.ticker}** "
             f"(alignment {worst.market_alignment_score}/100)."
         )
-    if uncertainty_score >= 50 and high_unc_positions:
-        tickers = ", ".join(f"**{p.ticker}**" for p in high_unc_positions[:3])
+    if uncertainty_score >= 50 and high_unc:
+        tickers = ", ".join(f"**{p.ticker}**" for p in high_unc[:3])
         required_actions.append(
             f"Strengthen evidence base for {tickers} — low-confidence positions."
         )
@@ -533,6 +443,7 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
         risk_regime=risk_regime,
         total_weight=total_weight,
         n_positions=len(positions),
+        total_market_value=total_market_value,
         categories=categories,
         top_risks=top_risks[:5],
         required_actions=required_actions[:5],

@@ -1,7 +1,34 @@
 """
 portfolio/__init__.py
 ---------------------
-Portfolio State Engine + Delta Intelligence Engine + Historical Comparison Store.
+Portfolio System.
+
+Layers (separate concerns):
+
+  · **Research Watchlist** (`state.py`, `PortfolioEntry`)
+      Populated automatically by every AI analysis (Filing Search, Upload).
+      Tracks thesis, catalysts, risks, conviction, recommended action — the
+      *opinion* about a ticker. Does NOT mean you own it.
+
+  · **Actual Holdings** (`holdings.py`, `Holding`)
+      Positions you actually own. Quantity, average cost, current price,
+      market, sector. Created explicitly via "Add to Holdings" or by
+      recording a BUY transaction. Derived metrics: market value,
+      unrealized P&L, portfolio weight %.
+
+  · **Transactions** (`holdings.py`, `Transaction`)
+      Manual buy/sell history. Each BUY updates the holding's quantity and
+      weighted-average cost; SELL reduces quantity.
+
+  · **Delta Engine** (`delta.py`)
+      Filing-over-filing change detection (thesis swings, conviction moves).
+
+  · **Comparison Store** (`comparison_store.py`)
+      Historical filing comparisons (revenue, margins, guidance trends).
+
+  · **Risk Engine** (`risk.py`)
+      Investment-risk (not price-volatility) over **Actual Holdings**,
+      enriched with research watchlist signals and market intel.
 """
 
 from .comparison_store import (
@@ -33,27 +60,37 @@ from .state import (
     save_portfolio,
     update_portfolio,
 )
+from .holdings import (
+    Holding,
+    Transaction,
+    delete_holding,
+    load_holdings,
+    load_transactions,
+    portfolio_weights,
+    record_transaction,
+    save_holdings,
+    save_transactions,
+    total_cost_basis,
+    total_market_value,
+    update_current_price,
+    upsert_holding,
+)
 from .risk import (
-    MARKETS,
     DEFAULT_SECTORS,
-    RISK_REGIME_BADGE,
+    MARKETS,
     RISK_CATEGORIES,
+    RISK_REGIME_BADGE,
     PortfolioPosition,
-    PositionMetadata,
     PortfolioRiskResult,
     RiskCategoryScore,
     build_positions,
     compute_portfolio_risk,
-    load_position_metadata,
-    save_position_metadata,
-    upsert_position_metadata,
-    delete_position_metadata,
     load_market_intel_state,
     save_market_intel_for_ticker,
 )
 
 __all__ = [
-    # State
+    # Research Watchlist (state)
     "PortfolioEntry",
     "load_portfolio",
     "save_portfolio",
@@ -79,21 +116,30 @@ __all__ = [
     "build_comparison_record",
     "load_comparison_history",
     "save_comparison",
+    # Actual Holdings + Transactions
+    "Holding",
+    "Transaction",
+    "load_holdings",
+    "save_holdings",
+    "upsert_holding",
+    "delete_holding",
+    "update_current_price",
+    "load_transactions",
+    "save_transactions",
+    "record_transaction",
+    "total_market_value",
+    "total_cost_basis",
+    "portfolio_weights",
     # Risk Engine
     "MARKETS",
     "DEFAULT_SECTORS",
     "RISK_REGIME_BADGE",
     "RISK_CATEGORIES",
     "PortfolioPosition",
-    "PositionMetadata",
     "PortfolioRiskResult",
     "RiskCategoryScore",
     "build_positions",
     "compute_portfolio_risk",
-    "load_position_metadata",
-    "save_position_metadata",
-    "upsert_position_metadata",
-    "delete_position_metadata",
     "load_market_intel_state",
     "save_market_intel_for_ticker",
 ]

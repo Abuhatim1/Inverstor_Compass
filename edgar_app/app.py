@@ -734,21 +734,29 @@ def render_section(
 
 # ── Portfolio Dashboard ───────────────────────────────────────────────────────
 def render_portfolio_dashboard() -> None:
+    from portfolio import (
+        load_holdings, upsert_holding, MARKETS, DEFAULT_SECTORS,
+    )
     portfolio    = load_portfolio()
     delta_hist   = load_delta_history()
     compare_hist = load_comparison_history()
+    holdings     = load_holdings()
 
-    # ── 1. Current Portfolio State ────────────────────────────────────────────
-    st.header("📊 Portfolio State")
+    # ── 1. Research Watchlist ─────────────────────────────────────────────────
+    st.header("🔬 Research Watchlist")
+    st.caption(
+        "Tickers you've researched — *not* positions you own. "
+        "Use **💼 Add to Holdings** to record actual ownership."
+    )
 
     if not portfolio:
         st.info(
-            "No tickers tracked yet. Search for a company and click "
+            "No tickers researched yet. Search for a company and click "
             "**Analyze Filing** to start tracking.",
             icon="💡",
         )
     else:
-        st.caption(f"{len(portfolio)} ticker(s) tracked")
+        st.caption(f"{len(portfolio)} ticker(s) on watchlist")
         for ticker, entry in sorted(portfolio.items()):
             t_icon = _IMPACT_COLOR.get(entry.thesis_status, "⚪")
             a_icon = _ACTION_COLOR.get(entry.recommended_action, "⚪")
@@ -784,6 +792,56 @@ def render_portfolio_dashboard() -> None:
                         for r in entry.risks:
                             st.markdown(f"- {r}")
                     st.caption(f"Analyses run: {entry.analyses_count}")
+
+                # ── Add to Holdings ────────────────────────────────────────
+                existing_h = holdings.get(ticker)
+                badge = (f"  ·  ✅ Held ({existing_h.quantity:g} sh @ "
+                         f"${existing_h.avg_cost:.2f})") if existing_h else ""
+                with st.expander(f"💼 Add to Holdings{badge}", expanded=False):
+                    with st.form(f"add_holding_{ticker}", clear_on_submit=False):
+                        f1, f2 = st.columns(2)
+                        with f1:
+                            qty = st.number_input(
+                                "Quantity (shares)", min_value=0.0, step=1.0,
+                                value=float(existing_h.quantity) if existing_h else 0.0,
+                                key=f"qty_{ticker}",
+                            )
+                            avg_cost = st.number_input(
+                                "Average cost ($/share)", min_value=0.0, step=0.01,
+                                value=float(existing_h.avg_cost) if existing_h else 0.0,
+                                format="%.2f", key=f"cost_{ticker}",
+                            )
+                            cur_price = st.number_input(
+                                "Current price ($/share, optional)", min_value=0.0, step=0.01,
+                                value=float(existing_h.current_price) if existing_h else 0.0,
+                                format="%.2f", key=f"price_{ticker}",
+                            )
+                        with f2:
+                            mkt_default = existing_h.market if existing_h else "US"
+                            sec_default = existing_h.sector if existing_h else "Other"
+                            mkt = st.selectbox(
+                                "Market", MARKETS,
+                                index=MARKETS.index(mkt_default) if mkt_default in MARKETS else 0,
+                                key=f"mkt_{ticker}",
+                            )
+                            sec = st.selectbox(
+                                "Sector", DEFAULT_SECTORS,
+                                index=DEFAULT_SECTORS.index(sec_default) if sec_default in DEFAULT_SECTORS else len(DEFAULT_SECTORS)-1,
+                                key=f"sec_{ticker}",
+                            )
+                        verb = "Update Holding" if existing_h else "Add to Holdings"
+                        if st.form_submit_button(f"💼 {verb}", type="primary"):
+                            upsert_holding(
+                                ticker=ticker,
+                                company_name=entry.company_name,
+                                market=mkt,
+                                sector=sec,
+                                quantity=qty,
+                                avg_cost=avg_cost,
+                                current_price=cur_price,
+                            )
+                            st.toast(f"{ticker} saved to Holdings", icon="💼")
+                            st.rerun()
 
     # ── 2. Historical Delta Analysis ──────────────────────────────────────────
     st.divider()
@@ -1175,117 +1233,41 @@ _UPLOAD_SOURCES = {
 
 
 def render_portfolio_risk_tab() -> None:
-    """Portfolio Risk Engine dashboard."""
+    """Portfolio Risk Engine dashboard — operates on Actual Holdings only."""
     from portfolio import (
-        DEFAULT_SECTORS,
-        MARKETS,
         RISK_REGIME_BADGE,
         build_positions,
         compute_portfolio_risk,
+        load_holdings,
         load_market_intel_state,
         load_portfolio,
-        load_position_metadata,
-        save_position_metadata,
-        PositionMetadata,
     )
     import pandas as pd
 
     st.header("🛡️ Portfolio Risk Engine")
     st.caption(
-        "Investment-risk view (not price volatility). Combines thesis status, "
-        "conviction, Damodaran valuation, uncertainty, and market intel."
+        "Investment-risk view (not price volatility) over **Actual Holdings**. "
+        "Weights are derived from market value. Enriched with research watchlist "
+        "and market intel where available."
     )
 
-    portfolio = load_portfolio()
-    if not portfolio:
+    holdings  = load_holdings()
+    watchlist = load_portfolio()
+    mi_state  = load_market_intel_state()
+
+    if not holdings:
         st.info(
-            "No portfolio positions yet. Analyse a filing in the **Filing Search** "
-            "or **Upload Filing** tab and add it to your portfolio first."
+            "No actual holdings yet. Open the **💼 Holdings** tab to record "
+            "positions, or click **💼 Add to Holdings** on any watchlist entry "
+            "in the **🔬 Research Watchlist** tab.",
+            icon="💡",
         )
         return
 
-    metadata     = load_position_metadata()
-    mi_state     = load_market_intel_state()
-
-    # ── 1. Position metadata editor ───────────────────────────────────────────
-    st.subheader("📋 Positions — Weight · Sector · Market")
-    st.caption(
-        "Edit the table below and click **Save metadata**. Weights are in % of "
-        "portfolio. Unset positions default to weight 0 (excluded from risk)."
-    )
-
-    rows = []
-    for ticker, entry in portfolio.items():
-        m = metadata.get(ticker)
-        rows.append({
-            "Ticker":      ticker,
-            "Company":     getattr(entry, "company_name", "Unknown"),
-            "Weight %":    float(m.weight_pct) if m else 0.0,
-            "Market":      m.market if m else "US",
-            "Sector":      m.sector if m else "Other",
-        })
-    df = pd.DataFrame(rows)
-
-    edited = st.data_editor(
-        df,
-        hide_index=True,
-        use_container_width=True,
-        disabled=["Ticker", "Company"],
-        column_config={
-            "Weight %": st.column_config.NumberColumn(
-                "Weight %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f"
-            ),
-            "Market":   st.column_config.SelectboxColumn("Market", options=MARKETS, required=True),
-            "Sector":   st.column_config.SelectboxColumn("Sector", options=DEFAULT_SECTORS, required=True),
-        },
-        key="risk_position_editor",
-    )
-
-    total_w = float(edited["Weight %"].sum()) if not edited.empty else 0.0
-    cols = st.columns([2, 1, 1])
-    with cols[0]:
-        if abs(total_w - 100.0) < 0.5:
-            st.success(f"Total weight: **{total_w:.1f}%** ✓")
-        elif total_w == 0.0:
-            st.warning("Total weight: **0%** — assign weights to compute risk.")
-        else:
-            st.info(f"Total weight: **{total_w:.1f}%** (doesn't need to sum to 100; normalised internally)")
-    with cols[1]:
-        save_clicked = st.button("💾 Save metadata", type="primary", use_container_width=True)
-    with cols[2]:
-        recompute_clicked = st.button("🔄 Recompute risk", use_container_width=True)
-
-    if save_clicked:
-        new_meta: dict[str, PositionMetadata] = {}
-        for _, row in edited.iterrows():
-            new_meta[row["Ticker"]] = PositionMetadata(
-                ticker=row["Ticker"],
-                market=row["Market"],
-                sector=row["Sector"],
-                weight_pct=float(row["Weight %"]),
-            )
-        save_position_metadata(new_meta)
-        st.toast("Position metadata saved", icon="💾")
-        st.rerun()
-
-    _ = recompute_clicked  # rerun happens automatically on click
-
-    # Use the LIVE edited values for the risk computation (so users see
-    # impact instantly even before they click Save).
-    live_metadata: dict[str, PositionMetadata] = {}
-    for _, row in edited.iterrows():
-        live_metadata[row["Ticker"]] = PositionMetadata(
-            ticker=row["Ticker"],
-            market=row["Market"],
-            sector=row["Sector"],
-            weight_pct=float(row["Weight %"]),
-        )
-
-    positions = build_positions(portfolio, live_metadata, mi_state)
+    positions = build_positions(holdings, watchlist, mi_state)
     result    = compute_portfolio_risk(positions)
 
-    # ── 2. Risk score header ──────────────────────────────────────────────────
-    st.divider()
+    # ── Risk score header ─────────────────────────────────────────────────────
     icon, label = RISK_REGIME_BADGE.get(result.risk_regime, ("⚪", result.risk_regime))
     score_cols = st.columns([1, 1, 1, 1])
     with score_cols[0]:
@@ -1295,7 +1277,7 @@ def render_portfolio_risk_tab() -> None:
     with score_cols[2]:
         st.metric("Positions", result.n_positions)
     with score_cols[3]:
-        st.metric("Total Weight", f"{result.total_weight:.1f}%")
+        st.metric("Total Market Value", f"${result.total_market_value:,.2f}")
 
     st.progress(result.risk_score / 100.0)
 
@@ -1339,7 +1321,7 @@ def render_portfolio_risk_tab() -> None:
     for i, action in enumerate(result.required_actions, start=1):
         st.markdown(f"**{i}.** {action}")
 
-    # ── 6. Position detail table ──────────────────────────────────────────────
+    # ── Position detail table ─────────────────────────────────────────────────
     with st.expander("📊 Full position detail (all intelligence signals)", expanded=False):
         detail_rows = []
         for p in positions:
@@ -1348,6 +1330,7 @@ def render_portfolio_risk_tab() -> None:
             detail_rows.append({
                 "Ticker":      p.ticker,
                 "Weight %":    round(p.weight_pct, 2),
+                "Mkt Value":   round(p.market_value, 2),
                 "Market":      p.market,
                 "Sector":      p.sector,
                 "Thesis":      p.thesis_status,
@@ -1361,6 +1344,249 @@ def render_portfolio_risk_tab() -> None:
         st.dataframe(pd.DataFrame(detail_rows), hide_index=True, use_container_width=True)
 
     st.caption(f"Computed at {result.computed_at}")
+
+
+def render_holdings_tab() -> None:
+    """Actual Holdings + Transactions tab."""
+    from portfolio import (
+        DEFAULT_SECTORS, MARKETS,
+        delete_holding,
+        load_holdings, load_portfolio, load_transactions,
+        portfolio_weights, record_transaction,
+        total_cost_basis, total_market_value,
+        update_current_price, upsert_holding,
+    )
+    import pandas as pd
+    from datetime import date
+
+    st.header("💼 Actual Holdings")
+    st.caption(
+        "Positions you actually own. Risk Engine reads from this tab. "
+        "Watchlist tickers can be promoted via **💼 Add to Holdings** on the "
+        "**🔬 Research Watchlist** tab."
+    )
+
+    holdings  = load_holdings()
+    watchlist = load_portfolio()
+
+    # ── Summary metrics ───────────────────────────────────────────────────────
+    if holdings:
+        mv     = total_market_value(holdings)
+        cb     = total_cost_basis(holdings)
+        pnl    = mv - cb
+        pnl_pct = (pnl / cb * 100.0) if cb > 0 else 0.0
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Positions", len(holdings))
+        m2.metric("Market Value", f"${mv:,.2f}")
+        m3.metric("Cost Basis", f"${cb:,.2f}")
+        m4.metric(
+            "Unrealized P&L",
+            f"${pnl:,.2f}",
+            delta=f"{pnl_pct:+.2f}%",
+        )
+    else:
+        st.info(
+            "No holdings yet. Use the **➕ Add Holding** form below, record a "
+            "**BUY** transaction, or click **💼 Add to Holdings** on a watchlist "
+            "entry.",
+            icon="💡",
+        )
+
+    # ── Holdings table with current-price editing ─────────────────────────────
+    if holdings:
+        st.subheader("📋 Holdings")
+        st.caption(
+            "Edit **Current Price** inline, then click **💾 Save prices**. "
+            "Other fields are edited via **💼 Add to Holdings** on the Watchlist."
+        )
+        weights = portfolio_weights(holdings)
+        rows = []
+        for ticker, h in sorted(holdings.items()):
+            rows.append({
+                "Ticker":         ticker,
+                "Company":        h.company_name,
+                "Market":         h.market,
+                "Sector":         h.sector,
+                "Quantity":       round(h.quantity, 4),
+                "Avg Cost":       round(h.avg_cost, 2),
+                "Current Price":  round(h.current_price, 2),
+                "Market Value":   round(h.market_value, 2),
+                "Cost Basis":     round(h.cost_basis, 2),
+                "Unreal. P&L":    round(h.unrealized_pnl, 2),
+                "P&L %":          round(h.unrealized_pnl_pct, 2),
+                "Weight %":       round(weights.get(ticker, 0.0), 2),
+            })
+        df = pd.DataFrame(rows)
+        edited = st.data_editor(
+            df,
+            hide_index=True,
+            use_container_width=True,
+            disabled=["Ticker", "Company", "Market", "Sector", "Quantity",
+                      "Avg Cost", "Market Value", "Cost Basis",
+                      "Unreal. P&L", "P&L %", "Weight %"],
+            column_config={
+                "Current Price": st.column_config.NumberColumn(
+                    "Current Price", min_value=0.0, step=0.01, format="%.2f",
+                ),
+            },
+            key="holdings_price_editor",
+        )
+        save_cols = st.columns([1, 1, 4])
+        with save_cols[0]:
+            if st.button("💾 Save prices", type="primary", use_container_width=True):
+                changed = 0
+                for _, row in edited.iterrows():
+                    new_price = float(row["Current Price"])
+                    if abs(new_price - holdings[row["Ticker"]].current_price) > 1e-9:
+                        update_current_price(row["Ticker"], new_price)
+                        changed += 1
+                st.toast(f"Updated {changed} price(s)", icon="💾")
+                st.rerun()
+        with save_cols[1]:
+            del_ticker = st.selectbox(
+                "Remove holding",
+                options=["—"] + sorted(holdings.keys()),
+                label_visibility="collapsed",
+                key="del_holding_select",
+            )
+        if del_ticker and del_ticker != "—":
+            if st.button(f"🗑️ Remove {del_ticker}", type="secondary"):
+                delete_holding(del_ticker)
+                st.toast(f"{del_ticker} removed", icon="🗑️")
+                st.rerun()
+
+    # ── Add Holding form ──────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("➕ Add Holding (manual)", expanded=not holdings):
+        with st.form("add_holding_manual", clear_on_submit=True):
+            ah1, ah2 = st.columns(2)
+            with ah1:
+                # Suggest watchlist tickers but allow free text
+                wl_options = sorted(watchlist.keys())
+                if wl_options:
+                    new_ticker_src = st.radio(
+                        "Source",
+                        options=["From Watchlist", "New Ticker"],
+                        horizontal=True,
+                        key="add_h_src",
+                    )
+                    if new_ticker_src == "From Watchlist":
+                        new_ticker = st.selectbox("Ticker", options=wl_options, key="add_h_wl")
+                        new_company = watchlist[new_ticker].company_name if new_ticker else ""
+                    else:
+                        new_ticker = st.text_input("Ticker", key="add_h_tk").strip().upper()
+                        new_company = st.text_input("Company name", key="add_h_co")
+                else:
+                    new_ticker = st.text_input("Ticker", key="add_h_tk").strip().upper()
+                    new_company = st.text_input("Company name", key="add_h_co")
+                new_qty = st.number_input("Quantity", min_value=0.0, step=1.0, key="add_h_qty")
+                new_cost = st.number_input(
+                    "Avg cost ($/share)", min_value=0.0, step=0.01, format="%.2f", key="add_h_cost",
+                )
+                new_price = st.number_input(
+                    "Current price ($/share)", min_value=0.0, step=0.01, format="%.2f", key="add_h_price",
+                )
+            with ah2:
+                new_market = st.selectbox("Market", MARKETS, key="add_h_mkt")
+                new_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="add_h_sec")
+            if st.form_submit_button("➕ Add holding", type="primary"):
+                if not new_ticker:
+                    st.error("Ticker is required.")
+                elif new_qty <= 0:
+                    st.error("Quantity must be greater than 0.")
+                else:
+                    upsert_holding(
+                        ticker=new_ticker,
+                        company_name=new_company or new_ticker,
+                        market=new_market,
+                        sector=new_sector,
+                        quantity=new_qty,
+                        avg_cost=new_cost,
+                        current_price=new_price,
+                    )
+                    st.toast(f"{new_ticker} added to Holdings", icon="💼")
+                    st.rerun()
+
+    # ── Record Transaction form ───────────────────────────────────────────────
+    with st.expander("🔁 Record Buy / Sell Transaction", expanded=False):
+        with st.form("record_txn", clear_on_submit=True):
+            t1, t2 = st.columns(2)
+            with t1:
+                # Source ticker
+                all_tickers = sorted(set(holdings.keys()) | set(watchlist.keys()))
+                if all_tickers:
+                    txn_src = st.radio(
+                        "Source",
+                        options=["From Existing", "New Ticker"],
+                        horizontal=True,
+                        key="txn_src",
+                    )
+                    if txn_src == "From Existing":
+                        txn_ticker = st.selectbox("Ticker", options=all_tickers, key="txn_tk_sel")
+                    else:
+                        txn_ticker = st.text_input("Ticker", key="txn_tk_txt").strip().upper()
+                else:
+                    txn_ticker = st.text_input("Ticker", key="txn_tk_txt").strip().upper()
+                txn_side = st.radio("Side", options=["BUY", "SELL"], horizontal=True, key="txn_side")
+                txn_qty  = st.number_input("Quantity", min_value=0.0, step=1.0, key="txn_qty")
+                txn_price = st.number_input(
+                    "Price ($/share)", min_value=0.0, step=0.01, format="%.2f", key="txn_price",
+                )
+            with t2:
+                txn_date = st.date_input("Date", value=date.today(), key="txn_date")
+                txn_notes = st.text_area("Notes (optional)", key="txn_notes", height=80)
+                # Market / sector only used if BUY creates a new holding
+                new_h_market = st.selectbox("Market (new holdings only)", MARKETS, key="txn_mkt")
+                new_h_sector = st.selectbox("Sector (new holdings only)", DEFAULT_SECTORS, key="txn_sec")
+            if st.form_submit_button("🔁 Record transaction", type="primary"):
+                if not txn_ticker:
+                    st.error("Ticker is required.")
+                else:
+                    # Get company name from watchlist or existing holding if available
+                    company_name = ""
+                    if txn_ticker in watchlist:
+                        company_name = watchlist[txn_ticker].company_name
+                    elif txn_ticker in holdings:
+                        company_name = holdings[txn_ticker].company_name
+                    else:
+                        company_name = txn_ticker
+
+                    txn, updated, err = record_transaction(
+                        ticker=txn_ticker,
+                        side=txn_side,
+                        quantity=float(txn_qty),
+                        price=float(txn_price),
+                        txn_date=txn_date.isoformat(),
+                        notes=txn_notes,
+                        company_name=company_name,
+                        market=new_h_market,
+                        sector=new_h_sector,
+                    )
+                    if err:
+                        st.error(err)
+                    else:
+                        st.toast(f"{txn_side} {txn_qty:g} {txn_ticker} @ ${txn_price:.2f} recorded",
+                                 icon="🔁")
+                        st.rerun()
+
+    # ── Transaction history ───────────────────────────────────────────────────
+    txns = load_transactions()
+    if txns:
+        st.subheader("📜 Transaction History")
+        st.caption(f"{len(txns)} transaction(s) recorded. Most recent first.")
+        sorted_txns = sorted(txns, key=lambda t: (t.date, t.recorded_at), reverse=True)
+        txn_rows = [{
+            "Date":      t.date,
+            "Ticker":    t.ticker,
+            "Side":      t.side,
+            "Quantity":  t.quantity,
+            "Price":     round(t.price, 2),
+            "Value":     round(t.quantity * t.price, 2),
+            "Notes":     t.notes,
+        } for t in sorted_txns]
+        st.dataframe(pd.DataFrame(txn_rows), hide_index=True, use_container_width=True)
+    else:
+        st.caption("No transactions recorded yet.")
 
 
 def render_upload_tab() -> None:
@@ -1529,16 +1755,21 @@ st.caption(
     "Look up SEC filings · Upload reports · AI analysis · Portfolio state · Delta intelligence"
 )
 
-tab_search, tab_upload, tab_market_intel, tab_portfolio, tab_risk = st.tabs([
+(tab_search, tab_upload, tab_market_intel,
+ tab_watchlist, tab_holdings, tab_risk) = st.tabs([
     "🔍 Filing Search",
     "📂 Upload Filing",
     "🌐 Market Intel",
-    "📊 Portfolio & Changes",
+    "🔬 Research Watchlist",
+    "💼 Holdings",
     "🛡️ Portfolio Risk",
 ])
 
-with tab_portfolio:
+with tab_watchlist:
     render_portfolio_dashboard()
+
+with tab_holdings:
+    render_holdings_tab()
 
 with tab_upload:
     render_upload_tab()
