@@ -1,5 +1,75 @@
 [
   {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:42:42",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:42:36",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:42:29",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 72,
+    "conviction_new": 72,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "No significant changes detected from previous analysis."
+    ],
+    "alerts": [],
+    "is_first_analysis": false
+  },
+  {
     "ticker": "AAPL",
     "company_name": "Apple Inc.",
     "filing_type": "10-K",

@@ -25,6 +25,10 @@ from edgar.filings import Filing
 from ai.analyzer import AnalysisResult, analyze_filing, get_api_key
 from ai.cache import DAILY_LIMIT, cache_size, get_today_count
 from ai.evidence import CONFIDENCE_BADGE, FIELD_LABELS, evidence_by_field
+from ai.uploader import (
+    SOURCE_ICON, SOURCE_LABELS,
+    analyze_uploaded, extract_text,
+)
 from portfolio import (
     # state
     PortfolioEntry,
@@ -159,7 +163,11 @@ _analyze_enabled = _ai_ready or demo_mode
 
 def render_analysis(result: AnalysisResult) -> None:
     """Render one AnalysisResult: status badge, metrics, narrative, comparison."""
-    # ── Status banner ─────────────────────────────────────────────────────────
+    # ── Source + status banner ────────────────────────────────────────────────
+    src_icon  = SOURCE_ICON.get(result.source_label, "📄") if result.source_label not in ("SEC", "") else "🏛️"
+    src_label = result.source_label or "SEC"
+    st.caption(f"{src_icon} Source: **{src_label}**")
+
     if result.is_cached:
         st.success("📦 Cached result — loaded instantly, no API call made.", icon="📦")
     elif result.is_demo:
@@ -170,6 +178,9 @@ def render_analysis(result: AnalysisResult) -> None:
     elif result.error and not result.what_changed:
         st.error(f"**Analysis failed:** {result.error}")
         return
+    elif result.error:
+        # Non-fatal notice (e.g. truncation warning)
+        st.warning(result.error, icon="⚠️")
 
     # ── Core metrics ──────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -575,6 +586,9 @@ def render_portfolio_dashboard() -> None:
                 with hcol3:
                     st.caption(f"Last: {entry.last_filing_type}")
                     st.caption(f"Updated: {entry.last_updated}")
+                    src = getattr(entry, "source_label", "SEC") or "SEC"
+                    src_ico = SOURCE_ICON.get(src, "📄") if src != "SEC" else "🏛️"
+                    st.caption(f"{src_ico} {src}")
                     if st.button("🗑️ Remove", key=f"del_{ticker}", use_container_width=True):
                         delete_ticker(ticker)
                         st.rerun()
@@ -663,16 +677,205 @@ def render_portfolio_dashboard() -> None:
         render_delta_card(d)
 
 
+# ── Upload Filing Tab ─────────────────────────────────────────────────────────
+
+_UPLOAD_DOC_TYPES = [
+    "10-K",
+    "10-Q",
+    "8-K",
+    "Earnings Presentation",
+    "Analyst Report",
+    "Tadawul Announcement",
+    "Annual Report",
+    "Other",
+]
+
+_UPLOAD_SOURCES = {
+    "SEC Filing":               "sec",
+    "Uploaded Report":          "uploaded_report",
+    "Tadawul Announcement":     "tadawul",
+    "Analyst Report":           "analyst_report",
+    "Earnings Presentation":    "earnings_presentation",
+}
+
+
+def render_upload_tab() -> None:
+    """Render the Upload Filing tab."""
+    st.subheader("📂 Upload a Document for AI Analysis")
+    st.caption(
+        "Upload a PDF or text file — earnings presentations, analyst reports, "
+        "Tadawul announcements, or any other company document. "
+        "The same AI analysis engine and Evidence Grounding Layer are applied."
+    )
+
+    # ── File uploader ─────────────────────────────────────────────────────────
+    uploaded = st.file_uploader(
+        "Choose a file",
+        type=["pdf", "txt"],
+        help="PDF files are parsed page-by-page. Plain text (.txt) is read directly.",
+    )
+
+    # ── Document metadata ─────────────────────────────────────────────────────
+    st.divider()
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        company_input = st.text_input(
+            "Company Name",
+            placeholder="e.g. Saudi Aramco, Apple Inc.",
+            help="Used in the AI prompt and portfolio state.",
+        ).strip()
+    with mc2:
+        ticker_input = st.text_input(
+            "Portfolio Ticker / Symbol",
+            placeholder="e.g. 2222.SR, AAPL",
+            help="Used to group results in your portfolio. Can be any unique label.",
+        ).strip().upper()
+
+    dc1, dc2 = st.columns(2)
+    with dc1:
+        doc_type = st.selectbox("Document Type", _UPLOAD_DOC_TYPES)
+    with dc2:
+        source_display = st.selectbox(
+            "Source",
+            list(_UPLOAD_SOURCES.keys()),
+            help="Tagging the source helps you track where each insight came from.",
+        )
+
+    source_type = _UPLOAD_SOURCES[source_display]
+
+    # ── Analyse button ────────────────────────────────────────────────────────
+    st.divider()
+    btn_label = (
+        "🧪 Demo Analysis" if (demo_mode and not _ai_ready)
+        else "Analyze Document"
+    )
+    analyze_clicked = st.button(
+        btn_label,
+        type="primary",
+        use_container_width=True,
+        disabled=not _analyze_enabled,
+        help=None if _analyze_enabled else "Enable Demo Mode or add OPENAI_API_KEY",
+    )
+
+    if analyze_clicked:
+        if not uploaded and not demo_mode:
+            st.error("Please upload a file first.")
+            st.stop()
+        if not company_input:
+            st.error("Please enter the company name.")
+            st.stop()
+        if not ticker_input:
+            st.error("Please enter a portfolio ticker or label.")
+            st.stop()
+
+        with st.spinner("Extracting text and analysing…"):
+            if demo_mode and not uploaded:
+                # Demo mode with no file — reuse demo result directly
+                from ai.analyzer import _DEMO_RESULT
+                from dataclasses import replace as _dc_replace
+                result = _dc_replace(
+                    _DEMO_RESULT,
+                    source_label=SOURCE_LABELS.get(source_type, source_display),
+                )
+                file_bytes = b""
+                page_count = 0
+                char_count = 0
+            else:
+                # Real file — extract then analyse
+                uploaded.seek(0)
+                file_bytes = uploaded.read()
+                uploaded.seek(0)
+                file_text, page_count = extract_text(uploaded)
+                char_count = len(file_text)
+
+                if not file_text.strip():
+                    st.error(
+                        "Could not extract any text from this file. "
+                        "Try a different PDF or paste the text as a .txt file."
+                    )
+                    st.stop()
+
+                result = analyze_uploaded(
+                    file_bytes=file_bytes,
+                    file_text=file_text,
+                    source_type=source_type,
+                    doc_type=doc_type,
+                    company_name=company_input,
+                    ticker=ticker_input,
+                    st_secrets=_st_secrets(),
+                    demo_mode=demo_mode,
+                )
+
+            st.session_state["upload_result"] = result
+
+            # Feed into Portfolio State + Delta Engine
+            if result.what_changed:
+                adj = result.comparison.conviction_adjustment if result.comparison else 0
+                _entry, delta = update_portfolio(
+                    ticker_input,
+                    company_input,
+                    result,
+                    doc_type,
+                    conviction_adjustment=adj,
+                    source_label=result.source_label,
+                )
+
+                red_alerts = [
+                    _ALERT_DISPLAY[a][1]
+                    for a in delta.alerts
+                    if a in _ALERT_DISPLAY and _ALERT_DISPLAY[a][0] == "🔴"
+                ]
+                if red_alerts:
+                    st.toast(f"⚠️ {ticker_input}: {', '.join(red_alerts)}", icon="🔴")
+                else:
+                    st.toast(f"Portfolio updated for {ticker_input}", icon="💾")
+
+            # File info summary
+            if not demo_mode and uploaded:
+                info_parts = [f"{char_count:,} chars extracted"]
+                if page_count:
+                    info_parts.append(f"{page_count} pages")
+                st.caption(f"📄 {uploaded.name} — {' · '.join(info_parts)}")
+
+    # ── Show result ───────────────────────────────────────────────────────────
+    if st.session_state.get("upload_result") is not None:
+        st.divider()
+        render_analysis(st.session_state["upload_result"])
+
+    # ── Tips ──────────────────────────────────────────────────────────────────
+    if not st.session_state.get("upload_result"):
+        with st.expander("💡 What can I upload?"):
+            st.markdown("""
+| File type | Examples |
+|-----------|---------|
+| **PDF** | Earnings slide decks, annual reports, broker notes, Tadawul filings |
+| **TXT** | Copy-pasted press releases, earnings call transcripts, announcements |
+
+**Tips for best results:**
+- Text-based PDFs work best. Scanned / image-only PDFs may return empty text.
+- If your PDF is image-only, copy-paste the text into a `.txt` file instead.
+- Documents are analysed up to **8,000 characters** (roughly 5–10 pages).
+- The analysis uses the same AI model and Evidence Grounding Layer as EDGAR filings.
+""")
+
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("📋 SEC EDGAR Filing Research")
 st.caption(
-    "Look up SEC filings · AI analysis · Filing comparison · Portfolio state · Delta intelligence"
+    "Look up SEC filings · Upload reports · AI analysis · Portfolio state · Delta intelligence"
 )
 
-tab_search, tab_portfolio = st.tabs(["🔍 Filing Search", "📊 Portfolio & Changes"])
+tab_search, tab_upload, tab_portfolio = st.tabs([
+    "🔍 Filing Search",
+    "📂 Upload Filing",
+    "📊 Portfolio & Changes",
+])
 
 with tab_portfolio:
     render_portfolio_dashboard()
+
+with tab_upload:
+    render_upload_tab()
 
 with tab_search:
     st.divider()

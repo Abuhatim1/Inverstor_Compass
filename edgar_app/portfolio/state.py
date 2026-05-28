@@ -30,6 +30,7 @@ class PortfolioEntry:
     recommended_action: str     # "Buy" | "Hold" | "Reduce" | "Exit"
     last_updated:       str     # ISO date
     analyses_count:     int = 1
+    source_label:       str = "SEC"  # "SEC", "Uploaded Report", "Tadawul Announcement", etc.
 
 
 def load_portfolio() -> dict[str, PortfolioEntry]:
@@ -58,6 +59,7 @@ def update_portfolio(
     analysis,             # AnalysisResult — typed loosely to avoid circular import
     filing_type:          str,
     conviction_adjustment: int = 0,
+    source_label:          str = "SEC",
 ) -> tuple[PortfolioEntry, DeltaRecord]:
     """
     Compare new analysis against previous state, record the delta,
@@ -91,6 +93,7 @@ def update_portfolio(
         recommended_action=analysis.suggested_action,
         last_updated=date.today().isoformat(),
         analyses_count=count,
+        source_label=source_label,
     )
     portfolio[ticker.upper()] = entry
     save_portfolio(portfolio)

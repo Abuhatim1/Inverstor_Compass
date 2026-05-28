@@ -52,6 +52,7 @@ class AnalysisResult:
     is_cached:        bool = False
     comparison:       FilingComparison | None = None
     evidence:         list[EvidenceItem] = field(default_factory=list)
+    source_label:     str = "SEC"            # e.g. "SEC Filing", "Tadawul Announcement"
 
 
 # ── Demo result ───────────────────────────────────────────────────────────────
@@ -304,20 +305,25 @@ def _dict_to_cached_result(d: dict) -> AnalysisResult:
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def analyze_filing(
-    filing_url:           str,
-    form_type:            str,
-    company_name:         str,
+    filing_url:            str,
+    form_type:             str,
+    company_name:          str,
     st_secrets=None,
-    demo_mode:            bool = False,
-    cache_key:            str | None = None,
-    previous_filing_url:  str | None = None,
-    previous_cache_key:   str | None = None,
+    demo_mode:             bool = False,
+    cache_key:             str | None = None,
+    previous_filing_url:   str | None = None,
+    previous_cache_key:    str | None = None,
+    filing_text_override:  str | None = None,  # pre-extracted text (skips URL fetch)
+    source_label:          str = "SEC",         # shown in UI as source badge
 ) -> AnalysisResult:
     """
     Analyse a filing and return a structured AnalysisResult.
 
-    Evidence Grounding is always requested — every trend claim is backed by
-    a quote, metric, section reference, and confidence level.
+    When filing_text_override is supplied (e.g. for uploaded documents),
+    the URL fetch step is skipped and the provided text is used directly.
+
+    Evidence Grounding is always requested — every trend claim is backed
+    by a quote, metric, section reference, and confidence level.
 
     Never raises — all failures captured in result.error.
     """
@@ -348,17 +354,21 @@ def analyze_filing(
             "Or enable Demo Mode to test the UI."
         )
 
-    # ── 5. Fetch current filing ───────────────────────────────────────────────
-    try:
-        filing_text = fetch_filing_text(filing_url)
-    except FilingTooLargeError as exc:
-        return _error_result(str(exc))
-    except FetchError as exc:
-        return _error_result(f"Could not fetch filing text: {exc}")
+    # ── 5. Obtain filing text ─────────────────────────────────────────────────
+    if filing_text_override is not None:
+        # Uploaded document — text already extracted by the caller
+        filing_text = filing_text_override
+    else:
+        try:
+            filing_text = fetch_filing_text(filing_url)
+        except FilingTooLargeError as exc:
+            return _error_result(str(exc))
+        except FetchError as exc:
+            return _error_result(f"Could not fetch filing text: {exc}")
 
-    # ── 5b. Optionally fetch previous filing ──────────────────────────────────
+    # ── 5b. Optionally fetch previous filing (EDGAR mode only) ────────────────
     prev_text: str | None = None
-    if previous_filing_url:
+    if previous_filing_url and filing_text_override is None:
         try:
             prev_text = fetch_filing_text(previous_filing_url, max_chars=PREV_MAX_CHARS)
         except (FetchError, FilingTooLargeError):
