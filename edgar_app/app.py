@@ -1174,12 +1174,23 @@ def render_market_intel_tab() -> None:
         if mi_ticker:
             try:
                 from portfolio import save_market_intel_for_ticker
+                # Compute the dominant external view by counting classified votes
+                view_votes: dict[str, int] = {}
+                for c in getattr(mi_result, "classified", []) or []:
+                    v = getattr(c, "view", "") or ""
+                    if v:
+                        view_votes[v] = view_votes.get(v, 0) + 1
+                dominant_view = (max(view_votes, key=view_votes.get)
+                                 if view_votes else "Neutral")
                 save_market_intel_for_ticker(
                     ticker=mi_ticker,
                     alignment_score=int(getattr(mi_result.reconciliation,
                                                 "consensus_alignment_score", 0) or 0),
                     alignment_label=getattr(mi_result.reconciliation,
                                             "alignment_label", "No Baseline"),
+                    dominant_view=dominant_view,
+                    mispricing=getattr(mi_result.reconciliation,
+                                       "potential_mispricing", "") or "",
                 )
             except Exception:
                 pass
@@ -1589,6 +1600,93 @@ def render_holdings_tab() -> None:
         st.caption("No transactions recorded yet.")
 
 
+def render_decision_queue_tab() -> None:
+    """Portfolio Decision Ranking — attention allocation, not trading signals."""
+    from portfolio import (
+        ACTION_BADGE, URGENCY_BADGE,
+        compute_decision_queue,
+        load_comparison_history, load_delta_history,
+        load_holdings, load_market_intel_state, load_portfolio,
+    )
+    import pandas as pd
+
+    st.header("🎯 Decision Queue")
+    st.caption(
+        "**Attention allocation, not trading signals.** Ranks your actual "
+        "holdings by which ones need your attention *today*, combining "
+        "position size, thesis, valuation, market intel, filing & risk "
+        "deterioration, tone, balance sheet, sentiment, and confidence."
+    )
+
+    holdings = load_holdings()
+    if not holdings:
+        st.info(
+            "No actual holdings yet. Add positions in the **💼 Holdings** tab "
+            "to populate the decision queue.",
+            icon="💡",
+        )
+        return
+
+    result = compute_decision_queue(
+        holdings           = holdings,
+        watchlist          = load_portfolio(),
+        market_intel_state = load_market_intel_state(),
+        delta_history      = load_delta_history(),
+        comparison_history = load_comparison_history(),
+    )
+
+    # ── Queue summary ─────────────────────────────────────────────────────────
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("🔴 Immediate", result.total_immediate)
+    s2.metric("🟠 High Attention", result.total_high_attention)
+    s3.metric("🟡 Review", result.total_review)
+    s4.metric("🟢 Monitor", result.total_monitor)
+    st.divider()
+
+    if result.total_immediate + result.total_high_attention == 0:
+        st.success(
+            "No holdings flagged for urgent attention. Routine monitoring suggested.",
+            icon="✅",
+        )
+
+    # ── Ranked decisions ──────────────────────────────────────────────────────
+    st.subheader(f"📋 Ranked Decisions ({len(result.decisions)} holding(s))")
+    st.caption("Highest attention priority at the top.")
+
+    for d in result.decisions:
+        u_icon, u_label = URGENCY_BADGE.get(d.urgency, ("⚪", d.urgency))
+        a_icon, a_label = ACTION_BADGE.get(d.suggested_action, ("⚪", d.suggested_action))
+
+        with st.container(border=True):
+            hc1, hc2, hc3, hc4 = st.columns([2, 1.4, 1.4, 1.4])
+            with hc1:
+                st.markdown(f"### {d.ticker}")
+                st.caption(f"{d.company_name} · {d.weight_pct:.1f}% of portfolio")
+            with hc2:
+                st.metric("Priority", f"{d.priority_score}/100")
+            with hc3:
+                st.metric("Urgency", f"{u_icon} {u_label}")
+            with hc4:
+                st.metric("Suggested", f"{a_icon} {a_label}")
+
+            st.progress(d.priority_score / 100.0)
+            st.markdown(f"**Why:** {d.key_reason}")
+
+            with st.expander("All 10 signals", expanded=False):
+                rows = sorted(
+                    d.signals, key=lambda s: -(s.score * s.weight),
+                )
+                df = pd.DataFrame([{
+                    "Signal":  s.name,
+                    "Score":   s.score,
+                    "Weight":  s.weight,
+                    "Detail":  s.detail,
+                } for s in rows])
+                st.dataframe(df, hide_index=True, use_container_width=True)
+
+    st.caption(f"Computed at {result.computed_at}")
+
+
 def render_upload_tab() -> None:
     """Render the Upload Filing tab."""
     st.subheader("📂 Upload a Document for AI Analysis")
@@ -1756,12 +1854,13 @@ st.caption(
 )
 
 (tab_search, tab_upload, tab_market_intel,
- tab_watchlist, tab_holdings, tab_risk) = st.tabs([
+ tab_watchlist, tab_holdings, tab_decisions, tab_risk) = st.tabs([
     "🔍 Filing Search",
     "📂 Upload Filing",
     "🌐 Market Intel",
     "🔬 Research Watchlist",
     "💼 Holdings",
+    "🎯 Decision Queue",
     "🛡️ Portfolio Risk",
 ])
 
@@ -1770,6 +1869,9 @@ with tab_watchlist:
 
 with tab_holdings:
     render_holdings_tab()
+
+with tab_decisions:
+    render_decision_queue_tab()
 
 with tab_upload:
     render_upload_tab()

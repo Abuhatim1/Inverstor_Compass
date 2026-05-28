@@ -1,0 +1,52 @@
+{
+  "VCYT": {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "market": "US",
+    "sector": "Healthcare",
+    "quantity": 618.0,
+    "avg_cost": 32.82,
+    "current_price": 44.49,
+    "added_at": "2026-05-28"
+  },
+  "DOCS": {
+    "ticker": "DOCS",
+    "company_name": "Doximity, Inc.",
+    "market": "US",
+    "sector": "Healthcare",
+    "quantity": 376.0,
+    "avg_cost": 28.43,
+    "current_price": 20.26,
+    "added_at": "2026-05-28"
+  },
+  "CSAI": {
+    "ticker": "CSAI",
+    "company_name": "CLOUDASTRUCTURE, INC.",
+    "market": "US",
+    "sector": "Technology",
+    "quantity": 800.0,
+    "avg_cost": 0.54,
+    "current_price": 0.48,
+    "added_at": "2026-05-28"
+  },
+  "EXEL": {
+    "ticker": "EXEL",
+    "company_name": "EXELIXIS, INC.",
+    "market": "US",
+    "sector": "Healthcare",
+    "quantity": 129.0,
+    "avg_cost": 43.91,
+    "current_price": 50.03,
+    "added_at": "2026-05-28"
+  },
+  "CPRX": {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "market": "US",
+    "sector": "Healthcare",
+    "quantity": 216.0,
+    "avg_cost": 23.03,
+    "current_price": 31.32,
+    "added_at": "2026-05-28"
+  }
+}

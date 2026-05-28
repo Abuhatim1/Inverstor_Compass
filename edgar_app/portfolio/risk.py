@@ -145,11 +145,15 @@ def save_market_intel_for_ticker(
     ticker: str,
     alignment_score: int,
     alignment_label: str,
+    dominant_view:   str = "",     # "Bullish" | "Bearish" | "Mixed" | "Neutral"
+    mispricing:      str = "",     # from MISPRICING_BADGE labels
 ) -> None:
     state = load_market_intel_state()
     state[ticker] = {
         "alignment_score": int(alignment_score),
         "alignment_label": alignment_label,
+        "dominant_view":   dominant_view,
+        "mispricing":      mispricing,
         "updated_at":      datetime.now().isoformat(),
     }
     os.makedirs(_DIR, exist_ok=True)

@@ -1,5 +1,97 @@
 [
   {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T12:44:29",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T12:44:25",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "CPRX",
+    "company_name": "CATALYST PHARMACEUTICALS, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T12:44:09",
+    "thesis_prev": "—",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 72,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for CPRX."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  },
+  {
+    "ticker": "EXEL",
+    "company_name": "EXELIXIS, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T12:41:15",
+    "thesis_prev": "—",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 72,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for EXEL."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  },
+  {
     "ticker": "CSAI",
     "company_name": "CLOUDASTRUCTURE, INC.",
     "filing_type": "10-K",

@@ -88,6 +88,16 @@ from .risk import (
     load_market_intel_state,
     save_market_intel_for_ticker,
 )
+from .decision_ranking import (
+    ACTION_BADGE,
+    DecisionQueueResult,
+    DecisionSignal,
+    HoldingDecision,
+    SIGNAL_NAMES,
+    URGENCY_BADGE,
+    compute_decision_queue,
+    compute_holding_decision,
+)
 
 __all__ = [
     # Research Watchlist (state)
@@ -142,4 +152,13 @@ __all__ = [
     "compute_portfolio_risk",
     "load_market_intel_state",
     "save_market_intel_for_ticker",
+    # Decision Ranking Engine
+    "ACTION_BADGE",
+    "URGENCY_BADGE",
+    "SIGNAL_NAMES",
+    "DecisionSignal",
+    "HoldingDecision",
+    "DecisionQueueResult",
+    "compute_holding_decision",
+    "compute_decision_queue",
 ]
