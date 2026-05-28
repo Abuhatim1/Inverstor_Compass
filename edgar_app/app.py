@@ -1015,21 +1015,27 @@ def render_market_intel_tab() -> None:
     internal_thesis: dict | None = None
     if mi_ticker and mi_ticker in portfolio:
         entry = portfolio[mi_ticker]
+        # Safely read fields — guard against any schema variation
+        thesis  = getattr(entry, "thesis_status",      getattr(entry, "thesis_impact",    "Unknown"))
+        action  = getattr(entry, "recommended_action",  getattr(entry, "suggested_action", "Unknown"))
+        score   = getattr(entry, "conviction_score",    getattr(entry, "confidence_score", 0))
+        cats    = getattr(entry, "catalysts",           getattr(entry, "key_catalysts",    []))
+        rsks    = getattr(entry, "risks",               getattr(entry, "key_risks",        []))
         internal_thesis = {
-            "thesis_impact":    entry.thesis_impact,
-            "suggested_action": entry.suggested_action,
-            "confidence_score": entry.confidence_score,
-            "key_catalysts":    entry.key_catalysts,
-            "key_risks":        entry.key_risks,
+            "thesis_impact":    thesis,
+            "suggested_action": action,
+            "confidence_score": score,
+            "key_catalysts":    cats,
+            "key_risks":        rsks,
         }
         st.divider()
         ctx1, ctx2, ctx3 = st.columns(3)
         with ctx1:
-            st.metric("Internal Thesis", entry.thesis_impact)
+            st.metric("Internal Thesis", thesis)
         with ctx2:
-            st.metric("Internal Action", entry.suggested_action)
+            st.metric("Internal Action", action)
         with ctx3:
-            st.metric("Internal Confidence", f"{entry.confidence_score}/100")
+            st.metric("Internal Confidence", f"{score}/100")
         st.caption(
             f"Using filing analysis for **{mi_ticker}** ({entry.company_name}) as the baseline. "
             "External intelligence will be reconciled against this thesis."
