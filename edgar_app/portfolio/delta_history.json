@@ -1,0 +1,85 @@
+[
+  {
+    "ticker": "TEST",
+    "company_name": "Test Corp",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:04:18",
+    "thesis_prev": "Weak",
+    "thesis_new": "Strong",
+    "thesis_changed": true,
+    "action_prev": "Reduce",
+    "action_new": "Buy",
+    "action_changed": true,
+    "conviction_prev": 45,
+    "conviction_new": 80,
+    "conviction_delta": 35,
+    "catalyst_trend": "more",
+    "risk_trend": "fewer",
+    "what_changed": [
+      "Thesis improved: Weak → Strong",
+      "Action upgraded: Reduce → Buy",
+      "Conviction score: 45 → 80 (+35)",
+      "Catalysts: 1 added (now 3)",
+      "Risks: 2 removed (now 2)"
+    ],
+    "alerts": [
+      "thesis_improved",
+      "action_upgraded",
+      "conviction_improved",
+      "falling_risk"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "TEST",
+    "company_name": "Test Corp",
+    "filing_type": "10-Q",
+    "timestamp": "2026-05-28T10:04:18",
+    "thesis_prev": "Stable",
+    "thesis_new": "Weak",
+    "thesis_changed": true,
+    "action_prev": "Hold",
+    "action_new": "Reduce",
+    "action_changed": true,
+    "conviction_prev": 60,
+    "conviction_new": 45,
+    "conviction_delta": -15,
+    "catalyst_trend": "same",
+    "risk_trend": "more",
+    "what_changed": [
+      "Thesis weakened: Stable → Weak",
+      "Action downgraded: Hold → Reduce",
+      "Conviction score: 60 → 45 (-15)",
+      "Risks: 2 added (now 4)"
+    ],
+    "alerts": [
+      "thesis_weakened",
+      "action_downgraded",
+      "conviction_dropped",
+      "rising_risk"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "TEST",
+    "company_name": "Test Corp",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:04:18",
+    "thesis_prev": "—",
+    "thesis_new": "Stable",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Hold",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 60,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for TEST."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  }
+]

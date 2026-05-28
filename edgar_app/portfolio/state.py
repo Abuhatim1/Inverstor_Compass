@@ -6,30 +6,17 @@ Portfolio State Engine.
 Stores one state record per ticker in a JSON file:
   edgar_app/portfolio/portfolio_state.json
 
-Each record tracks:
-  - ticker & company name
-  - last filing type analyzed
-  - thesis status  (Strong / Stable / Weak / Broken)
-  - catalysts list (from latest analysis)
-  - risks list     (from latest analysis)
-  - conviction score (0-100)
-  - recommended action (Buy / Hold / Reduce / Exit)
-  - last_updated date
-
-Usage:
-    from portfolio.state import load_portfolio, update_portfolio
-
-    portfolio = load_portfolio()
-    update_portfolio("AAPL", "Apple Inc.", analysis_result, "10-K")
+update_portfolio() now also runs the Delta Intelligence Engine before
+saving, recording what changed from the previous state.
 """
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import date
 
+from .delta import DeltaRecord, detect_delta, save_delta
 
-# ── Path to the JSON file (lives next to this module) ────────────────────────
 _STATE_FILE = os.path.join(os.path.dirname(__file__), "portfolio_state.json")
 
 
@@ -37,71 +24,65 @@ _STATE_FILE = os.path.join(os.path.dirname(__file__), "portfolio_state.json")
 
 @dataclass
 class PortfolioEntry:
-    ticker: str
-    company_name: str
-    last_filing_type: str
-    thesis_status: str          # "Strong" | "Stable" | "Weak" | "Broken"
-    catalysts: list[str]
-    risks: list[str]
-    conviction_score: int       # 0–100
+    ticker:             str
+    company_name:       str
+    last_filing_type:   str
+    thesis_status:      str     # "Strong" | "Stable" | "Weak" | "Broken"
+    catalysts:          list[str]
+    risks:              list[str]
+    conviction_score:   int     # 0–100
     recommended_action: str     # "Buy" | "Hold" | "Reduce" | "Exit"
-    last_updated: str           # ISO date string, e.g. "2026-05-28"
-    analyses_count: int = 1     # how many times this ticker has been analyzed
+    last_updated:       str     # ISO date, e.g. "2026-05-28"
+    analyses_count:     int = 1
 
 
 # ── Load / save ───────────────────────────────────────────────────────────────
 
 def load_portfolio() -> dict[str, PortfolioEntry]:
-    """
-    Load all portfolio entries from the JSON file.
-    Returns an empty dict if the file doesn't exist yet.
-    """
+    """Load all entries from the JSON file. Returns {} if the file is missing."""
     if not os.path.exists(_STATE_FILE):
         return {}
-
     try:
         with open(_STATE_FILE, "r", encoding="utf-8") as f:
             raw: dict = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
-
-    return {
-        ticker: PortfolioEntry(**entry)
-        for ticker, entry in raw.items()
-    }
+    return {t: PortfolioEntry(**e) for t, e in raw.items()}
 
 
 def save_portfolio(portfolio: dict[str, PortfolioEntry]) -> None:
-    """Write the full portfolio state to disk."""
+    """Write the full portfolio to disk."""
     os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
     with open(_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(
-            {ticker: asdict(entry) for ticker, entry in portfolio.items()},
-            f,
-            indent=2,
-            ensure_ascii=False,
+            {t: asdict(e) for t, e in portfolio.items()},
+            f, indent=2, ensure_ascii=False,
         )
 
 
-# ── Update ────────────────────────────────────────────────────────────────────
+# ── Update (with delta detection) ────────────────────────────────────────────
 
 def update_portfolio(
-    ticker: str,
+    ticker:       str,
     company_name: str,
-    analysis,             # AnalysisResult — typed loosely to avoid circular import
-    filing_type: str,
-) -> PortfolioEntry:
+    analysis,           # AnalysisResult — typed loosely to avoid circular import
+    filing_type:  str,
+) -> tuple[PortfolioEntry, DeltaRecord]:
     """
-    Update (or create) the portfolio entry for a ticker based on an AnalysisResult.
-    Saves to disk and returns the updated entry.
+    Compare new analysis against previous state, record the delta,
+    then save the updated entry.
 
-    Only updates if the analysis did not hard-fail (error with no data).
-    Demo results are accepted — they are marked by is_demo=True on the result.
+    Returns (updated_entry, delta_record).
     """
     portfolio = load_portfolio()
-    existing  = portfolio.get(ticker.upper())
+    existing  = portfolio.get(ticker.upper())    # None on first analysis
     count     = (existing.analyses_count + 1) if existing else 1
 
+    # ── Detect what changed BEFORE overwriting the state ─────────────────────
+    delta = detect_delta(existing, analysis, ticker, company_name, filing_type)
+    save_delta(delta)
+
+    # ── Build and save the new entry ──────────────────────────────────────────
     entry = PortfolioEntry(
         ticker=ticker.upper(),
         company_name=company_name,
@@ -114,11 +95,12 @@ def update_portfolio(
         last_updated=date.today().isoformat(),
         analyses_count=count,
     )
-
     portfolio[ticker.upper()] = entry
     save_portfolio(portfolio)
-    return entry
+    return entry, delta
 
+
+# ── Delete ────────────────────────────────────────────────────────────────────
 
 def delete_ticker(ticker: str) -> bool:
     """Remove a ticker from the portfolio. Returns True if it existed."""
