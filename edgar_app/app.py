@@ -1614,6 +1614,7 @@ def render_thesis_memory_tab() -> None:
         ThesisQuotaExceeded,
         build_preview_thesis,
         delete_core_thesis, delete_risk_item, load_all_core_theses, load_holdings,
+        load_core_thesis,
         extract_text_from_document, extract_thesis_from_text,
         extract_thesis_rule_based,
         save_core_thesis,
@@ -1808,8 +1809,11 @@ def _render_thesis_import_section(
     When OpenAI quota is exhausted, surfaces a friendly Demo Mode fallback
     that runs a rule-based section parser on the document instead.
     """
-    PENDING_KEY = "pending_thesis_import"
-    QUOTA_KEY   = "pending_thesis_quota_fallback"
+    from dataclasses import asdict
+
+    PENDING_KEY    = "pending_thesis_import"
+    QUOTA_KEY      = "pending_thesis_quota_fallback"
+    LAST_SAVED_KEY = "last_saved_thesis_import"
 
     with st.expander("📥 Import Thesis From Report", expanded=False):
         st.caption(
@@ -1822,6 +1826,32 @@ def _render_thesis_import_section(
 
         pending  = st.session_state.get(PENDING_KEY)
         quota_fb = st.session_state.get(QUOTA_KEY)
+        last_saved = st.session_state.get(LAST_SAVED_KEY)
+
+        # ── Show "Stored Thesis Debug" right after a successful save ─────
+        if pending is None and last_saved is not None:
+            st.success(
+                f"✅ Thesis for **{last_saved['ticker']}** saved successfully "
+                f"from `{last_saved['filename']}`.",
+                icon="📜",
+            )
+            with st.expander(
+                f"🐞 Stored Thesis Debug — {last_saved['ticker']} "
+                "(reloaded from disk)",
+                expanded=True,
+            ):
+                st.caption(
+                    "This is what is now persisted in "
+                    "`portfolio/core_theses.json` for this ticker — "
+                    "reloaded fresh from storage after save."
+                )
+                st.json(last_saved["stored_json"])
+                if st.button(
+                    "Dismiss debug panel",
+                    key=f"dismiss_last_saved_{last_saved['ticker']}",
+                ):
+                    del st.session_state[LAST_SAVED_KEY]
+                    st.rerun()
 
         # ── Quota-exhausted state → offer Demo Mode rule-based fallback ──
         if pending is None and quota_fb is not None:
@@ -1871,6 +1901,7 @@ def _render_thesis_import_section(
                         "preview":  preview,
                         "demo_mode": True,
                     }
+                    st.session_state.pop(LAST_SAVED_KEY, None)
                     del st.session_state[QUOTA_KEY]
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
@@ -1935,6 +1966,7 @@ def _render_thesis_import_section(
                         "preview":  preview,
                         "demo_mode": False,
                     }
+                    st.session_state.pop(LAST_SAVED_KEY, None)
                     st.rerun()
                 except QuotaExceeded:
                     # Quota path: stash extracted text so the user can opt
@@ -1976,6 +2008,22 @@ def _render_thesis_import_section(
                 icon="📥",
             )
 
+        # ── 🐞 Debug: parsed JSON BEFORE save ────────────────────────────
+        with st.expander(
+            "🐞 Debug — Parsed Thesis (JSON before save)",
+            expanded=False,
+        ):
+            st.caption(
+                "Exactly what the parser produced from the document. Edits "
+                "you make in the form below are applied on top of this "
+                "before saving. Empty fields mean the parser did not find "
+                "them — fill them in manually."
+            )
+            try:
+                st.json(asdict(preview))
+            except Exception as _e:  # noqa: BLE001
+                st.error(f"Could not render parsed JSON: {_e}")
+
         # Preview summary metrics (read-only counters above the form)
         summ = preview_summary_fn(preview)
         sc1, sc2, sc3 = st.columns(3)
@@ -2004,6 +2052,18 @@ def _render_thesis_import_section(
                 f"Yes, overwrite the existing thesis for {ticker}",
                 key=f"confirm_overwrite_{ticker}",
             )
+            if confirm_ok:
+                st.info(
+                    "✅ Overwrite confirmed. Scroll to the bottom of the "
+                    "form and click **✅ Confirm Save Imported Thesis** "
+                    "to write this thesis to disk.",
+                    icon="👇",
+                )
+            else:
+                st.caption(
+                    "_The save button below is disabled until you tick the "
+                    "checkbox above._"
+                )
 
         st.caption(
             "✏️ **Review and edit every field below before saving.** "
@@ -2023,15 +2083,11 @@ def _render_thesis_import_section(
         saved = _render_import_preview_form(
             preview=preview, ticker=ticker, confirm_ok=confirm_ok,
             save_thesis=save_thesis, filename=filename, kind=kind,
+            load_thesis=load_core_thesis,
+            last_saved_key=LAST_SAVED_KEY,
         )
         if saved:
             del st.session_state[PENDING_KEY]
-            st.success(
-                f"✅ Imported thesis saved for {ticker}. Open the holding "
-                "card below to add events, conviction history, or further "
-                "fine-tune any field.",
-                icon="📜",
-            )
             st.rerun()
 
 
@@ -2046,9 +2102,11 @@ def _list_to_lines(xs) -> str:
 def _render_import_preview_form(
     *, preview, ticker: str, confirm_ok: bool,
     save_thesis, filename: str, kind: str,
+    load_thesis=None, last_saved_key: str = "last_saved_thesis_import",
 ) -> bool:
     """Editable form bound to the pending-import preview. Returns True if
     the user submitted and the thesis was saved."""
+    from dataclasses import asdict
     from portfolio import (
         RISK_CATEGORIES, RISK_KINDS, RISK_SEVERITIES, RISK_STATUSES,
         TIME_HORIZONS, normalize_scenario_probabilities,
@@ -2248,15 +2306,24 @@ def _render_import_preview_form(
                 })
 
         submitted = st.form_submit_button(
-            f"💾 Save imported thesis for {ticker}",
+            f"✅ Confirm Save Imported Thesis ({ticker})",
             type="primary", use_container_width=True,
             disabled=(not confirm_ok),
+            help=(
+                "Writes the thesis (with your edits) to "
+                "portfolio/core_theses.json. Disabled until the overwrite "
+                "checkbox above is ticked (when a thesis already exists)."
+            ),
         )
 
     if not submitted:
         return False
     if not confirm_ok:
-        st.error("Please confirm the overwrite before saving.", icon="⚠️")
+        st.error(
+            "Please tick the overwrite confirmation checkbox above before "
+            "clicking Confirm Save.",
+            icon="⚠️",
+        )
         return False
 
     # Build the final CoreThesis from edited values (preserving provenance)
@@ -2314,7 +2381,36 @@ def _render_import_preview_form(
     if not final.imported_at:
         final.imported_at = datetime.now().isoformat(timespec="seconds")
 
-    save_thesis(final)
+    try:
+        save_thesis(final)
+    except Exception as e:  # noqa: BLE001
+        st.error(
+            f"❌ Could not save the imported thesis: **{type(e).__name__}** — "
+            f"{e}\n\nYour edits are preserved in the form above; please try "
+            "again or click **Discard import** to cancel.",
+            icon="🚨",
+        )
+        return False
+
+    # Reload the persisted thesis fresh from disk and stash it so the
+    # next render can show the "Stored Thesis Debug" expander.
+    try:
+        stored = load_thesis(ticker) if load_thesis else None
+        stored_json = asdict(stored) if stored is not None else asdict(final)
+    except Exception as _e:  # noqa: BLE001
+        stored_json = {
+            "_warning": (
+                f"Saved, but could not reload from disk: {type(_e).__name__}: "
+                f"{_e}"
+            ),
+            **asdict(final),
+        }
+    st.session_state[last_saved_key] = {
+        "ticker":      ticker,
+        "filename":    filename,
+        "kind":        kind,
+        "stored_json": stored_json,
+    }
     return True
 
 
