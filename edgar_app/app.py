@@ -35,6 +35,18 @@ from ai.explainability import (
     EXPLAINABILITY_TOPICS,
     UNCERTAINTY_BADGE as EXPLAIN_BADGE,
 )
+from ai.market_intel import (
+    analyze_market_intel,
+    ALIGNMENT_BADGE,
+    MISPRICING_BADGE,
+    DETECTION_ICON,
+    DETECTION_TAXONOMY,
+    INTEL_CATEGORIES,
+    INTEL_CATEGORY_ICON,
+    INTEL_VIEW_BADGE,
+    INTEL_SOURCE_TYPES,
+    MarketIntelResult,
+)
 from portfolio import (
     # state
     PortfolioEntry,
@@ -845,6 +857,281 @@ def render_portfolio_dashboard() -> None:
         render_delta_card(d)
 
 
+# ── Market Intelligence Tab ───────────────────────────────────────────────────
+
+def _render_market_intel_results(result: MarketIntelResult) -> None:
+    """Render the full market intelligence reconciliation UI."""
+    align_icon, align_label = ALIGNMENT_BADGE.get(
+        result.reconciliation.alignment_label, ("❓", result.reconciliation.alignment_label)
+    )
+    mis_icon, mis_label = MISPRICING_BADGE.get(
+        result.reconciliation.potential_mispricing, ("❓", result.reconciliation.potential_mispricing)
+    )
+    score = result.reconciliation.consensus_alignment_score
+
+    # ── Score colour ──────────────────────────────────────────────────────────
+    if score >= 80:
+        score_prefix = "🟢"
+    elif score >= 60:
+        score_prefix = "🔵"
+    elif score >= 40:
+        score_prefix = "🟡"
+    elif score >= 20:
+        score_prefix = "🟠"
+    else:
+        score_prefix = "🔴"
+
+    st.subheader("🌐 Market vs Thesis Reconciliation")
+    st.caption(
+        "⚠️ **External intelligence is advisory only.** "
+        "It is classified and compared against the filing-based thesis — never overrides it."
+    )
+
+    # ── Top metrics row ───────────────────────────────────────────────────────
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("Consensus Alignment", f"{score_prefix} {score}/100")
+    with m2:
+        st.metric("Alignment Label", f"{align_icon} {align_label}")
+    with m3:
+        st.metric("Mispricing Signal", f"{mis_icon} {mis_label}")
+    with m4:
+        st.metric("Internal Thesis", f"{result.internal_thesis_impact} / {result.internal_action}")
+
+    # ── No internal basis warning ─────────────────────────────────────────────
+    if not result.has_internal_basis:
+        st.warning(
+            "No prior filing analysis found for this ticker. "
+            "Reconciliation accuracy is limited — run a filing analysis first for a grounded baseline.",
+            icon="⚠️",
+        )
+
+    # ── Detected conditions ───────────────────────────────────────────────────
+    if result.reconciliation.detections:
+        st.divider()
+        st.markdown("**Detected Market Conditions:**")
+        det_cols = st.columns(min(len(result.reconciliation.detections), 3))
+        for idx, det in enumerate(result.reconciliation.detections):
+            icon = DETECTION_ICON.get(det, "🔎")
+            with det_cols[idx % 3]:
+                st.info(f"{icon} {det}")
+
+    # ── Market view summary ───────────────────────────────────────────────────
+    if result.reconciliation.market_view_summary:
+        st.divider()
+        st.markdown("**External Market View Summary:**")
+        st.markdown(f"> {result.reconciliation.market_view_summary}")
+
+    # ── Mispricing rationale ──────────────────────────────────────────────────
+    if result.reconciliation.mispricing_rationale:
+        st.markdown(f"**Mispricing Rationale:** {result.reconciliation.mispricing_rationale}")
+
+    # ── Classified intelligence cards ─────────────────────────────────────────
+    if result.classified:
+        st.divider()
+        st.markdown("#### Classified Intelligence")
+        st.caption("Each block of external intelligence classified by type and directional view.")
+        card_cols = st.columns(2)
+        for idx, item in enumerate(result.classified):
+            cat_label = INTEL_CATEGORIES.get(item.category, item.category.replace("_", " ").title())
+            cat_icon  = INTEL_CATEGORY_ICON.get(item.category, "📄")
+            v_icon, v_label = INTEL_VIEW_BADGE.get(item.view, ("❓", item.view))
+            with card_cols[idx % 2]:
+                with st.container(border=True):
+                    st.markdown(f"**{cat_icon} {cat_label}** — {v_icon} {v_label}")
+                    st.markdown(item.summary)
+                    if item.key_points:
+                        for pt in item.key_points:
+                            st.markdown(f"- {pt}")
+
+    # ── Reconciliation notes ──────────────────────────────────────────────────
+    if result.reconciliation.reconciliation_notes:
+        st.divider()
+        st.markdown("#### Reconciliation Notes")
+        st.caption("Where the external market view and the internal filing thesis agree or diverge.")
+        for note in result.reconciliation.reconciliation_notes:
+            if note.startswith("ALIGNED:"):
+                st.success(note, icon="✅")
+            elif note.startswith("DIVERGENT:"):
+                st.error(note, icon="❌")
+            elif note.startswith("WATCH:"):
+                st.warning(note, icon="⚠️")
+            else:
+                st.markdown(f"- {note}")
+
+    # ── Source snippet ────────────────────────────────────────────────────────
+    if result.source_snippet:
+        with st.expander("📄 Source text preview"):
+            st.caption(result.source_snippet + ("…" if len(result.source_snippet) >= 300 else ""))
+
+
+def render_market_intel_tab() -> None:
+    """Render the Market Intelligence tab."""
+    st.subheader("🌐 External Market Intelligence")
+    st.caption(
+        "Paste or upload an external report — InvestingPro summary, analyst note, "
+        "valuation analysis, or technical summary. The AI classifies the intelligence "
+        "and reconciles it against your internal filing thesis. "
+        "External reports never override grounded filing evidence."
+    )
+
+    # ── Ticker + company ──────────────────────────────────────────────────────
+    portfolio = load_portfolio()
+    portfolio_tickers = sorted(portfolio.keys()) if portfolio else []
+
+    st.divider()
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        if portfolio_tickers:
+            ticker_options = ["— Enter manually —"] + portfolio_tickers
+            selected = st.selectbox(
+                "Select Portfolio Ticker",
+                ticker_options,
+                help="Select a ticker with a prior filing analysis for full reconciliation.",
+            )
+            if selected == "— Enter manually —":
+                mi_ticker = st.text_input(
+                    "Ticker Symbol",
+                    placeholder="e.g. AAPL, MSFT",
+                ).strip().upper()
+            else:
+                mi_ticker = selected
+        else:
+            mi_ticker = st.text_input(
+                "Ticker Symbol",
+                placeholder="e.g. AAPL, MSFT",
+                help="Run a filing analysis first for full reconciliation.",
+            ).strip().upper()
+
+    with mc2:
+        mi_company = st.text_input(
+            "Company Name",
+            placeholder="e.g. Apple Inc.",
+        ).strip()
+
+    mi_source = st.selectbox("Source Type", INTEL_SOURCE_TYPES)
+
+    # ── Internal thesis context (from portfolio) ──────────────────────────────
+    internal_thesis: dict | None = None
+    if mi_ticker and mi_ticker in portfolio:
+        entry = portfolio[mi_ticker]
+        internal_thesis = {
+            "thesis_impact":    entry.thesis_impact,
+            "suggested_action": entry.suggested_action,
+            "confidence_score": entry.confidence_score,
+            "key_catalysts":    entry.key_catalysts,
+            "key_risks":        entry.key_risks,
+        }
+        st.divider()
+        ctx1, ctx2, ctx3 = st.columns(3)
+        with ctx1:
+            st.metric("Internal Thesis", entry.thesis_impact)
+        with ctx2:
+            st.metric("Internal Action", entry.suggested_action)
+        with ctx3:
+            st.metric("Internal Confidence", f"{entry.confidence_score}/100")
+        st.caption(
+            f"Using filing analysis for **{mi_ticker}** ({entry.company_name}) as the baseline. "
+            "External intelligence will be reconciled against this thesis."
+        )
+    elif mi_ticker:
+        st.info(
+            f"No filing analysis found for **{mi_ticker}** in your portfolio. "
+            "Run a Filing Search analysis first for full reconciliation. "
+            "Classification-only mode will still work.",
+            icon="ℹ️",
+        )
+
+    # ── Intelligence input ────────────────────────────────────────────────────
+    st.divider()
+    input_mode = st.radio(
+        "Input method",
+        ["📋 Paste text", "📎 Upload file (PDF / TXT)"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    mi_text = ""
+    if input_mode == "📋 Paste text":
+        mi_text = st.text_area(
+            "Paste external intelligence here",
+            height=220,
+            placeholder=(
+                "Paste an InvestingPro summary, analyst note, valuation table, "
+                "technical analysis, or any market commentary…"
+            ),
+            label_visibility="collapsed",
+        ).strip()
+    else:
+        mi_upload = st.file_uploader(
+            "Upload file",
+            type=["pdf", "txt"],
+            label_visibility="collapsed",
+            help="PDF or plain text files. Text-based PDFs work best.",
+        )
+        if mi_upload:
+            with st.spinner("Extracting text…"):
+                try:
+                    mi_text, _ = extract_text(mi_upload)
+                except Exception as exc:
+                    st.error(f"Could not extract text: {exc}")
+            if mi_text:
+                st.caption(f"✅ {len(mi_text):,} characters extracted from **{mi_upload.name}**")
+
+    # ── Analyse button ────────────────────────────────────────────────────────
+    st.divider()
+    btn_label = (
+        "🧪 Demo Intelligence Analysis" if (demo_mode and not _ai_ready)
+        else "Analyze Intelligence"
+    )
+    can_analyze = bool(mi_ticker and (mi_text or (demo_mode and not _ai_ready)))
+    if not mi_ticker:
+        st.caption("Enter a ticker symbol to enable analysis.")
+
+    if st.button(
+        btn_label,
+        type="primary",
+        disabled=not (can_analyze or (demo_mode and not _ai_ready)),
+        use_container_width=False,
+    ):
+        with st.spinner("Classifying intelligence and reconciling with thesis…"):
+            mi_result = analyze_market_intel(
+                text=mi_text,
+                ticker=mi_ticker or "DEMO",
+                company_name=mi_company or mi_ticker or "Demo Company",
+                source_type=mi_source,
+                internal_thesis=internal_thesis,
+                st_secrets=_st_secrets(),
+                demo_mode=(demo_mode and not _ai_ready),
+            )
+        st.session_state["market_intel_result"] = mi_result
+        st.toast(f"Intelligence classified for {mi_ticker or 'DEMO'}", icon="🌐")
+
+    # ── Results ───────────────────────────────────────────────────────────────
+    if st.session_state.get("market_intel_result") is not None:
+        r: MarketIntelResult = st.session_state["market_intel_result"]
+        st.divider()
+        _render_market_intel_results(r)
+
+    # ── Tips ──────────────────────────────────────────────────────────────────
+    if not st.session_state.get("market_intel_result"):
+        with st.expander("💡 What can I paste here?"):
+            st.markdown("""
+| Source | What to paste |
+|--------|--------------|
+| **InvestingPro** | The AI summary, fair value estimate, financial health score |
+| **Analyst reports** | The key thesis, price target, rating rationale |
+| **Valuation summaries** | DCF assumptions, comparable multiples, target range |
+| **Technical analysis** | RSI, moving averages, support/resistance levels, trend summary |
+| **News & commentary** | Relevant articles, earnings call summaries, macro commentary |
+
+**Tips:**
+- More text = better classification. Include analyst names, targets, and rationales if available.
+- The system works best when you paste the full summary, not just a headline.
+- External intelligence never replaces the SEC filing analysis — it enriches it.
+            """)
+
+
 # ── Upload Filing Tab ─────────────────────────────────────────────────────────
 
 _UPLOAD_DOC_TYPES = [
@@ -1033,9 +1320,10 @@ st.caption(
     "Look up SEC filings · Upload reports · AI analysis · Portfolio state · Delta intelligence"
 )
 
-tab_search, tab_upload, tab_portfolio = st.tabs([
+tab_search, tab_upload, tab_market_intel, tab_portfolio = st.tabs([
     "🔍 Filing Search",
     "📂 Upload Filing",
+    "🌐 Market Intel",
     "📊 Portfolio & Changes",
 ])
 
@@ -1044,6 +1332,9 @@ with tab_portfolio:
 
 with tab_upload:
     render_upload_tab()
+
+with tab_market_intel:
+    render_market_intel_tab()
 
 with tab_search:
     st.divider()
