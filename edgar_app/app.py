@@ -1764,11 +1764,22 @@ def render_thesis_memory_tab() -> None:
                 _render_scenario_bar(c)
 
             # ── Sub-sections (expanders) ────────────────────────────────────
+            # Auto-expand Core Thesis right after a fresh import.
+            _recently_imported = (
+                st.session_state.get("last_saved_thesis_import", {})
+                    .get("ticker") == ticker
+            )
             edit_label = (
                 "✏️ Core Thesis & Scenarios" if c is not None
                 else "📜 Author Core Thesis & Scenarios"
             )
-            with st.expander(edit_label, expanded=(c is None)):
+            with st.expander(
+                edit_label,
+                expanded=(c is None or _recently_imported),
+            ):
+                # ── Read-only field summary ──────────────────────────
+                if c is not None:
+                    _render_thesis_field_summary(c)
                 _render_core_thesis_form(
                     ticker, h, c,
                     upsert_fn=upsert_core_thesis_fields,
@@ -1777,6 +1788,14 @@ def render_thesis_memory_tab() -> None:
                 )
 
             if c is not None:
+                # ── Stored Thesis JSON debug ─────────────────────────
+                with st.expander("🐞 Stored Thesis JSON", expanded=False):
+                    from dataclasses import asdict as _asdict
+                    try:
+                        st.json(_asdict(c))
+                    except Exception as _e:
+                        st.error(f"Could not serialise thesis: {_e}")
+
                 with st.expander(
                     f"🛡️ Risk / Return Matrix ({len(c.risk_matrix)} item(s))",
                     expanded=False,
@@ -2567,6 +2586,67 @@ def _render_risk_matrix_section(
                     possible_hedge = r_hedge.strip(),
                 )
                 st.rerun()
+
+
+def _render_thesis_field_summary(core) -> None:
+    """Compact read-only snapshot of what is actually stored in a CoreThesis.
+
+    Shown at the top of the "Core Thesis & Scenarios" expander so the user
+    can immediately see which fields were populated by the importer vs which
+    are still empty — without having to scroll through all form widgets.
+    """
+    def _badge(val) -> str:
+        if isinstance(val, list):
+            return f"✅ {len(val)} item(s)" if val else "⬜ empty"
+        return f"✅ set" if (val or "").strip() else "⬜ empty"
+
+    def _preview_list(lst, n=3) -> str:
+        if not lst:
+            return "_none_"
+        items = [f"`{x}`" for x in lst[:n]]
+        more = f" … +{len(lst)-n} more" if len(lst) > n else ""
+        return ", ".join(items) + more
+
+    rows = [
+        ("Rationale",        _badge(core.rationale),        (core.rationale or "")[:120] or "_empty_"),
+        ("Thesis drivers",   _badge(core.thesis_drivers),   _preview_list(core.thesis_drivers)),
+        ("Value drivers",    _badge(core.expected_value_drivers), _preview_list(core.expected_value_drivers)),
+        ("Catalysts",        _badge(core.expected_catalysts), _preview_list(core.expected_catalysts)),
+        ("Key risks",        _badge(core.key_risks),        _preview_list(core.key_risks)),
+        ("Moat",             _badge(core.expected_moat),    (core.expected_moat or "")[:80] or "_empty_"),
+        ("Management",       _badge(core.expected_management), (core.expected_management or "")[:80] or "_empty_"),
+        ("Margin profile",   _badge(core.expected_margin_profile), (core.expected_margin_profile or "")[:80] or "_empty_"),
+        ("Growth profile",   _badge(core.expected_growth_profile), (core.expected_growth_profile or "")[:80] or "_empty_"),
+        ("Valuation thesis", _badge(core.valuation_thesis), (core.valuation_thesis or "")[:120] or "_empty_"),
+        ("Mgmt assumptions", _badge(core.management_execution_assumptions), _preview_list(core.management_execution_assumptions)),
+        ("Bull description", _badge(getattr(core.scenario_bull, "description", "")), (getattr(core.scenario_bull, "description", "") or "")[:80] or "_empty_"),
+        ("Base description", _badge(getattr(core.scenario_base, "description", "")), (getattr(core.scenario_base, "description", "") or "")[:80] or "_empty_"),
+        ("Bear description", _badge(getattr(core.scenario_bear, "description", "")), (getattr(core.scenario_bear, "description", "") or "")[:80] or "_empty_"),
+        ("Risk matrix rows", _badge(core.risk_matrix), _preview_list([r.name for r in (core.risk_matrix or [])])),
+    ]
+
+    populated = sum(1 for _, b, _ in rows if b.startswith("✅"))
+    total     = len(rows)
+
+    with st.expander(
+        f"📊 Imported field summary — {populated}/{total} fields populated",
+        expanded=True,
+    ):
+        if populated == 0:
+            st.warning(
+                "No thesis fields were extracted. If you just imported a "
+                "document, the parser may not have recognised the section "
+                "headers. Open **🐞 Stored Thesis JSON** below to inspect "
+                "the raw stored data, then edit the fields in the form below "
+                "or re-import with a better-structured document.",
+                icon="⚠️",
+            )
+            return
+        cols = st.columns(3)
+        for i, (field, badge, preview) in enumerate(rows):
+            with cols[i % 3]:
+                st.markdown(f"**{field}** {badge}")
+                st.caption(preview)
 
 
 def _render_core_thesis_form(

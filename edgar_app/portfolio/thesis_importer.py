@@ -439,11 +439,18 @@ _SECTION_LABELS: list[tuple[str, str]] = sorted([
     ("near-term catalysts",     "catalysts"),
     ("near term catalysts",     "catalysts"),
     ("expected catalysts",      "catalysts"),
+    ("growth catalysts",        "catalysts"),
+    ("upcoming catalysts",      "catalysts"),
     ("catalysts",               "catalysts"),
     ("catalyst",                "catalysts"),
     ("المحفزات",                "catalysts"),
     ("المحفزات المتوقعة",       "catalysts"),
     ("المحفزات قصيرة المدى",    "catalysts"),
+    # bare Arabic (no ال article) — common in informal notes
+    ("محفزات النمو",            "catalysts"),
+    ("محفزات المشروع",          "catalysts"),
+    ("محفزات الأداء",           "catalysts"),
+    ("محفزات",                  "catalysts"),
     # ── risks (section-level — for free-text bullet list) ─────────────
     ("key risks",               "risks"),
     ("risk factors",            "risks"),
