@@ -31,7 +31,7 @@ from ai.uploader import (
     analyze_uploaded, extract_text,
 )
 from ai.valuation import DRIVER_DISPLAY, VALUATION_IMPACT_BADGE
-from ai.explainability import (
+from ai.explainability import (  # noqa: E402 — kept after valuation import
     CAUSE_DISPLAY,
     EXPLAINABILITY_TOPICS,
     UNCERTAINTY_BADGE as EXPLAIN_BADGE,
@@ -48,6 +48,7 @@ from ai.market_intel import (
     INTEL_SOURCE_TYPES,
     MarketIntelResult,
 )
+from command_center import render_command_center_tab
 from portfolio import (
     # state
     PortfolioEntry,
@@ -3247,8 +3248,9 @@ st.caption(
     "Look up SEC filings · Upload reports · AI analysis · Portfolio state · Delta intelligence"
 )
 
-(tab_search, tab_upload, tab_market_intel,
+(tab_command, tab_search, tab_upload, tab_market_intel,
  tab_watchlist, tab_holdings, tab_thesis, tab_decisions, tab_risk) = st.tabs([
+    "⚡ Command Center",
     "🔍 Filing Search",
     "📂 Upload Filing",
     "🌐 Market Intel",
@@ -3258,6 +3260,9 @@ st.caption(
     "🎯 Decision Queue",
     "🛡️ Portfolio Risk",
 ])
+
+with tab_command:
+    render_command_center_tab()
 
 with tab_watchlist:
     render_portfolio_dashboard()
