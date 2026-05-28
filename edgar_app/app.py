@@ -23,6 +23,7 @@ import streamlit as st
 from edgar import EdgarAPIError, get_filings, lookup_company
 from edgar.filings import Filing
 from ai.analyzer import AnalysisResult, analyze_filing, get_api_key
+from ai.cache import DAILY_LIMIT, cache_size, get_today_count
 from portfolio import (
     DeltaRecord,
     PortfolioEntry,
@@ -108,12 +109,29 @@ with st.sidebar:
         if st.button("🔄 Reload secrets", use_container_width=True):
             st.rerun()
 
+    st.divider()
+    st.caption("📊 **Usage Today**")
+    _today_count = get_today_count()
+    _pct = int(_today_count / DAILY_LIMIT * 100)
+    st.progress(_pct / 100, text=f"{_today_count} / {DAILY_LIMIT} live analyses")
+    if _today_count >= DAILY_LIMIT:
+        st.error("Daily limit reached — enable Demo Mode or wait until midnight.", icon="🚫")
+    elif _today_count >= DAILY_LIMIT * 0.8:
+        st.warning(f"Approaching daily limit ({DAILY_LIMIT - _today_count} remaining).", icon="⚠️")
+
+    st.divider()
+    st.caption("📦 **Analysis Cache**")
+    _n_cached = cache_size()
+    st.caption(f"{_n_cached} filing(s) cached — repeat analyses are instant and free.")
+
 _analyze_enabled = _ai_ready or demo_mode
 
 
 # ── Helper: render AI analysis result ────────────────────────────────────────
 def render_analysis(result: AnalysisResult) -> None:
-    if result.is_demo:
+    if result.is_cached:
+        st.success("📦 Cached result — loaded instantly, no API call made.", icon="📦")
+    elif result.is_demo:
         label = "🧪 Demo result"
         if result.error:
             label += f" — {result.error}"
@@ -248,6 +266,7 @@ def render_filing_card(filing: Filing, company_name: str, ticker: str, index: in
                         company_name=company_name,
                         st_secrets=_st_secrets(),
                         demo_mode=demo_mode,
+                        cache_key=filing.accession,
                     )
                     st.session_state[result_key] = result
 

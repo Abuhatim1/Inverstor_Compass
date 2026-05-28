@@ -3,36 +3,48 @@ ai/analyzer.py
 --------------
 AI analysis of SEC filings using OpenAI.
 
-Two modes:
-  - Live mode:  calls OpenAI with the real filing text
-  - Demo mode:  returns a realistic sample result instantly (no API key needed)
-
-If OpenAI returns an insufficient_quota / billing error, the function
-automatically falls back to demo mode instead of crashing.
+Protection layers (in order):
+  1. Demo mode          — returns sample data instantly, no API call
+  2. Cache hit          — returns stored result, no API call
+  3. Daily limit        — blocks when today's live calls hit DAILY_LIMIT
+  4. Filing too large   — FilingTooLargeError from fetcher, returned as error
+  5. No API key         — returns error result
+  6. Live OpenAI call   — result cached on success, usage incremented
+  7. Quota/billing err  — auto-fallback to demo result
+  8. Any other error    — error result (never raises)
 """
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
-from .fetcher import FetchError, fetch_filing_text
+from .cache import (
+    DAILY_LIMIT,
+    get_cached,
+    get_today_count,
+    increment_usage,
+    is_limit_reached,
+    save_to_cache,
+)
+from .fetcher import FetchError, FilingTooLargeError, fetch_filing_text
 
 
 # ── Result dataclass ──────────────────────────────────────────────────────────
 
 @dataclass
 class AnalysisResult:
-    what_changed: str
-    key_catalysts: list[str]
-    key_risks: list[str]
-    thesis_impact: str        # "Strong" | "Stable" | "Weak" | "Broken"
-    suggested_action: str     # "Buy" | "Hold" | "Reduce" | "Exit"
-    confidence_score: int     # 0–100
-    error: str | None = None  # set only when analysis fully failed
-    is_demo: bool = False     # True when result came from demo data
+    what_changed:     str
+    key_catalysts:    list[str]
+    key_risks:        list[str]
+    thesis_impact:    str       # "Strong" | "Stable" | "Weak" | "Broken"
+    suggested_action: str       # "Buy" | "Hold" | "Reduce" | "Exit"
+    confidence_score: int       # 0–100
+    error:            str | None = None   # set only on failure
+    is_demo:          bool = False        # True for sample / quota-fallback data
+    is_cached:        bool = False        # True when result came from cache
 
 
-# ── Sample demo result (realistic, filing-agnostic) ──────────────────────────
+# ── Sample demo result ────────────────────────────────────────────────────────
 
 _DEMO_RESULT = AnalysisResult(
     what_changed=(
@@ -61,12 +73,8 @@ _DEMO_RESULT = AnalysisResult(
 
 def get_api_key(st_secrets=None) -> str:
     """
-    Return the OpenAI API key, checking two sources in order:
-      1. os.environ  (Replit Secrets → env vars)
-      2. st.secrets  (Streamlit secrets.toml, if provided)
-
+    Return the OpenAI API key, checking os.environ then st.secrets.
     Always evaluated fresh — never cached at module level.
-    Does NOT log or expose the key value.
     """
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key:
@@ -79,23 +87,17 @@ def get_api_key(st_secrets=None) -> str:
     return key
 
 
-# Legacy module-level flag — use get_api_key() for reliable runtime checks.
 OPENAI_AVAILABLE: bool = bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
 
 # ── Quota / billing error detection ──────────────────────────────────────────
 
 def _is_quota_error(exc: Exception) -> bool:
-    """Return True if the exception is an OpenAI quota / billing error."""
     msg = str(exc).lower()
-    quota_keywords = (
-        "insufficient_quota",
-        "exceeded your current quota",
-        "billing",
-        "rate limit",
-        "429",
-    )
-    return any(k in msg for k in quota_keywords)
+    return any(k in msg for k in (
+        "insufficient_quota", "exceeded your current quota",
+        "billing", "rate limit", "429",
+    ))
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -122,68 +124,91 @@ Definitions:
 """
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _error_result(msg: str) -> AnalysisResult:
+    return AnalysisResult(
+        what_changed="", key_catalysts=[], key_risks=[],
+        thesis_impact="Stable", suggested_action="Hold",
+        confidence_score=0, error=msg,
+    )
+
+
+def _result_to_dict(r: AnalysisResult) -> dict:
+    """Serialise an AnalysisResult to a plain dict for the cache."""
+    d = asdict(r)
+    # Don't persist transient flags into the cache
+    d.pop("is_cached", None)
+    d.pop("error", None)
+    return d
+
+
+def _dict_to_cached_result(d: dict) -> AnalysisResult:
+    """Re-hydrate a cached dict into an AnalysisResult."""
+    # Exclude transient / meta fields that we set explicitly below
+    _skip = {"is_cached", "error", "cached_at"}
+    d = {
+        k: v for k, v in d.items()
+        if k in AnalysisResult.__dataclass_fields__ and k not in _skip
+    }
+    return AnalysisResult(**d, is_cached=True, error=None)
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def analyze_filing(
-    filing_url: str,
-    form_type: str,
+    filing_url:  str,
+    form_type:   str,
     company_name: str,
     st_secrets=None,
-    demo_mode: bool = False,
+    demo_mode:   bool = False,
+    cache_key:   str | None = None,   # typically the filing accession number
 ) -> AnalysisResult:
     """
     Analyse a filing and return a structured AnalysisResult.
 
-    Behaviour by priority:
-      1. demo_mode=True  → return demo result immediately (no network call)
-      2. No API key      → return error result
-      3. Live call OK    → return real result
-      4. Quota/billing error from OpenAI → auto-fallback to demo result
-      5. Any other error → return error result
-
     Never raises — all failures are captured in result.error.
     """
 
-    # ── 1. Demo mode: return sample data right away ───────────────────────────
+    # ── 1. Demo mode ──────────────────────────────────────────────────────────
     if demo_mode:
         return _DEMO_RESULT
 
-    # ── 2. No API key ─────────────────────────────────────────────────────────
+    # ── 2. Cache hit ──────────────────────────────────────────────────────────
+    if cache_key:
+        cached = get_cached(cache_key)
+        if cached:
+            return _dict_to_cached_result(cached)
+
+    # ── 3. Daily limit ────────────────────────────────────────────────────────
+    if is_limit_reached():
+        return _error_result(
+            f"Daily analysis limit reached ({DAILY_LIMIT} live calls). "
+            "Limit resets at midnight. Enable Demo Mode to continue exploring."
+        )
+
+    # ── 4. API key ────────────────────────────────────────────────────────────
     api_key = get_api_key(st_secrets)
     if not api_key:
-        return AnalysisResult(
-            what_changed="",
-            key_catalysts=[],
-            key_risks=[],
-            thesis_impact="Stable",
-            suggested_action="Hold",
-            confidence_score=0,
-            error=(
-                "OPENAI_API_KEY not found. "
-                "Add it in Replit Secrets (key name must be exactly OPENAI_API_KEY), "
-                "then restart the app. Or enable Demo Mode to test the UI."
-            ),
+        return _error_result(
+            "OPENAI_API_KEY not found. Add it in Replit Secrets "
+            "(key name must be exactly OPENAI_API_KEY), then restart the app. "
+            "Or enable Demo Mode to test the UI."
         )
 
-    # ── 3. Fetch filing text ──────────────────────────────────────────────────
+    # ── 5. Fetch filing text ──────────────────────────────────────────────────
     try:
         filing_text = fetch_filing_text(filing_url)
+    except FilingTooLargeError as exc:
+        return _error_result(str(exc))
     except FetchError as exc:
-        return AnalysisResult(
-            what_changed="",
-            key_catalysts=[],
-            key_risks=[],
-            thesis_impact="Stable",
-            suggested_action="Hold",
-            confidence_score=0,
-            error=f"Could not fetch filing text: {exc}",
-        )
+        return _error_result(f"Could not fetch filing text: {exc}")
 
-    # ── 4. Call OpenAI ────────────────────────────────────────────────────────
+    # ── 6. Call OpenAI ────────────────────────────────────────────────────────
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key)
+        client      = OpenAI(api_key=api_key)
         user_prompt = (
             f"Company: {company_name}\n"
             f"Filing type: {form_type}\n\n"
@@ -195,15 +220,15 @@ def analyze_filing(
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "user",   "content": user_prompt},
             ],
             max_tokens=800,
         )
 
         raw_json = response.choices[0].message.content or "{}"
-        data = json.loads(raw_json)
+        data     = json.loads(raw_json)
 
-        return AnalysisResult(
+        result = AnalysisResult(
             what_changed=data.get("what_changed", "No summary returned."),
             key_catalysts=data.get("key_catalysts", []),
             key_risks=data.get("key_risks", []),
@@ -212,11 +237,17 @@ def analyze_filing(
             confidence_score=int(data.get("confidence_score", 0)),
         )
 
+        # ── Save to cache and increment daily counter ─────────────────────────
+        if cache_key:
+            save_to_cache(cache_key, _result_to_dict(result))
+        increment_usage()
+
+        return result
+
     except Exception as exc:
-        # ── 4a. Quota / billing error → auto-fallback to demo ─────────────────
+        # ── 6a. Quota error → demo fallback ───────────────────────────────────
         if _is_quota_error(exc):
             demo = _DEMO_RESULT
-            # Return a copy with a note attached via the error field
             return AnalysisResult(
                 what_changed=demo.what_changed,
                 key_catalysts=demo.key_catalysts,
@@ -226,18 +257,10 @@ def analyze_filing(
                 confidence_score=demo.confidence_score,
                 is_demo=True,
                 error=(
-                    "OpenAI quota exceeded — showing demo analysis instead. "
+                    "OpenAI quota exceeded — showing demo analysis. "
                     "Check your billing at platform.openai.com."
                 ),
             )
 
-        # ── 4b. Any other OpenAI error ────────────────────────────────────────
-        return AnalysisResult(
-            what_changed="",
-            key_catalysts=[],
-            key_risks=[],
-            thesis_impact="Stable",
-            suggested_action="Hold",
-            confidence_score=0,
-            error=f"OpenAI error: {exc}",
-        )
+        # ── 6b. Any other error ───────────────────────────────────────────────
+        return _error_result(f"OpenAI error: {exc}")
