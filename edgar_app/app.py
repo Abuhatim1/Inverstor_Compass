@@ -1564,23 +1564,73 @@ def render_holdings_tab() -> None:
     holdings  = load_holdings()
     watchlist = load_portfolio()
 
+    # ── Base currency selector ────────────────────────────────────────────────
+    from fx_rates import get_rates_for_holdings, refresh_fx_rates
+    _bc1, _bc2, _bc3 = st.columns([1, 1, 4])
+    with _bc1:
+        _base_ccy = st.selectbox(
+            "Base Currency",
+            options=["SAR", "USD", "EUR", "GBP"],
+            index=0,
+            key="holdings_base_ccy",
+            help="All portfolio totals and weight percentages are shown in this currency.",
+        )
+    with _bc2:
+        st.write("")
+        if st.button("💱 Refresh FX", key="refresh_fx_btn",
+                     help="Fetch live FX rates from Yahoo Finance."):
+            if holdings:
+                _ccys = list({getattr(h, "currency", "USD") for h in holdings.values()})
+                with st.spinner("Fetching FX rates…"):
+                    refresh_fx_rates(_ccys, _base_ccy)
+                st.toast("FX rates updated", icon="💱")
+                st.rerun()
+
+    # FX rates (cached; refreshed by button above or after 5 min TTL)
+    _all_ccys = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
+    _fx       = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
+    _manual_fx = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
+
+    def _mv_base(h) -> float:
+        ccy  = getattr(h, "currency", "USD")
+        rate = _fx[ccy].rate if ccy in _fx else 1.0
+        return h.market_value * rate
+
+    def _cb_base(h) -> float:
+        ccy  = getattr(h, "currency", "USD")
+        rate = _fx[ccy].rate if ccy in _fx else 1.0
+        return h.cost_basis * rate
+
     # ── Summary metrics ───────────────────────────────────────────────────────
     if holdings:
-        mv      = total_market_value(holdings)
-        cb      = total_cost_basis(holdings)
-        pnl     = mv - cb
-        pnl_pct = (pnl / cb * 100.0) if cb > 0 else 0.0
-        _last_ref = st.session_state.get("mp_last_refresh") or "—"
+        _total_mv  = sum(_mv_base(h) for h in holdings.values())
+        _total_cb  = sum(_cb_base(h) for h in holdings.values())
+        _total_pnl = _total_mv - _total_cb
+        _pnl_pct   = (_total_pnl / _total_cb * 100.0) if _total_cb > 0 else 0.0
+        _last_ref  = st.session_state.get("mp_last_refresh") or "—"
+
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Positions", len(holdings))
-        m2.metric("Market Value", f"${mv:,.2f}")
-        m3.metric("Cost Basis", f"${cb:,.2f}")
+        m2.metric(f"Market Value ({_base_ccy})", f"{_total_mv:,.2f}")
+        m3.metric(f"Cost Basis ({_base_ccy})",   f"{_total_cb:,.2f}")
         m4.metric(
-            "Unrealized P&L",
-            f"${pnl:,.2f}",
-            delta=f"{pnl_pct:+.2f}%",
+            f"Unrealized P&L ({_base_ccy})",
+            f"{_total_pnl:,.2f}",
+            delta=f"{_pnl_pct:+.2f}%",
         )
         m5.metric("Last Price Refresh", _last_ref)
+
+        if _manual_fx:
+            st.warning(
+                f"⚠️ Portfolio totals converted to **{_base_ccy}** using estimated "
+                f"default FX rates for: **{', '.join(_manual_fx)}**. "
+                "Click **💱 Refresh FX** or enter rates manually.",
+                icon="💱",
+            )
+        else:
+            st.caption(
+                f"💱 Totals in **{_base_ccy}** · FX rates sourced live from Yahoo Finance."
+            )
     else:
         st.info(
             "No holdings yet. Use the **➕ Add Holding** form below, record a "
@@ -1593,48 +1643,68 @@ def render_holdings_tab() -> None:
     if holdings:
         st.subheader("📋 Holdings")
         st.caption(
-            "Edit **Current Price** inline, then click **💾 Save prices**. "
-            "Other fields are edited via **💼 Add to Holdings** on the Watchlist."
+            "Edit **Price** inline and click **💾 Save prices**. "
+            "All other fields are edited in the **🖊️ Edit / Delete Holding** section below."
         )
-        weights = portfolio_weights(holdings)
+
+        # Base-currency total for weight calculation
+        _bw_total = sum(_mv_base(h) for h in holdings.values()) or 1.0
+
+        _mv_col  = f"MV ({_base_ccy})"
+        _pnl_col = f"P&L ({_base_ccy})"
+        _wt_col  = f"Wt% ({_base_ccy})"
+
         rows = []
         for ticker, h in sorted(holdings.items()):
             has_tk  = getattr(h, "has_ticker", True)
             p_src   = getattr(h, "price_source", "manual")
             sec_lnk = getattr(h, "sec_linked", False)
+            ccy     = getattr(h, "currency", "USD")
+            fx_r    = _fx.get(ccy)
+            fx_rate = fx_r.rate   if fx_r else 1.0
+            fx_src  = fx_r.source if fx_r else "default"
+            mv_b    = round(h.market_value * fx_rate, 2)
+            pnl_b   = round(h.unrealized_pnl * fx_rate, 2)
+            wt_b    = round(h.market_value * fx_rate / _bw_total * 100.0, 2)
+
             price_src_label = (
                 "📡 yfinance" if p_src == "yfinance"
                 else ("⚠️ Manual (no ticker)" if not has_tk else "📝 Manual")
             )
+            fx_src_label = "✅ live" if fx_src == "live" else ("➖ same" if fx_src == "same" else "🔴 default")
+
             rows.append({
-                "Ticker":         ticker,
-                "Company":        h.company_name,
-                "Type":           getattr(h, "asset_type", "Stock"),
-                "Market":         h.market,
-                "Ccy":            getattr(h, "currency", "USD"),
-                "Sector":         h.sector,
-                "Quantity":       round(h.quantity, 4),
-                "Avg Cost":       round(h.avg_cost, 4),
-                "Current Price":  round(h.current_price, 4),
-                "Market Value":   round(h.market_value, 2),
-                "Cost Basis":     round(h.cost_basis, 2),
-                "Unreal. P&L":    round(h.unrealized_pnl, 2),
-                "P&L %":          round(h.unrealized_pnl_pct, 2),
-                "Weight %":       round(weights.get(ticker, 0.0), 2),
-                "Price Src":      price_src_label,
-                "SEC":            "🏛️" if sec_lnk else "—",
+                "Ticker":        ticker,
+                "Company":       h.company_name,
+                "Type":          getattr(h, "asset_type", "Stock"),
+                "Ccy":           ccy,
+                "Quantity":      round(h.quantity, 4),
+                "Avg Cost":      round(h.avg_cost, 4),
+                "Price":         round(h.current_price, 4),
+                "MV (Local)":    round(h.market_value, 2),
+                "FX":            round(fx_rate, 6),
+                "FX Src":        fx_src_label,
+                _mv_col:         mv_b,
+                _pnl_col:        pnl_b,
+                "P&L %":         round(h.unrealized_pnl_pct, 2),
+                _wt_col:         wt_b,
+                "Price Src":     price_src_label,
+                "SEC":           "🏛️" if sec_lnk else "—",
             })
         df = pd.DataFrame(rows)
+        _disabled_cols = [
+            "Ticker", "Company", "Type", "Ccy", "Quantity", "Avg Cost",
+            "MV (Local)", "FX", "FX Src", _mv_col, _pnl_col, "P&L %", _wt_col,
+            "Price Src", "SEC",
+        ]
         edited = st.data_editor(
             df,
             hide_index=True,
             use_container_width=True,
-            disabled=["Ticker", "Company", "Type", "Market", "Ccy", "Sector",
-                      "Quantity", "Avg Cost", "Market Value", "Cost Basis",
-                      "Unreal. P&L", "P&L %", "Weight %", "Price Src", "SEC"],
+            disabled=_disabled_cols,
             column_config={
-                "Current Price": st.column_config.NumberColumn(
-                    "Current Price", min_value=0.0, step=0.01, format="%.2f",
+                "Price": st.column_config.NumberColumn(
+                    "Price", min_value=0.0, step=0.01, format="%.4f",
                 ),
             },
             key="holdings_price_editor",
@@ -1789,29 +1859,15 @@ def render_holdings_tab() -> None:
                             hide_index=True, use_container_width=True,
                         )
 
-        save_cols = st.columns([1, 1, 4])
-        with save_cols[0]:
-            if st.button("💾 Save prices", type="primary", use_container_width=True):
-                changed = 0
-                for _, row in edited.iterrows():
-                    new_price = float(row["Current Price"])
-                    if abs(new_price - holdings[row["Ticker"]].current_price) > 1e-9:
-                        update_current_price(row["Ticker"], new_price)
-                        changed += 1
-                st.toast(f"Updated {changed} price(s)", icon="💾")
-                st.rerun()
-        with save_cols[1]:
-            del_ticker = st.selectbox(
-                "Remove holding",
-                options=["—"] + sorted(holdings.keys()),
-                label_visibility="collapsed",
-                key="del_holding_select",
-            )
-        if del_ticker and del_ticker != "—":
-            if st.button(f"🗑️ Remove {del_ticker}", type="secondary"):
-                delete_holding(del_ticker)
-                st.toast(f"{del_ticker} removed", icon="🗑️")
-                st.rerun()
+        if st.button("💾 Save prices", type="primary"):
+            changed = 0
+            for _, row in edited.iterrows():
+                new_price = float(row["Price"])
+                if abs(new_price - holdings[row["Ticker"]].current_price) > 1e-9:
+                    update_current_price(row["Ticker"], new_price)
+                    changed += 1
+            st.toast(f"Updated {changed} price(s)", icon="💾")
+            st.rerun()
 
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
@@ -2081,7 +2137,8 @@ def render_holdings_tab() -> None:
 
     # ── Edit / Delete Holding ─────────────────────────────────────────────────
     st.divider()
-    with st.expander("🖊️ Edit / Delete Holding", expanded=False):
+    st.subheader("🖊️ Edit / Delete Holding")
+    with st.container():
         if not holdings:
             st.info("No holdings yet — add one above.", icon="ℹ️")
         else:

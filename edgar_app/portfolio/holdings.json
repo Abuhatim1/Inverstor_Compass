@@ -6,7 +6,7 @@
     "sector": "Healthcare",
     "quantity": 618.0,
     "avg_cost": 32.82,
-    "current_price": 47.9900016784668,
+    "current_price": 47.99,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "USD",
@@ -25,7 +25,7 @@
     "sector": "Healthcare",
     "quantity": 376.0,
     "avg_cost": 28.43,
-    "current_price": 21.06999969482422,
+    "current_price": 21.07,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "USD",
@@ -44,7 +44,7 @@
     "sector": "Technology",
     "quantity": 800.0,
     "avg_cost": 0.54,
-    "current_price": 0.5109999775886536,
+    "current_price": 0.511,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "USD",
@@ -63,7 +63,7 @@
     "sector": "Healthcare",
     "quantity": 129.0,
     "avg_cost": 43.91,
-    "current_price": 51.45000076293945,
+    "current_price": 51.45,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "USD",
@@ -82,7 +82,7 @@
     "sector": "Healthcare",
     "quantity": 216.0,
     "avg_cost": 23.03,
-    "current_price": 31.290000915527344,
+    "current_price": 31.29,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "USD",
@@ -129,7 +129,7 @@
     "cik": "",
     "purchase_date": "2023-05-01",
     "notes": "",
-    "price_source": "yfinance",
+    "price_source": "manual",
     "price_date": "2026-05-28"
   },
   "7010.SR": {
@@ -148,7 +148,7 @@
     "cik": "",
     "purchase_date": "2020-05-01",
     "notes": "",
-    "price_source": "yfinance",
+    "price_source": "manual",
     "price_date": "2026-05-28"
   }
 }
