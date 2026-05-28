@@ -341,14 +341,13 @@ def analyze_market_intel(
         )
 
     # ── API key ───────────────────────────────────────────────────────────────
-    api_key: str | None = None
-    if st_secrets:
+    # Read key from env first, then from Streamlit secrets (never evaluate secrets as bool)
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key and st_secrets is not None:
         try:
-            api_key = st_secrets["OPENAI_API_KEY"]
+            api_key = (st_secrets.get("OPENAI_API_KEY") or "").strip()
         except Exception:
             pass
-    if not api_key:
-        api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key:
         return _error_result(
