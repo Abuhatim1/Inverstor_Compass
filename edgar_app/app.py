@@ -24,6 +24,7 @@ from edgar import EdgarAPIError, get_filings, lookup_company
 from edgar.filings import Filing
 from ai.analyzer import AnalysisResult, analyze_filing, get_api_key
 from ai.cache import DAILY_LIMIT, cache_size, get_today_count
+from ai.evidence import CONFIDENCE_BADGE, FIELD_LABELS, evidence_by_field
 from portfolio import (
     # state
     PortfolioEntry,
@@ -196,26 +197,34 @@ def render_analysis(result: AnalysisResult) -> None:
         adj_sign = "+" if adj > 0 else ""
         adj_color = "🟢" if adj > 0 else ("🔴" if adj < 0 else "⚪")
 
+        # Build evidence lookup for confidence-gating the trend grid
+        ev_lookup = evidence_by_field(result.evidence)
+
         st.divider()
         st.markdown(
-            f"**📊 vs. Previous {result.suggested_action and 'Filing'} Comparison** — "
+            f"**📊 vs. Previous Filing Comparison** — "
             f"Conviction adjustment: {adj_color} {adj_sign}{adj}"
         )
 
-        # Trend grid
+        # Trend grid — low-confidence fields show ❓ instead of a trend claim
         trend_rows = [
-            ("Revenue growth",   c.revenue_growth_trend, TREND_ICON),
-            ("Margins",          c.margin_trend,          TREND_ICON),
-            ("Cash position",    c.cash_trend,            TREND_ICON),
-            ("Debt / leverage",  c.debt_trend,            TREND_ICON),
-            ("Management tone",  c.management_tone,       TONE_ICON),
-            ("Guidance",         c.guidance_trend,        GUIDANCE_ICON),
+            ("Revenue growth",  c.revenue_growth_trend, TREND_ICON,    "revenue_growth"),
+            ("Margins",         c.margin_trend,          TREND_ICON,    "margins"),
+            ("Cash position",   c.cash_trend,            TREND_ICON,    "cash_position"),
+            ("Debt / leverage", c.debt_trend,            TREND_ICON,    "debt"),
+            ("Management tone", c.management_tone,       TONE_ICON,     "management_tone"),
+            ("Guidance",        c.guidance_trend,        GUIDANCE_ICON, "guidance"),
         ]
         cols = st.columns(3)
-        for idx, (label, value, icon_map) in enumerate(trend_rows):
-            icon = icon_map.get(value, "❓")
-            txt  = _TREND_LABEL.get(value, value.title())
-            cols[idx % 3].metric(label, f"{icon} {txt}")
+        for idx, (label, value, icon_map, ev_field) in enumerate(trend_rows):
+            ev = ev_lookup.get(ev_field)
+            if ev and ev.confidence == "low":
+                cols[idx % 3].metric(label, "❓ Low confidence")
+            else:
+                icon = icon_map.get(value, "❓")
+                txt  = _TREND_LABEL.get(value, value.title())
+                conf_icon = CONFIDENCE_BADGE.get(ev.confidence, ("⚪", ""))[0] if ev else ""
+                cols[idx % 3].metric(label, f"{icon} {txt}", delta=conf_icon if conf_icon else None)
 
         # Four narrative sections
         with st.expander("What improved / weakened / new"):
@@ -238,6 +247,70 @@ def render_analysis(result: AnalysisResult) -> None:
                     st.markdown("**🔴 New concerns**")
                     for item in c.new_concerns:
                         st.markdown(f"- {item}")
+
+
+    # ── Evidence Grounding (always shown when evidence exists) ────────────────
+    if result.evidence:
+        _render_evidence_section(result.evidence, has_comparison=result.comparison is not None)
+
+
+def _render_evidence_section(evidence: list, has_comparison: bool) -> None:
+    """Render collapsible evidence cards — one per financial field."""
+    st.divider()
+    # Count by confidence level
+    n_high   = sum(1 for e in evidence if e.confidence == "high")
+    n_medium = sum(1 for e in evidence if e.confidence == "medium")
+    n_low    = sum(1 for e in evidence if e.confidence == "low")
+    summary  = f"🟢 {n_high} high · 🟡 {n_medium} medium · 🔴 {n_low} low confidence"
+
+    with st.expander(f"🔍 Evidence Grounding — {summary}"):
+        st.caption(
+            "Every AI conclusion is grounded in a direct quote or metric from the filing. "
+            "🔴 Low confidence means the filing did not mention that topic."
+        )
+        for ev in evidence:
+            _render_evidence_card(ev, has_comparison)
+
+
+def _render_evidence_card(ev, has_comparison: bool) -> None:
+    """Render one EvidenceItem as a structured card."""
+    conf_icon, conf_label = CONFIDENCE_BADGE.get(ev.confidence, ("⚪", "Unknown"))
+    field_label = FIELD_LABELS.get(ev.field, ev.field.replace("_", " ").title())
+
+    with st.container(border=True):
+        hc1, hc2 = st.columns([3, 1])
+        with hc1:
+            st.markdown(f"**{field_label}**")
+            if ev.section and ev.section not in ("", "not_mentioned"):
+                st.caption(f"📄 Section: {ev.section}")
+        with hc2:
+            st.markdown(f"{conf_icon} **{conf_label}**")
+
+        if ev.confidence == "low":
+            st.caption("_No relevant data found in this filing excerpt._")
+            if ev.interpretation:
+                st.caption(f"Note: {ev.interpretation}")
+            return
+
+        # Values row
+        if has_comparison and ev.previous_value and ev.previous_value not in ("", "not_applicable"):
+            vc1, vc2, vc3 = st.columns(3)
+            vc1.metric("Previous", ev.previous_value)
+            vc2.metric("Current",  ev.current_value)
+            if ev.delta and ev.delta not in ("", "not_applicable"):
+                # Try to detect positive/negative direction for delta colouring
+                delta_str = ev.delta
+                vc3.metric("Change", delta_str)
+        else:
+            st.markdown(f"**Value:** {ev.current_value}")
+
+        # Quote
+        if ev.quote:
+            st.markdown(f"> *\"{ev.quote}\"*")
+
+        # Interpretation
+        if ev.interpretation:
+            st.info(f"💡 {ev.interpretation}", icon="💡")
 
 
 def render_delta_card(d: DeltaRecord) -> None:

@@ -18,5 +18,25 @@
     "recommended_action": "Buy",
     "last_updated": "2026-05-28",
     "analyses_count": 4
+  },
+  "AAPL": {
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "last_filing_type": "10-K",
+    "thesis_status": "Strong",
+    "catalysts": [
+      "Accelerating revenue growth in high-margin software segment",
+      "New multi-year enterprise contract wins announced in the quarter",
+      "Share buyback program expanded by $500M"
+    ],
+    "risks": [
+      "Macroeconomic headwinds could pressure discretionary spending",
+      "Increasing competition from well-funded new entrants",
+      "Foreign exchange exposure on ~35% of international revenues"
+    ],
+    "conviction_score": 84,
+    "recommended_action": "Buy",
+    "last_updated": "2026-05-28",
+    "analyses_count": 1
   }
 }

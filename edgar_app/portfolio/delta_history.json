@@ -1,5 +1,27 @@
 [
   {
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:30:49",
+    "thesis_prev": "—",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 72,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for AAPL."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  },
+  {
     "ticker": "TEST2",
     "company_name": "Test2 Corp",
     "filing_type": "10-K",

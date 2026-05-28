@@ -1,1 +1,31 @@
-[]
+[
+  {
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "filing_type": "10-K",
+    "accession": "0000320193-25-000079",
+    "timestamp": "2026-05-28T10:30:49",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of revenues"
+    ],
+    "new_catalysts": [
+      "Enterprise contract wins",
+      "Expanded buyback program"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  }
+]

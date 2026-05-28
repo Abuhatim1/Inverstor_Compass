@@ -10,26 +10,25 @@ Protection layers (in order):
   4. Filing too large    — FilingTooLargeError surfaced as error result
   5. No API key          — error result
   6. Live OpenAI call    — result cached on success, usage incremented
-     → If previous_filing_url provided: extended comparison prompt,
-       FilingComparison populated on the result
+     · Evidence Grounding Layer always requested in both prompts
+     · If previous_filing_url provided: comparison block also requested
   7. Quota/billing error — auto-fallback to demo result
   8. Any other error     — error result (never raises)
 """
 
 import json
 import os
-from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass, field
 
 from .cache import (
     DAILY_LIMIT,
     get_cached,
-    get_today_count,
     increment_usage,
     is_limit_reached,
     save_to_cache,
 )
 from .comparator import FilingComparison, comparison_from_dict
+from .evidence import EvidenceItem, evidence_from_list
 from .fetcher import (
     FetchError,
     FilingTooLargeError,
@@ -45,13 +44,14 @@ class AnalysisResult:
     what_changed:     str
     key_catalysts:    list[str]
     key_risks:        list[str]
-    thesis_impact:    str               # "Strong" | "Stable" | "Weak" | "Broken"
-    suggested_action: str               # "Buy" | "Hold" | "Reduce" | "Exit"
-    confidence_score: int               # 0–100 (base AI score, before comparison adj.)
+    thesis_impact:    str                    # "Strong" | "Stable" | "Weak" | "Broken"
+    suggested_action: str                    # "Buy" | "Hold" | "Reduce" | "Exit"
+    confidence_score: int                    # 0–100 (base, before comparison adj.)
     error:            str | None = None
     is_demo:          bool = False
     is_cached:        bool = False
-    comparison:       FilingComparison | None = None  # populated when prev filing available
+    comparison:       FilingComparison | None = None
+    evidence:         list[EvidenceItem] = field(default_factory=list)
 
 
 # ── Demo result ───────────────────────────────────────────────────────────────
@@ -82,9 +82,9 @@ _DEMO_RESULT = AnalysisResult(
             "Operating margins expanded 200 bps to 28%",
             "Management raised full-year guidance by 5%",
         ],
-        what_weakened=["International growth slightly below domestic"],
-        new_concerns=["FX headwind on ~35% of revenues"],
-        new_catalysts=["Enterprise contract wins", "Expanded buyback program"],
+        what_weakened=["International growth slightly below domestic pace"],
+        new_concerns=["FX headwind on ~35% of international revenues"],
+        new_catalysts=["New enterprise contract wins", "Expanded $500M buyback"],
         revenue_growth_trend="improving",
         margin_trend="improving",
         cash_trend="stable",
@@ -93,6 +93,72 @@ _DEMO_RESULT = AnalysisResult(
         guidance_trend="raised",
         conviction_adjustment=12,
     ),
+    evidence=[
+        EvidenceItem(
+            field="revenue_growth",
+            section="Results of Operations",
+            current_value="$4.7B, +14% YoY",
+            previous_value="$4.1B",
+            delta="+$600M / +14.6%",
+            quote="Net revenues increased 14% year-over-year to $4.7 billion, "
+                  "driven by strong software segment performance.",
+            interpretation="Growth is accelerating vs. the prior 9% pace — a bullish signal.",
+            confidence="high",
+        ),
+        EvidenceItem(
+            field="margins",
+            section="Results of Operations",
+            current_value="28% operating margin",
+            previous_value="26%",
+            delta="+200 bps",
+            quote="Operating income margin expanded to 28.0% from 26.0% in the "
+                  "prior-year period.",
+            interpretation="Margin expansion alongside revenue growth is a strong positive.",
+            confidence="high",
+        ),
+        EvidenceItem(
+            field="cash_position",
+            section="Balance Sheet",
+            current_value="$1.2B cash & equivalents",
+            previous_value="$1.1B",
+            delta="+$100M",
+            quote="Cash and cash equivalents were $1.2 billion as of quarter end.",
+            interpretation="Cash position is stable with modest improvement.",
+            confidence="medium",
+        ),
+        EvidenceItem(
+            field="debt",
+            section="Balance Sheet",
+            current_value="$800M long-term debt",
+            previous_value="$850M",
+            delta="-$50M",
+            quote="Long-term debt decreased to $800 million following scheduled repayments.",
+            interpretation="Modest debt reduction; leverage remains manageable.",
+            confidence="high",
+        ),
+        EvidenceItem(
+            field="guidance",
+            section="Outlook",
+            current_value="Full-year revenue raised to $18.5B–$18.8B",
+            previous_value="$17.5B–$17.8B",
+            delta="+~$1B at midpoint",
+            quote="We are raising our full-year 2026 revenue outlook to $18.5 to "
+                  "$18.8 billion, reflecting strong demand visibility.",
+            interpretation="Guidance raise is material and signals management confidence.",
+            confidence="high",
+        ),
+        EvidenceItem(
+            field="management_tone",
+            section="CEO Commentary",
+            current_value="Positive — confident, forward-looking language",
+            previous_value="Neutral",
+            delta="Tone improved",
+            quote="We are very pleased with our execution and remain highly confident "
+                  "in our ability to deliver long-term value for shareholders.",
+            interpretation="Tone shift from neutral to positive aligns with raised guidance.",
+            confidence="medium",
+        ),
+    ],
 )
 
 
@@ -121,64 +187,87 @@ def _is_quota_error(exc: Exception) -> bool:
     ))
 
 
+# ── Evidence schema (shared by both prompts) ──────────────────────────────────
+
+_EVIDENCE_SCHEMA = """\
+  "evidence": [
+    {
+      "field": "revenue_growth | margins | cash_position | debt | guidance | management_tone",
+      "section": "exact section name (e.g. 'Results of Operations') or 'not_mentioned'",
+      "current_value": "metric with unit and period, e.g. '$4.7B, +14% YoY' or 'not mentioned'",
+      "previous_value": "comparable prior-period metric, or '' if no comparison filing",
+      "delta": "change vs prior period with sign, or '' if no comparison filing",
+      "quote": "verbatim sentence from the filing (max 150 chars), or '' if not found",
+      "interpretation": "one sentence: what this means for the investment thesis",
+      "confidence": "high (explicit number/quote found) | medium (inferred) | low (not mentioned)"
+    }
+  ]
+
+EVIDENCE RULES — you MUST follow these:
+- Include exactly one entry per field (all six fields must be present).
+- Set confidence='low' and current_value='not mentioned' when no data exists in the excerpt.
+- NEVER invent numbers. Only use values that appear verbatim or can be directly calculated
+  from the excerpt. If uncertain, lower the confidence level.
+- A 'low' confidence entry is NOT a failure — it tells the reader the filing does not
+  address this topic.
+"""
+
+
 # ── System prompts ────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """\
-You are a senior equity research analyst. Analyze the provided SEC filing excerpt
-and respond ONLY with a valid JSON object — no markdown, no explanation.
+_SYSTEM_PROMPT = (
+    "You are a senior equity research analyst. Analyze the provided SEC filing excerpt\n"
+    "and respond ONLY with a valid JSON object — no markdown, no explanation.\n\n"
+    "Required JSON structure:\n"
+    "{\n"
+    '  "what_changed": "1-3 sentence summary of the most important new information",\n'
+    '  "key_catalysts": ["catalyst 1", "catalyst 2", "catalyst 3"],\n'
+    '  "key_risks": ["risk 1", "risk 2", "risk 3"],\n'
+    '  "thesis_impact": "Strong | Stable | Weak | Broken",\n'
+    '  "suggested_action": "Buy | Hold | Reduce | Exit",\n'
+    '  "confidence_score": 0-100,\n'
+    + _EVIDENCE_SCHEMA +
+    "}\n\n"
+    "Definitions:\n"
+    "- thesis_impact: effect on a long investment thesis\n"
+    "  Strong=improved, Stable=unchanged, Weak=deteriorated, Broken=invalidated\n"
+    "- suggested_action: recommendation based solely on this filing\n"
+    "- confidence_score: 0=complete uncertainty, 100=very high conviction\n"
+)
 
-Required JSON structure:
-{
-  "what_changed": "1-3 sentence summary of the most important new information",
-  "key_catalysts": ["catalyst 1", "catalyst 2", "catalyst 3"],
-  "key_risks": ["risk 1", "risk 2", "risk 3"],
-  "thesis_impact": "Strong | Stable | Weak | Broken",
-  "suggested_action": "Buy | Hold | Reduce | Exit",
-  "confidence_score": 0-100
-}
-
-Definitions:
-- thesis_impact: effect on a long investment thesis
-  Strong = meaningfully improved, Stable = unchanged, Weak = deteriorated, Broken = invalidated
-- suggested_action: portfolio recommendation based solely on this filing
-- confidence_score: 0 = complete uncertainty, 100 = very high conviction
-"""
-
-_COMPARISON_SYSTEM_PROMPT = """\
-You are a senior equity research analyst. You are given TWO consecutive filings
-of the same type for the same company: the CURRENT filing and the PREVIOUS filing.
-
-Compare them carefully and respond ONLY with a valid JSON object — no markdown, no explanation.
-
-Required JSON structure:
-{
-  "what_changed": "1-3 sentence summary of the most important new information in the CURRENT filing",
-  "key_catalysts": ["catalyst 1", "catalyst 2", "catalyst 3"],
-  "key_risks": ["risk 1", "risk 2", "risk 3"],
-  "thesis_impact": "Strong | Stable | Weak | Broken",
-  "suggested_action": "Buy | Hold | Reduce | Exit",
-  "confidence_score": 0-100,
-  "comparison": {
-    "what_improved": ["specific improvement 1", "specific improvement 2"],
-    "what_weakened": ["specific deterioration 1", "specific deterioration 2"],
-    "new_concerns": ["new risk not present in previous filing"],
-    "new_catalysts": ["new positive catalyst not present in previous filing"],
-    "revenue_growth_trend": "improving | stable | declining",
-    "margin_trend": "improving | stable | declining",
-    "cash_trend": "improving | stable | declining",
-    "debt_trend": "improving | stable | declining",
-    "management_tone": "positive | neutral | cautious | negative",
-    "guidance_trend": "raised | maintained | lowered | withdrawn | not_mentioned"
-  }
-}
-
-Definitions:
-- thesis_impact, suggested_action, confidence_score: based on the CURRENT filing
-- debt_trend: improving = debt reduced or balance sheet strengthened
-- management_tone: overall tone of the language in the current filing vs previous
-- what_improved / what_weakened: specific, concrete observations with numbers where possible
-- new_concerns / new_catalysts: items present in CURRENT filing but NOT in PREVIOUS filing
-"""
+_COMPARISON_SYSTEM_PROMPT = (
+    "You are a senior equity research analyst. You are given TWO consecutive filings\n"
+    "of the same type for the same company: the CURRENT filing and the PREVIOUS filing.\n\n"
+    "Compare them carefully and respond ONLY with a valid JSON object — no markdown, no explanation.\n\n"
+    "Required JSON structure:\n"
+    "{\n"
+    '  "what_changed": "1-3 sentence summary of the most important new information in the CURRENT filing",\n'
+    '  "key_catalysts": ["catalyst 1", "catalyst 2", "catalyst 3"],\n'
+    '  "key_risks": ["risk 1", "risk 2", "risk 3"],\n'
+    '  "thesis_impact": "Strong | Stable | Weak | Broken",\n'
+    '  "suggested_action": "Buy | Hold | Reduce | Exit",\n'
+    '  "confidence_score": 0-100,\n'
+    '  "comparison": {\n'
+    '    "what_improved": ["specific improvement 1", "specific improvement 2"],\n'
+    '    "what_weakened": ["specific deterioration 1", "specific deterioration 2"],\n'
+    '    "new_concerns": ["new risk not present in previous filing"],\n'
+    '    "new_catalysts": ["new positive catalyst not present in previous filing"],\n'
+    '    "revenue_growth_trend": "improving | stable | declining",\n'
+    '    "margin_trend": "improving | stable | declining",\n'
+    '    "cash_trend": "improving | stable | declining",\n'
+    '    "debt_trend": "improving | stable | declining",\n'
+    '    "management_tone": "positive | neutral | cautious | negative",\n'
+    '    "guidance_trend": "raised | maintained | lowered | withdrawn | not_mentioned"\n'
+    "  },\n"
+    + _EVIDENCE_SCHEMA +
+    "}\n\n"
+    "Definitions:\n"
+    "- thesis_impact, suggested_action, confidence_score: based on the CURRENT filing\n"
+    "- debt_trend: improving = debt reduced or balance sheet strengthened\n"
+    "- management_tone: tone of CURRENT filing language vs PREVIOUS filing\n"
+    "- what_improved / what_weakened: specific, concrete, with numbers where possible\n"
+    "- For evidence: previous_value and delta MUST use PREVIOUS filing data for comparison\n"
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -192,7 +281,7 @@ def _error_result(msg: str) -> AnalysisResult:
 
 
 def _result_to_dict(r: AnalysisResult) -> dict:
-    """Serialise for the cache — drop transient / non-serialisable fields."""
+    """Serialise for the cache — drop transient flags, keep evidence."""
     d = asdict(r)
     for key in ("is_cached", "error", "comparison"):
         d.pop(key, None)
@@ -200,13 +289,16 @@ def _result_to_dict(r: AnalysisResult) -> dict:
 
 
 def _dict_to_cached_result(d: dict) -> AnalysisResult:
-    """Re-hydrate a cached dict into an AnalysisResult (no comparison data)."""
-    _skip = {"is_cached", "error", "cached_at", "comparison"}
-    d = {
+    """Re-hydrate a cached dict. Evidence items are reconstructed; no comparison data."""
+    _skip = {"is_cached", "error", "cached_at", "comparison", "evidence"}
+    # Reconstruct evidence list
+    evidence = evidence_from_list(d.get("evidence") or [])
+    # Filter remaining fields
+    filtered = {
         k: v for k, v in d.items()
         if k in AnalysisResult.__dataclass_fields__ and k not in _skip
     }
-    return AnalysisResult(**d, is_cached=True, error=None)
+    return AnalysisResult(**filtered, is_cached=True, error=None, evidence=evidence)
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -218,16 +310,16 @@ def analyze_filing(
     st_secrets=None,
     demo_mode:            bool = False,
     cache_key:            str | None = None,
-    previous_filing_url:  str | None = None,   # URL of the prior same-type filing
-    previous_cache_key:   str | None = None,   # accession of prior filing (optional)
+    previous_filing_url:  str | None = None,
+    previous_cache_key:   str | None = None,
 ) -> AnalysisResult:
     """
     Analyse a filing and return a structured AnalysisResult.
 
-    When previous_filing_url is supplied, uses an extended prompt that
-    compares both filings and populates result.comparison.
+    Evidence Grounding is always requested — every trend claim is backed by
+    a quote, metric, section reference, and confidence level.
 
-    Never raises — all failures are captured in result.error.
+    Never raises — all failures captured in result.error.
     """
 
     # ── 1. Demo mode ──────────────────────────────────────────────────────────
@@ -256,7 +348,7 @@ def analyze_filing(
             "Or enable Demo Mode to test the UI."
         )
 
-    # ── 5. Fetch current filing text ──────────────────────────────────────────
+    # ── 5. Fetch current filing ───────────────────────────────────────────────
     try:
         filing_text = fetch_filing_text(filing_url)
     except FilingTooLargeError as exc:
@@ -264,36 +356,31 @@ def analyze_filing(
     except FetchError as exc:
         return _error_result(f"Could not fetch filing text: {exc}")
 
-    # ── 5b. Optionally fetch previous filing for comparison ───────────────────
+    # ── 5b. Optionally fetch previous filing ──────────────────────────────────
     prev_text: str | None = None
     if previous_filing_url:
         try:
-            prev_text = fetch_filing_text(
-                previous_filing_url,
-                max_chars=PREV_MAX_CHARS,
-            )
+            prev_text = fetch_filing_text(previous_filing_url, max_chars=PREV_MAX_CHARS)
         except (FetchError, FilingTooLargeError):
-            # Comparison not available — fall back to standard single-filing analysis
-            prev_text = None
+            prev_text = None  # fall back to single-filing analysis
 
-    # ── 6. Call OpenAI ────────────────────────────────────────────────────────
+    # ── 6. Build prompt ───────────────────────────────────────────────────────
     use_comparison = prev_text is not None
     system_prompt  = _COMPARISON_SYSTEM_PROMPT if use_comparison else _SYSTEM_PROMPT
 
     if use_comparison:
         user_prompt = (
-            f"Company: {company_name}\n"
-            f"Filing type: {form_type}\n\n"
+            f"Company: {company_name}\nFiling type: {form_type}\n\n"
             f"--- CURRENT {form_type} EXCERPT ---\n{filing_text}\n\n"
             f"--- PREVIOUS {form_type} EXCERPT ---\n{prev_text}"
         )
     else:
         user_prompt = (
-            f"Company: {company_name}\n"
-            f"Filing type: {form_type}\n\n"
+            f"Company: {company_name}\nFiling type: {form_type}\n\n"
             f"--- FILING EXCERPT ---\n{filing_text}"
         )
 
+    # ── 7. Call OpenAI ────────────────────────────────────────────────────────
     try:
         from openai import OpenAI
 
@@ -305,19 +392,22 @@ def analyze_filing(
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=1200,   # slightly more room for the comparison object
+            max_tokens=1800,   # room for evidence + comparison + core fields
         )
 
         raw_json = response.choices[0].message.content or "{}"
         data     = json.loads(raw_json)
 
-        # Parse optional comparison block
+        # Parse comparison block (comparison mode only)
         comparison: FilingComparison | None = None
         if use_comparison and "comparison" in data:
             try:
                 comparison = comparison_from_dict(data["comparison"])
             except Exception:
                 comparison = None
+
+        # Parse evidence block (always requested)
+        evidence = evidence_from_list(data.get("evidence") or [])
 
         result = AnalysisResult(
             what_changed=data.get("what_changed", "No summary returned."),
@@ -327,13 +417,12 @@ def analyze_filing(
             suggested_action=data.get("suggested_action", "Hold"),
             confidence_score=int(data.get("confidence_score", 0)),
             comparison=comparison,
+            evidence=evidence,
         )
 
-        # Cache and count (only successful live results)
         if cache_key:
             save_to_cache(cache_key, _result_to_dict(result))
         increment_usage()
-
         return result
 
     except Exception as exc:
@@ -348,9 +437,8 @@ def analyze_filing(
                 confidence_score=demo.confidence_score,
                 is_demo=True,
                 comparison=demo.comparison,
-                error=(
-                    "OpenAI quota exceeded — showing demo analysis. "
-                    "Check billing at platform.openai.com."
-                ),
+                evidence=demo.evidence,
+                error="OpenAI quota exceeded — showing demo analysis. "
+                      "Check billing at platform.openai.com.",
             )
         return _error_result(f"OpenAI error: {exc}")
