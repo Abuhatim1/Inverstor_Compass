@@ -2,7 +2,7 @@
   "VCYT": {
     "ticker": "VCYT",
     "company_name": "VERACYTE, INC.",
-    "rationale": "تحديث استثنائي — TrueMRD يحصل على تغطية Medicare Veracyte (NASDAQ: VCYT) | تاريخ الخبر: 15 مايو 2026 | السعر الجديد: $42 (+9.42%) | المصدر: Investing.com / Reuters نقطة التحوّل المنتظرة وصلت — أحد أكبر محفزات الاستثمار في القصة تحقق رسمياً الحقائق الجوهرية من الخبر (15 مايو 2026) النقطة",
+    "rationale": "خبر تغطية TrueMRD هو نقطة تحوّل جوهرية في قصة الاستثمار. حتى الآن كان TrueMRD \"أمل مستقبلي\" - منتج واعد قيد التطوير اشترته الشركة من C2i Genomics بمبلغ كبير وأنفقت عليه استثمارات ضخمة. اليوم أصبح \"محرك إيرادات نشط\" بموافقة دفع مؤكدة من أكبر مدفوع في أمريكا.",
     "thesis_drivers": [],
     "expected_value_drivers": [],
     "expected_catalysts": [],
@@ -44,10 +44,10 @@
     "drift_summary": "",
     "source_type": "Imported",
     "imported_from": "VCYT TrueMRD Medicare Coverage Update.docx",
-    "imported_at": "2026-05-28T14:06:36",
+    "imported_at": "2026-05-28T14:32:13",
     "import_source_kind": "DOCX",
     "created_at": "2026-05-28",
-    "updated_at": "2026-05-28T14:07:22.793193",
+    "updated_at": "2026-05-28T14:32:46.394352",
     "last_evaluated": "",
     "evaluations_count": 0
   }
