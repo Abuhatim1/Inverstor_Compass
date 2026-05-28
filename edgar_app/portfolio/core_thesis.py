@@ -198,6 +198,13 @@ class CoreThesis:
     drift_detected:          bool  = False
     drift_summary:           str   = ""
 
+    # ── Provenance ──────────────────────────────────────────────────────────
+    # "Manual" = hand-authored in the UI; "Imported" = extracted from a doc
+    source_type:             str   = "Manual"
+    imported_from:           str   = ""   # original filename
+    imported_at:             str   = ""   # ISO datetime
+    import_source_kind:      str   = ""   # "PDF" | "DOCX" | "TXT"
+
     # ── Audit ────────────────────────────────────────────────────────────────
     created_at:              str   = ""
     updated_at:              str   = ""

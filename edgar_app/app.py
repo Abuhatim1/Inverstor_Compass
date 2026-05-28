@@ -13,6 +13,7 @@ Structure:
 
 import sys
 import os
+from datetime import datetime
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -1609,7 +1610,12 @@ def render_thesis_memory_tab() -> None:
         THESIS_STATUS_BADGE, THESIS_STATUS_BROKEN,
         THESIS_STATUS_STABLE, THESIS_STATUS_STRENGTHENING,
         THESIS_STATUS_WEAKENING, TIME_HORIZONS,
+        ThesisImportError,
+        build_preview_thesis,
         delete_core_thesis, delete_risk_item, load_all_core_theses, load_holdings,
+        extract_text_from_document, extract_thesis_from_text,
+        save_core_thesis,
+        thesis_preview_summary,
         upsert_core_thesis_fields, upsert_risk_item,
     )
 
@@ -1665,6 +1671,17 @@ def render_thesis_memory_tab() -> None:
             "investment case. Review CIO commentary below.",
             icon="🧭",
         )
+
+    # ── 📥 Import Thesis From Report ──────────────────────────────────────────
+    _render_thesis_import_section(
+        holdings=holdings, existing_theses=theses,
+        extract_text=extract_text_from_document,
+        extract_thesis=extract_thesis_from_text,
+        build_preview=build_preview_thesis,
+        preview_summary_fn=thesis_preview_summary,
+        save_thesis=save_core_thesis,
+        ImportError_=ThesisImportError,
+    )
     st.divider()
 
     # ── Per-holding editor cards ──────────────────────────────────────────────
@@ -1714,6 +1731,18 @@ def render_thesis_memory_tab() -> None:
                         + (f" · Horizon: {c.time_horizon}" if c.time_horizon else "")
                     )
 
+            # ── Provenance badge (Imported vs Manual) ───────────────────────
+            if c is not None:
+                if c.source_type == "Imported" and c.imported_from:
+                    src_kind = c.import_source_kind or "doc"
+                    imp_date = (c.imported_at or "")[:10] or "—"
+                    st.caption(
+                        f"📥 **User-authored / imported** from `{c.imported_from}` "
+                        f"({src_kind}) on {imp_date}"
+                    )
+                else:
+                    st.caption("✍️ **User-authored** (manual entry)")
+
             # ── CIO Commentary + drift ──────────────────────────────────────
             if c is not None:
                 if c.cio_commentary:
@@ -1762,6 +1791,444 @@ def render_thesis_memory_tab() -> None:
                     expanded=False,
                 ):
                     _render_validation_events_section(c, badge_map=EVENT_BADGE)
+
+
+def _render_thesis_import_section(
+    *, holdings, existing_theses,
+    extract_text, extract_thesis, build_preview, preview_summary_fn,
+    save_thesis, ImportError_,
+) -> None:
+    """📥 Import Thesis From Report — upload PDF/DOCX/TXT and extract via AI."""
+    PENDING_KEY = "pending_thesis_import"
+
+    with st.expander("📥 Import Thesis From Report", expanded=False):
+        st.caption(
+            "Upload an investment research note (**PDF**, **DOCX**, or **TXT**) "
+            "and the system will extract the thesis fields — drivers, "
+            "catalysts, risks, scenarios, valuation, risk/return matrix — "
+            "for you to review and edit before saving. You stay in control: "
+            "nothing is auto-applied to your holdings."
+        )
+
+        pending = st.session_state.get(PENDING_KEY)
+
+        # ── No pending import → show upload form ─────────────────────────
+        if pending is None:
+            tickers = sorted(holdings.keys())
+            if not tickers:
+                st.info("Add at least one holding first.")
+                return
+
+            ic1, ic2 = st.columns([1, 2])
+            with ic1:
+                t_choice = st.selectbox(
+                    "Holding", tickers, key="import_ticker_choice",
+                    help="Pick the holding this research note relates to.",
+                )
+            with ic2:
+                uploaded = st.file_uploader(
+                    "Research document",
+                    type=["pdf", "docx", "txt", "md"],
+                    accept_multiple_files=False,
+                    key="thesis_upload",
+                    help="PDF, DOCX, TXT, or Markdown · max 8 MB",
+                )
+
+            extract_clicked = st.button(
+                "🤖 Extract Thesis from Document", type="primary",
+                use_container_width=True,
+                disabled=(uploaded is None),
+            )
+            if extract_clicked and uploaded is not None:
+                ticker_sel = t_choice
+                holding    = holdings[ticker_sel]
+                try:
+                    with st.spinner("Extracting text from document…"):
+                        text, kind = extract_text(uploaded.getvalue(), uploaded.name)
+                    with st.spinner(
+                        "AI is reading the document and structuring the thesis "
+                        "(this can take 10-30 seconds)…"
+                    ):
+                        # Pass st.secrets so import matches analyzer's API-key
+                        # resolution path (env first, then st.secrets fallback).
+                        try:
+                            _secrets = st.secrets
+                        except Exception:
+                            _secrets = None
+                        extracted = extract_thesis(
+                            text, ticker_sel, holding.company_name,
+                            st_secrets=_secrets,
+                        )
+                    preview = build_preview(
+                        ticker_sel, holding.company_name, extracted,
+                        filename=uploaded.name, source_kind=kind,
+                    )
+                    st.session_state[PENDING_KEY] = {
+                        "ticker":   ticker_sel,
+                        "filename": uploaded.name,
+                        "kind":     kind,
+                        "preview":  preview,
+                    }
+                    st.rerun()
+                except ImportError_ as e:
+                    st.error(f"Import failed: {e}", icon="❌")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Unexpected error during import: {e}", icon="❌")
+            return
+
+        # ── Pending import → preview + save / discard ────────────────────
+        preview  = pending["preview"]
+        ticker   = pending["ticker"]
+        filename = pending["filename"]
+        kind     = pending["kind"]
+        existing = existing_theses.get(ticker)
+
+        st.success(
+            f"✅ Extracted thesis for **{ticker}** from `{filename}` ({kind}). "
+            "Review the preview below before saving.",
+            icon="📥",
+        )
+
+        # Preview summary metrics (read-only counters above the form)
+        summ = preview_summary_fn(preview)
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("Drivers found",     summ["drivers_count"])
+        sc1.metric("Catalysts found",   summ["catalysts_count"])
+        sc2.metric("Risks found",       summ["risks_count"])
+        sc2.metric("Risk matrix rows",  summ["risk_matrix_count"])
+        sc3.metric("Bull / Base / Bear",
+                   f"{summ['bull_prob']:.0f} / {summ['base_prob']:.0f} / "
+                   f"{summ['bear_prob']:.0f}")
+
+        # ── Overwrite confirmation (outside the form, no submit needed) ──
+        confirm_ok = True
+        if existing is not None:
+            st.warning(
+                f"⚠️ A thesis already exists for **{ticker}**. Saving will "
+                f"replace it (live state — events log, conviction history, "
+                f"scenario probabilities — will be reset). Current source: "
+                f"**{existing.source_type}**"
+                + (f" · `{existing.imported_from}`"
+                   if existing.imported_from else "")
+                + ".",
+                icon="🚨",
+            )
+            confirm_ok = st.checkbox(
+                f"Yes, overwrite the existing thesis for {ticker}",
+                key=f"confirm_overwrite_{ticker}",
+            )
+
+        st.caption(
+            "✏️ **Review and edit every field below before saving.** "
+            "Nothing has been written to your holdings yet. After saving, "
+            "you can still fine-tune the thesis in the holding's card below."
+        )
+
+        cancel_clicked = st.button(
+            "❌ Discard import", key="discard_import", help="Throw away the "
+            "extracted preview without saving.",
+        )
+        if cancel_clicked:
+            del st.session_state[PENDING_KEY]
+            st.rerun()
+
+        # ── Editable preview form ────────────────────────────────────────
+        saved = _render_import_preview_form(
+            preview=preview, ticker=ticker, confirm_ok=confirm_ok,
+            save_thesis=save_thesis, filename=filename, kind=kind,
+        )
+        if saved:
+            del st.session_state[PENDING_KEY]
+            st.success(
+                f"✅ Imported thesis saved for {ticker}. Open the holding "
+                "card below to add events, conviction history, or further "
+                "fine-tune any field.",
+                icon="📜",
+            )
+            st.rerun()
+
+
+def _lines_to_list(s: str) -> list[str]:
+    return [ln.strip() for ln in (s or "").splitlines() if ln.strip()]
+
+
+def _list_to_lines(xs) -> str:
+    return "\n".join(xs or [])
+
+
+def _render_import_preview_form(
+    *, preview, ticker: str, confirm_ok: bool,
+    save_thesis, filename: str, kind: str,
+) -> bool:
+    """Editable form bound to the pending-import preview. Returns True if
+    the user submitted and the thesis was saved."""
+    from portfolio import (
+        RISK_CATEGORIES, RISK_KINDS, RISK_SEVERITIES, RISK_STATUSES,
+        TIME_HORIZONS, normalize_scenario_probabilities,
+    )
+    from portfolio.core_thesis import RiskMatrixItem, ScenarioCase
+
+    with st.form(f"import_preview_form_{ticker}", clear_on_submit=False):
+        st.markdown("##### 📋 Edit extracted thesis")
+
+        rationale = st.text_area(
+            "Rationale (1-3 sentences)", value=preview.rationale,
+            height=80, key=f"imp_rationale_{ticker}",
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            drivers_txt = st.text_area(
+                "Thesis drivers (one per line)",
+                value=_list_to_lines(preview.thesis_drivers),
+                height=120, key=f"imp_drivers_{ticker}",
+            )
+            catalysts_txt = st.text_area(
+                "Expected catalysts (one per line)",
+                value=_list_to_lines(preview.expected_catalysts),
+                height=100, key=f"imp_catalysts_{ticker}",
+            )
+            risks_txt = st.text_area(
+                "Key risks (one per line)",
+                value=_list_to_lines(preview.key_risks),
+                height=100, key=f"imp_risks_{ticker}",
+            )
+        with c2:
+            value_drivers_txt = st.text_area(
+                "Expected value drivers (one per line)",
+                value=_list_to_lines(preview.expected_value_drivers),
+                height=120, key=f"imp_value_drivers_{ticker}",
+            )
+            mgmt_txt = st.text_area(
+                "Mgmt execution assumptions (one per line)",
+                value=_list_to_lines(preview.management_execution_assumptions),
+                height=100, key=f"imp_mgmt_{ticker}",
+            )
+            try:
+                horizon_idx = TIME_HORIZONS.index(preview.time_horizon)
+            except ValueError:
+                horizon_idx = 1
+            time_horizon = st.selectbox(
+                "Time horizon", TIME_HORIZONS, index=horizon_idx,
+                key=f"imp_horizon_{ticker}",
+            )
+
+        c3, c4 = st.columns(2)
+        with c3:
+            expected_moat = st.text_input(
+                "Expected moat", value=preview.expected_moat,
+                key=f"imp_moat_{ticker}",
+            )
+            expected_margin_profile = st.text_input(
+                "Expected margin profile", value=preview.expected_margin_profile,
+                key=f"imp_margin_{ticker}",
+            )
+        with c4:
+            expected_management = st.text_input(
+                "Expected management behavior", value=preview.expected_management,
+                key=f"imp_mgmtbeh_{ticker}",
+            )
+            expected_growth_profile = st.text_input(
+                "Expected growth profile", value=preview.expected_growth_profile,
+                key=f"imp_growth_{ticker}",
+            )
+
+        valuation_thesis = st.text_input(
+            "Valuation thesis (one-liner)", value=preview.valuation_thesis,
+            key=f"imp_val_{ticker}",
+        )
+
+        # Scenarios
+        st.markdown("##### 🎯 Bull / Base / Bear scenarios")
+        st.caption(
+            "Probabilities will be auto-rescaled to sum to 100% on save."
+        )
+        scn_inputs: list[dict] = []
+        for label, scn, default_prob in [
+            ("🐂 Bull",  preview.scenario_bull, 25),
+            ("⚖️ Base",  preview.scenario_base, 55),
+            ("🐻 Bear",  preview.scenario_bear, 20),
+        ]:
+            with st.container(border=True):
+                st.markdown(f"**{label} case**")
+                sc1, sc2 = st.columns([3, 1])
+                with sc1:
+                    desc = st.text_area(
+                        f"{label} — description", value=scn.description,
+                        height=70, key=f"imp_{label}_desc_{ticker}",
+                        label_visibility="collapsed",
+                    )
+                with sc2:
+                    prob = st.number_input(
+                        f"{label} probability (%)", min_value=0.0, max_value=100.0,
+                        value=float(scn.probability or default_prob), step=1.0,
+                        key=f"imp_{label}_prob_{ticker}",
+                    )
+                tgt = st.text_input(
+                    f"{label} — valuation target",
+                    value=scn.valuation_target,
+                    key=f"imp_{label}_tgt_{ticker}",
+                )
+                assumptions_txt = st.text_area(
+                    f"{label} — key assumptions (one per line)",
+                    value=_list_to_lines(scn.key_assumptions),
+                    height=70, key=f"imp_{label}_assum_{ticker}",
+                )
+                scn_inputs.append({
+                    "description":      desc,
+                    "probability":      prob,
+                    "valuation_target": tgt,
+                    "key_assumptions":  _lines_to_list(assumptions_txt),
+                })
+
+        # Risk matrix
+        st.markdown("##### 🛡️ Risk / Return matrix")
+        risk_inputs: list[dict] = []
+        if not preview.risk_matrix:
+            st.caption("_No risk-matrix rows were extracted. You can add them "
+                       "from the holding's card after saving._")
+        for idx, item in enumerate(preview.risk_matrix):
+            with st.expander(
+                f"{item.kind}: {item.name} "
+                f"({item.severity} · {item.current_status})",
+                expanded=(idx == 0),
+            ):
+                rc1, rc2, rc3, rc4 = st.columns(4)
+                with rc1:
+                    name = st.text_input(
+                        "Name", value=item.name,
+                        key=f"imp_risk_{idx}_name_{ticker}",
+                    )
+                with rc2:
+                    cat_idx = (RISK_CATEGORIES.index(item.category)
+                               if item.category in RISK_CATEGORIES else 0)
+                    category = st.selectbox(
+                        "Category", RISK_CATEGORIES, index=cat_idx,
+                        key=f"imp_risk_{idx}_cat_{ticker}",
+                    )
+                with rc3:
+                    kind_idx = (RISK_KINDS.index(item.kind)
+                                if item.kind in RISK_KINDS else 0)
+                    risk_kind = st.selectbox(
+                        "Kind", RISK_KINDS, index=kind_idx,
+                        key=f"imp_risk_{idx}_kind_{ticker}",
+                    )
+                with rc4:
+                    sev_idx = (RISK_SEVERITIES.index(item.severity)
+                               if item.severity in RISK_SEVERITIES else 1)
+                    severity = st.selectbox(
+                        "Severity", RISK_SEVERITIES, index=sev_idx,
+                        key=f"imp_risk_{idx}_sev_{ticker}",
+                    )
+                rc5, rc6 = st.columns([1, 3])
+                with rc5:
+                    st_idx = (RISK_STATUSES.index(item.current_status)
+                              if item.current_status in RISK_STATUSES else 1)
+                    status = st.selectbox(
+                        "Status", RISK_STATUSES, index=st_idx,
+                        key=f"imp_risk_{idx}_st_{ticker}",
+                    )
+                with rc6:
+                    impact = st.text_input(
+                        "Expected impact", value=item.expected_impact,
+                        key=f"imp_risk_{idx}_imp_{ticker}",
+                    )
+                ewi_txt = st.text_area(
+                    "Early-warning indicators (one per line)",
+                    value=_list_to_lines(item.early_warning_indicators),
+                    height=70, key=f"imp_risk_{idx}_ewi_{ticker}",
+                )
+                action = st.text_input(
+                    "Required action if this materializes",
+                    value=item.required_action,
+                    key=f"imp_risk_{idx}_act_{ticker}",
+                )
+                hedge = st.text_input(
+                    "Possible hedge (optional)", value=item.possible_hedge,
+                    key=f"imp_risk_{idx}_hdg_{ticker}",
+                )
+                risk_inputs.append({
+                    "original_id":              item.id,
+                    "name":                     name,
+                    "category":                 category,
+                    "kind":                     risk_kind,
+                    "severity":                 severity,
+                    "current_status":           status,
+                    "expected_impact":          impact,
+                    "early_warning_indicators": _lines_to_list(ewi_txt),
+                    "required_action":          action,
+                    "possible_hedge":           hedge,
+                })
+
+        submitted = st.form_submit_button(
+            f"💾 Save imported thesis for {ticker}",
+            type="primary", use_container_width=True,
+            disabled=(not confirm_ok),
+        )
+
+    if not submitted:
+        return False
+    if not confirm_ok:
+        st.error("Please confirm the overwrite before saving.", icon="⚠️")
+        return False
+
+    # Build the final CoreThesis from edited values (preserving provenance)
+    p_bull, p_base, p_bear = normalize_scenario_probabilities(
+        scn_inputs[0]["probability"], scn_inputs[1]["probability"],
+        scn_inputs[2]["probability"],
+    )
+    final = preview  # mutate in place; provenance fields already set
+    final.rationale                        = rationale.strip()
+    final.thesis_drivers                   = _lines_to_list(drivers_txt)
+    final.expected_value_drivers           = _lines_to_list(value_drivers_txt)
+    final.expected_catalysts               = _lines_to_list(catalysts_txt)
+    final.key_risks                        = _lines_to_list(risks_txt)
+    final.management_execution_assumptions = _lines_to_list(mgmt_txt)
+    final.expected_moat                    = expected_moat.strip()
+    final.expected_management              = expected_management.strip()
+    final.expected_margin_profile          = expected_margin_profile.strip()
+    final.expected_growth_profile          = expected_growth_profile.strip()
+    final.time_horizon                     = time_horizon
+    final.valuation_thesis                 = valuation_thesis.strip()
+    final.scenario_bull = ScenarioCase(
+        description=scn_inputs[0]["description"], probability=p_bull,
+        valuation_target=scn_inputs[0]["valuation_target"],
+        key_assumptions=scn_inputs[0]["key_assumptions"],
+    )
+    final.scenario_base = ScenarioCase(
+        description=scn_inputs[1]["description"], probability=p_base,
+        valuation_target=scn_inputs[1]["valuation_target"],
+        key_assumptions=scn_inputs[1]["key_assumptions"],
+    )
+    final.scenario_bear = ScenarioCase(
+        description=scn_inputs[2]["description"], probability=p_bear,
+        valuation_target=scn_inputs[2]["valuation_target"],
+        key_assumptions=scn_inputs[2]["key_assumptions"],
+    )
+    new_risks: list[RiskMatrixItem] = []
+    for r in risk_inputs:
+        if not r["name"].strip():
+            continue
+        new_risks.append(RiskMatrixItem(
+            id=r["original_id"] or "",
+            name=r["name"].strip(),
+            category=r["category"], kind=r["kind"],
+            severity=r["severity"], current_status=r["current_status"],
+            expected_impact=r["expected_impact"].strip(),
+            early_warning_indicators=r["early_warning_indicators"],
+            required_action=r["required_action"].strip(),
+            possible_hedge=r["possible_hedge"].strip(),
+        ))
+    final.risk_matrix = new_risks
+    # Re-assert provenance (defensive — should already be set)
+    final.source_type        = "Imported"
+    final.imported_from      = filename
+    final.import_source_kind = kind
+    if not final.imported_at:
+        final.imported_at = datetime.now().isoformat(timespec="seconds")
+
+    save_thesis(final)
+    return True
 
 
 def _render_scenario_bar(core) -> None:

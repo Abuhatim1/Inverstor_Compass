@@ -135,6 +135,14 @@ from .core_thesis import (
     upsert_core_thesis_fields,
     upsert_risk_item,
 )
+from .thesis_importer import (
+    ImportError_ as ThesisImportError,
+    build_preview_thesis,
+    extract_text as extract_text_from_document,
+    extract_thesis_from_text,
+    normalize_scenario_probabilities,
+    preview_summary as thesis_preview_summary,
+)
 
 __all__ = [
     # Research Watchlist (state)
@@ -234,4 +242,11 @@ __all__ = [
     "delete_risk_item",
     "evaluate_thesis_against_analysis",
     "apply_evaluation",
+    # Thesis import (PDF / DOCX / TXT → CoreThesis)
+    "ThesisImportError",
+    "extract_text_from_document",
+    "extract_thesis_from_text",
+    "build_preview_thesis",
+    "thesis_preview_summary",
+    "normalize_scenario_probabilities",
 ]
