@@ -1545,7 +1545,7 @@ def render_holdings_tab() -> None:
     """Actual Holdings + Transactions tab."""
     from portfolio import (
         ASSET_TYPES, CURRENCIES, DEFAULT_SECTORS, MARKETS,
-        delete_holding,
+        delete_holding, soft_delete_holding,
         load_holdings, load_portfolio, load_transactions,
         portfolio_weights, record_transaction,
         total_cost_basis, total_market_value,
@@ -1566,11 +1566,12 @@ def render_holdings_tab() -> None:
 
     # ── Summary metrics ───────────────────────────────────────────────────────
     if holdings:
-        mv     = total_market_value(holdings)
-        cb     = total_cost_basis(holdings)
-        pnl    = mv - cb
+        mv      = total_market_value(holdings)
+        cb      = total_cost_basis(holdings)
+        pnl     = mv - cb
         pnl_pct = (pnl / cb * 100.0) if cb > 0 else 0.0
-        m1, m2, m3, m4 = st.columns(4)
+        _last_ref = st.session_state.get("mp_last_refresh") or "—"
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Positions", len(holdings))
         m2.metric("Market Value", f"${mv:,.2f}")
         m3.metric("Cost Basis", f"${cb:,.2f}")
@@ -1579,6 +1580,7 @@ def render_holdings_tab() -> None:
             f"${pnl:,.2f}",
             delta=f"{pnl_pct:+.2f}%",
         )
+        m5.metric("Last Price Refresh", _last_ref)
     else:
         st.info(
             "No holdings yet. Use the **➕ Add Holding** form below, record a "
@@ -2076,6 +2078,199 @@ def render_holdings_tab() -> None:
                     st.session_state.pop("ah_validation", None)
                     st.toast(f"{ticker_key} added / updated in Holdings", icon="💼")
                     st.rerun()
+
+    # ── Edit / Delete Holding ─────────────────────────────────────────────────
+    st.divider()
+    with st.expander("🖊️ Edit / Delete Holding", expanded=False):
+        if not holdings:
+            st.info("No holdings yet — add one above.", icon="ℹ️")
+        else:
+            _ed_tickers = sorted(holdings.keys())
+
+            _ed_sel = st.selectbox(
+                "Select holding to edit or delete",
+                options=_ed_tickers,
+                key="ed_sel",
+                format_func=lambda t: f"{t}  —  {holdings[t].company_name}",
+            )
+            _ed_h = holdings[_ed_sel]
+
+            # When the user picks a different holding, clear stale form values
+            # so the new holding's data fills in via the value= defaults.
+            _prev_ed = st.session_state.get("_ed_prev_sel")
+            if _prev_ed != _ed_sel:
+                for _k in ("ed_tk", "ed_name", "ed_type", "ed_mkt", "ed_sec",
+                           "ed_cur", "ed_qty", "ed_cost", "ed_price",
+                           "ed_psrc", "ed_notes"):
+                    st.session_state.pop(_k, None)
+                st.session_state["_ed_prev_sel"] = _ed_sel
+
+            def _idx(lst: list, val, default: int = 0) -> int:
+                try:
+                    return lst.index(val)
+                except ValueError:
+                    return default
+
+            # ── Edit form ─────────────────────────────────────────────────
+            st.markdown("##### Edit fields")
+            with st.form("edit_holding_form", clear_on_submit=False):
+                ef1, ef2 = st.columns(2)
+                with ef1:
+                    ed_ticker = st.text_input(
+                        "Ticker / Asset ID",
+                        value=_ed_sel,
+                        key="ed_tk",
+                        help="Rename this holding by changing the ticker.",
+                    )
+                    ed_name = st.text_input(
+                        "Asset name",
+                        value=_ed_h.company_name,
+                        key="ed_name",
+                    )
+                    ed_type = st.selectbox(
+                        "Asset type", ASSET_TYPES,
+                        index=_idx(ASSET_TYPES, getattr(_ed_h, "asset_type", "Stock")),
+                        key="ed_type",
+                    )
+                    ed_market = st.selectbox(
+                        "Market", MARKETS,
+                        index=_idx(MARKETS, _ed_h.market),
+                        key="ed_mkt",
+                    )
+                    ed_sector = st.selectbox(
+                        "Sector", DEFAULT_SECTORS,
+                        index=_idx(DEFAULT_SECTORS, _ed_h.sector),
+                        key="ed_sec",
+                    )
+                with ef2:
+                    ed_currency = st.selectbox(
+                        "Currency", CURRENCIES,
+                        index=_idx(CURRENCIES, getattr(_ed_h, "currency", "USD")),
+                        key="ed_cur",
+                    )
+                    ed_qty = st.number_input(
+                        "Quantity",
+                        value=float(_ed_h.quantity),
+                        min_value=0.0, step=1.0, format="%.4f",
+                        key="ed_qty",
+                    )
+                    ed_cost = st.number_input(
+                        "Avg cost per unit",
+                        value=float(_ed_h.avg_cost),
+                        min_value=0.0, step=0.01, format="%.4f",
+                        key="ed_cost",
+                    )
+                    ed_price = st.number_input(
+                        "Current price per unit",
+                        value=float(_ed_h.current_price),
+                        min_value=0.0, step=0.01, format="%.4f",
+                        key="ed_price",
+                    )
+                    ed_psrc = st.selectbox(
+                        "Price source",
+                        ["yfinance", "manual"],
+                        index=0 if getattr(_ed_h, "price_source", "manual") == "yfinance" else 1,
+                        key="ed_psrc",
+                    )
+                ed_notes = st.text_input(
+                    "Notes (optional)",
+                    value=getattr(_ed_h, "notes", ""),
+                    key="ed_notes", max_chars=200,
+                )
+
+                if st.form_submit_button("💾 Save Changes", type="primary"):
+                    _errs = []
+                    ed_tk_clean = ed_ticker.strip().replace(" ", "_").upper()
+                    if not ed_tk_clean:
+                        _errs.append("Ticker / Asset ID cannot be empty.")
+                    if ed_qty < 0:
+                        _errs.append("Quantity must be ≥ 0.")
+                    if ed_cost < 0:
+                        _errs.append("Avg cost must be ≥ 0.")
+                    if ed_price < 0:
+                        _errs.append("Current price must be ≥ 0.")
+                    if _errs:
+                        for _e in _errs:
+                            st.error(_e)
+                    else:
+                        # Ticker rename — soft-delete old key first
+                        if ed_tk_clean != _ed_sel:
+                            soft_delete_holding(_ed_sel)
+                            st.session_state.pop("ed_sel", None)
+                            st.session_state.pop("_ed_prev_sel", None)
+                        upsert_holding(
+                            ticker=ed_tk_clean,
+                            company_name=ed_name.strip() or ed_tk_clean,
+                            market=ed_market,
+                            sector=ed_sector,
+                            quantity=ed_qty,
+                            avg_cost=ed_cost,
+                            current_price=ed_price,
+                            asset_type=ed_type,
+                            currency=ed_currency,
+                            has_ticker=getattr(_ed_h, "has_ticker", True),
+                            sec_linked=getattr(_ed_h, "sec_linked", False),
+                            purchase_date=getattr(_ed_h, "purchase_date", ""),
+                            notes=ed_notes,
+                            price_source=ed_psrc,
+                            price_date=date.today().isoformat(),
+                        )
+                        st.toast(f"✅ {ed_tk_clean} updated.", icon="💾")
+                        st.rerun()
+
+            # ── Delete section ────────────────────────────────────────────
+            st.divider()
+            st.markdown("##### Delete this holding")
+            st.warning(
+                f"Removing **{_ed_sel}** will delete it from your portfolio. "
+                "A backup copy will be saved automatically.",
+                icon="⚠️",
+            )
+
+            _del_cb = st.checkbox(
+                "I understand this will remove this holding from my portfolio",
+                key="del_confirm_cb",
+            )
+            _del_txt = st.text_input(
+                "Type the ticker exactly to confirm",
+                key="del_confirm_txt",
+                placeholder=f"Type  {_ed_sel}  here",
+            )
+            _also_thesis = st.checkbox(
+                "Also delete research / thesis data for this ticker",
+                key="del_also_thesis",
+                help=(
+                    "Removes the CoreThesis (investment thesis, risk matrix, "
+                    "scenarios) stored under this ticker. "
+                    "Watchlist analysis is not affected."
+                ),
+            )
+
+            _can_delete = (
+                _del_cb
+                and _del_txt.strip().upper() == _ed_sel.strip().upper()
+            )
+            if st.button(
+                f"🗑️ Confirm Delete — {_ed_sel}",
+                type="primary",
+                disabled=not _can_delete,
+                key="del_confirm_btn",
+            ):
+                soft_delete_holding(_ed_sel)
+                if _also_thesis:
+                    try:
+                        from portfolio import delete_core_thesis
+                        delete_core_thesis(_ed_sel)
+                    except Exception:
+                        pass
+                st.success(
+                    f"✅ **{_ed_sel}** removed from Holdings. "
+                    "A backup was saved to deleted_holdings.json."
+                )
+                for _k in ("del_confirm_cb", "del_confirm_txt",
+                           "del_also_thesis", "ed_sel", "_ed_prev_sel"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
 
     # ── Record Transaction form ───────────────────────────────────────────────
     with st.expander("🔁 Record Buy / Sell Transaction", expanded=False):
@@ -3820,42 +4015,42 @@ st.caption(
     "SEC filings · AI analysis · Portfolio state · Delta intelligence · Market prices"
 )
 
-(tab_command, tab_search, tab_upload, tab_market_intel,
- tab_watchlist, tab_holdings, tab_thesis, tab_decisions, tab_risk) = st.tabs([
-    "⚡ Command Center",
-    "🔍 Filing Search",
-    "📂 Upload Filing",
-    "🌐 Market Intel",
-    "🔬 Research Watchlist",
+(tab_holdings, tab_decisions, tab_risk, tab_command,
+ tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload) = st.tabs([
     "💼 Holdings",
-    "📜 Thesis Memory",
     "🎯 Decision Queue",
     "🛡️ Portfolio Risk",
+    "🧭 Command Center",
+    "📝 Thesis Memory",
+    "🌍 Market Intel",
+    "📄 Filing Search",
+    "🔬 Research Watchlist",
+    "📂 Upload Filing",
 ])
-
-with tab_command:
-    render_command_center_tab()
-
-with tab_watchlist:
-    render_portfolio_dashboard()
 
 with tab_holdings:
     render_holdings_tab()
 
-with tab_thesis:
-    render_thesis_memory_tab()
-
 with tab_decisions:
     render_decision_queue_tab()
 
-with tab_upload:
-    render_upload_tab()
+with tab_risk:
+    render_portfolio_risk_tab()
+
+with tab_command:
+    render_command_center_tab()
+
+with tab_thesis:
+    render_thesis_memory_tab()
 
 with tab_market_intel:
     render_market_intel_tab()
 
-with tab_risk:
-    render_portfolio_risk_tab()
+with tab_watchlist:
+    render_portfolio_dashboard()
+
+with tab_upload:
+    render_upload_tab()
 
 with tab_search:
     st.divider()

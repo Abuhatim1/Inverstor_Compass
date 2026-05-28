@@ -221,12 +221,55 @@ def upsert_holding(
 
 
 def delete_holding(ticker: str) -> bool:
+    """Hard delete — removes the holding with no backup."""
     holdings = load_holdings()
     if ticker in holdings:
         del holdings[ticker]
         save_holdings(holdings)
         return True
     return False
+
+
+_DELETED_HOLDINGS_FILE = os.path.join(_DIR, "deleted_holdings.json")
+
+
+def soft_delete_holding(ticker: str) -> bool:
+    """
+    Remove a holding from holdings.json and archive it in deleted_holdings.json
+    with a deletion timestamp.
+
+    Returns True if the holding existed and was removed, False otherwise.
+    Does NOT touch Research Watchlist, thesis data, or transaction history.
+    """
+    holdings = load_holdings()
+    if ticker not in holdings:
+        return False
+
+    # ── Archive ───────────────────────────────────────────────────────────────
+    try:
+        if os.path.exists(_DELETED_HOLDINGS_FILE):
+            with open(_DELETED_HOLDINGS_FILE, "r", encoding="utf-8") as f:
+                archive: list = json.load(f)
+            if not isinstance(archive, list):
+                archive = []
+        else:
+            archive = []
+    except (json.JSONDecodeError, OSError):
+        archive = []
+
+    entry = asdict(holdings[ticker])
+    entry["_deleted_at"]       = datetime.now().isoformat()
+    entry["_original_ticker"]  = ticker
+    archive.append(entry)
+
+    os.makedirs(_DIR, exist_ok=True)
+    with open(_DELETED_HOLDINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(archive, f, indent=2, ensure_ascii=False)
+
+    # ── Remove from live holdings ─────────────────────────────────────────────
+    del holdings[ticker]
+    save_holdings(holdings)
+    return True
 
 
 def update_current_price(ticker: str, price: float, source: str = "manual") -> bool:
