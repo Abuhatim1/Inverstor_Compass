@@ -1601,22 +1601,25 @@ def render_holdings_tab() -> None:
 
 
 def render_thesis_memory_tab() -> None:
-    """Thesis Memory Layer — author, edit, and track original investment theses."""
+    """Dynamic Thesis State Engine — strategic state models for each holding."""
     from portfolio import (
+        CONVICTION_BADGE, CONVICTION_FALLING, CONVICTION_RISING, CONVICTION_STABLE,
+        EVENT_BADGE,
+        RISK_CATEGORIES, RISK_KINDS, RISK_SEVERITIES, RISK_STATUSES,
         THESIS_STATUS_BADGE, THESIS_STATUS_BROKEN,
         THESIS_STATUS_STABLE, THESIS_STATUS_STRENGTHENING,
         THESIS_STATUS_WEAKENING, TIME_HORIZONS,
-        delete_core_thesis, load_all_core_theses, load_holdings,
-        upsert_core_thesis_fields,
+        delete_core_thesis, delete_risk_item, load_all_core_theses, load_holdings,
+        upsert_core_thesis_fields, upsert_risk_item,
     )
 
-    st.header("📜 Thesis Memory")
+    st.header("📜 Thesis Memory — Dynamic State Engine")
     st.caption(
-        "Capture the **original investment thesis** for every holding once. "
-        "The system then compares every new SEC filing against this stable "
-        "reference and tracks whether the thesis is **Strengthening**, "
-        "**Stable**, **Weakening**, or **Broken** — plus detects when the "
-        "company narrative drifts materially from your original case."
+        "Each holding is a **continuously monitored strategic state model**: "
+        "core thesis · scenarios (bull/base/bear) · risk/return matrix · "
+        "validation events · conviction trend. Every new filing reweights "
+        "scenarios, generates validation events, and updates conviction — "
+        "without overwriting your original investment intent."
     )
 
     holdings = load_holdings()
@@ -1684,8 +1687,8 @@ def render_thesis_memory_tab() -> None:
     for ticker, h in sorted(holdings.items(), key=_sort_key):
         c = theses.get(ticker)
         with st.container(border=True):
-            # Header row
-            hc1, hc2, hc3 = st.columns([2.5, 2, 1.5])
+            # ── Header row: identity · status · conviction trend ─────────────
+            hc1, hc2, hc3 = st.columns([2.5, 2, 2])
             with hc1:
                 st.markdown(f"### {ticker}")
                 st.caption(f"{h.company_name} · {h.sector} · {h.market}")
@@ -1700,12 +1703,18 @@ def render_thesis_memory_tab() -> None:
                         st.caption(f"Since: {c.last_status_change}")
             with hc3:
                 if c is not None:
+                    tr_icon, tr_lbl = CONVICTION_BADGE.get(
+                        c.conviction_trend, ("➖", "Stable"))
+                    st.markdown(
+                        f"**Conviction:** {c.last_conviction_score}/100 · "
+                        f"{tr_icon} {tr_lbl}"
+                    )
                     st.caption(
                         f"Evaluations: {c.evaluations_count}"
                         + (f" · Horizon: {c.time_horizon}" if c.time_horizon else "")
                     )
 
-            # CIO Commentary + drift
+            # ── CIO Commentary + drift ──────────────────────────────────────
             if c is not None:
                 if c.cio_commentary:
                     st.markdown(f"**🧑‍💼 CIO Commentary:** {c.cio_commentary}")
@@ -1717,12 +1726,15 @@ def render_thesis_memory_tab() -> None:
                         "for this ticker."
                     )
 
-            # ── Editor form ──
-            expander_label = (
-                "✏️ Edit Core Thesis" if c is not None
-                else "📜 Author Core Thesis"
+                # ── Scenario probability bar ────────────────────────────────
+                _render_scenario_bar(c)
+
+            # ── Sub-sections (expanders) ────────────────────────────────────
+            edit_label = (
+                "✏️ Core Thesis & Scenarios" if c is not None
+                else "📜 Author Core Thesis & Scenarios"
             )
-            with st.expander(expander_label, expanded=(c is None)):
+            with st.expander(edit_label, expanded=(c is None)):
                 _render_core_thesis_form(
                     ticker, h, c,
                     upsert_fn=upsert_core_thesis_fields,
@@ -1730,17 +1742,200 @@ def render_thesis_memory_tab() -> None:
                     time_horizons=TIME_HORIZONS,
                 )
 
+            if c is not None:
+                with st.expander(
+                    f"🛡️ Risk / Return Matrix ({len(c.risk_matrix)} item(s))",
+                    expanded=False,
+                ):
+                    _render_risk_matrix_section(
+                        ticker, c,
+                        upsert_fn=upsert_risk_item,
+                        delete_fn=delete_risk_item,
+                        categories=RISK_CATEGORIES,
+                        kinds=RISK_KINDS,
+                        severities=RISK_SEVERITIES,
+                        statuses=RISK_STATUSES,
+                    )
+
+                with st.expander(
+                    f"📅 Validation Events ({len(c.validation_events)})",
+                    expanded=False,
+                ):
+                    _render_validation_events_section(c, badge_map=EVENT_BADGE)
+
+
+def _render_scenario_bar(core) -> None:
+    """Compact bull/base/bear probability bar with values."""
+    bull = core.scenario_bull.probability
+    base = core.scenario_base.probability
+    bear = core.scenario_bear.probability
+    sc1, sc2, sc3 = st.columns(3)
+    sc1.markdown(f"📗 **Bull:** {bull:.0f}%")
+    sc2.markdown(f"📘 **Base:** {base:.0f}%")
+    sc3.markdown(f"📕 **Bear:** {bear:.0f}%")
+    sc1.progress(min(1.0, bull / 100.0))
+    sc2.progress(min(1.0, base / 100.0))
+    sc3.progress(min(1.0, bear / 100.0))
+
+
+def _render_validation_events_section(core, *, badge_map: dict) -> None:
+    """Read-only timeline of validation events (newest first)."""
+    events = list(core.validation_events or [])
+    if not events:
+        st.caption(
+            "No validation events recorded yet. Events are generated "
+            "automatically each time a filing is analysed for this ticker."
+        )
+        return
+    for ev in events[:20]:
+        icon, lbl = badge_map.get(ev.event_type, ("⚪", ev.event_type))
+        ts = ev.timestamp.replace("T", " ")[:16] if ev.timestamp else "—"
+        with st.container(border=True):
+            top1, top2 = st.columns([4, 1])
+            with top1:
+                st.markdown(f"{icon} **{lbl}** · {ev.title}")
+                if ev.detail:
+                    st.caption(ev.detail)
+                if ev.related_terms:
+                    st.caption(f"Terms: {', '.join(ev.related_terms)}")
+            with top2:
+                st.caption(ts)
+                st.caption(f"_{ev.source}_")
+            if ev.scenario_deltas:
+                deltas_str = " · ".join(
+                    f"{k}: {('+' if v >= 0 else '')}{v:g}"
+                    for k, v in ev.scenario_deltas.items()
+                )
+                st.caption(f"Scenario impact: {deltas_str}")
+
+
+def _render_risk_matrix_section(
+    ticker, core, *,
+    upsert_fn, delete_fn, categories, kinds, severities, statuses,
+) -> None:
+    """Risk / Return Matrix — list existing rows with edit/delete, plus an add form."""
+    # ── Existing rows ────────────────────────────────────────────────────────
+    if not core.risk_matrix:
+        st.caption(
+            "No risks or opportunities recorded yet. Use the form below to "
+            "add the first one."
+        )
+    else:
+        _SEV_ICON = {"Low": "🟢", "Medium": "🟡", "High": "🟠", "Critical": "🔴"}
+        _STATUS_ICON = {
+            "Active": "🚨", "Monitoring": "👁️", "Realized": "💥",
+            "Mitigated": "🛡️", "Closed": "✅",
+        }
+        for item in sorted(
+            core.risk_matrix,
+            key=lambda r: (
+                {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}.get(r.severity, 4),
+                0 if r.current_status == "Active" else 1,
+            ),
+        ):
+            kind_icon = "⚠️" if item.kind == "Risk" else "✨"
+            sev_icon  = _SEV_ICON.get(item.severity, "⚪")
+            st_icon   = _STATUS_ICON.get(item.current_status, "⚪")
+            with st.container(border=True):
+                top1, top2 = st.columns([5, 1])
+                with top1:
+                    st.markdown(
+                        f"{kind_icon} **{item.name or '(unnamed)'}** "
+                        f"· {item.category} · {sev_icon} {item.severity} "
+                        f"· {st_icon} {item.current_status}"
+                    )
+                    if item.expected_impact:
+                        st.caption(f"**Impact:** {item.expected_impact}")
+                    if item.early_warning_indicators:
+                        st.caption(
+                            "**Early warnings:** "
+                            + " · ".join(item.early_warning_indicators)
+                        )
+                    if item.required_action:
+                        st.caption(f"**Required action:** {item.required_action}")
+                    if item.possible_hedge:
+                        st.caption(f"**Possible hedge:** {item.possible_hedge}")
+                with top2:
+                    if st.button(
+                        "🗑️",
+                        key=f"del_risk_{ticker}_{item.id}",
+                        help="Delete this row",
+                        use_container_width=True,
+                    ):
+                        delete_fn(ticker, item.id)
+                        st.rerun()
+
+    # ── Add new risk/opportunity form ────────────────────────────────────────
+    st.markdown("**Add a risk or opportunity:**")
+    with st.form(key=f"add_risk_form_{ticker}", clear_on_submit=True):
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            r_name = st.text_input(
+                "Name", placeholder="Apple Pay competitive escalation")
+            r_category = st.selectbox("Category", categories, index=0)
+            r_kind     = st.selectbox("Type", kinds, index=0)
+            r_severity = st.selectbox("Severity", severities, index=1)
+            r_status   = st.selectbox("Current status", statuses, index=1)
+        with rc2:
+            r_impact = st.text_area(
+                "Expected impact",
+                placeholder="Could compress branded checkout share by 200-400bps",
+                height=80,
+            )
+            r_warnings = st.text_area(
+                "Early warning indicators (one per line)",
+                placeholder="Apple Pay merchant adoption\nBranded checkout share data",
+                height=80,
+            )
+            r_action = st.text_input(
+                "Required action",
+                placeholder="Cut position if share loss two consecutive quarters",
+            )
+            r_hedge = st.text_input(
+                "Possible hedge",
+                placeholder="Long V/MA as offset",
+            )
+        if st.form_submit_button(
+            "➕ Add to Matrix", type="primary", use_container_width=True,
+        ):
+            if not r_name.strip():
+                st.error("Name is required.")
+            else:
+                upsert_fn(
+                    ticker = ticker,
+                    name = r_name.strip(),
+                    category = r_category,
+                    kind = r_kind,
+                    severity = r_severity,
+                    current_status = r_status,
+                    expected_impact = r_impact.strip(),
+                    early_warning_indicators = [
+                        ln.strip() for ln in r_warnings.splitlines() if ln.strip()
+                    ],
+                    required_action = r_action.strip(),
+                    possible_hedge = r_hedge.strip(),
+                )
+                st.rerun()
+
 
 def _render_core_thesis_form(
     ticker, holding, core, *,
     upsert_fn, delete_fn, time_horizons,
 ) -> None:
-    """Inline form to author/edit a CoreThesis for one ticker."""
+    """Inline form to author/edit a CoreThesis for one ticker — including scenarios."""
     form_key = f"core_thesis_form_{ticker}"
+
+    def _val(field, default=""):
+        return getattr(core, field, default) if core else default
+    def _join(lst):
+        return "\n".join(lst or [])
+
     with st.form(key=form_key, clear_on_submit=False):
+        # ── Intent ──────────────────────────────────────────────────────────
+        st.markdown("##### 🧭 Investment Intent")
         rationale = st.text_area(
             "Why this position exists",
-            value=(core.rationale if core else ""),
+            value=_val("rationale"),
             placeholder="e.g. Dominant share in a structurally growing market...",
             height=80,
         )
@@ -1748,41 +1943,55 @@ def _render_core_thesis_form(
         with c1:
             drivers = st.text_area(
                 "Thesis drivers (one per line)",
-                value=("\n".join(core.thesis_drivers) if core else ""),
+                value=_join(core.thesis_drivers if core else None),
                 placeholder="Pricing power\nNetwork effects\nRecurring revenue",
                 height=100,
             )
+            value_drivers = st.text_area(
+                "Expected value drivers (one per line)",
+                value=_join(core.expected_value_drivers if core else None),
+                placeholder="Revenue per unit\nMargin expansion\nFree cash flow conversion",
+                height=80,
+                help="The *financial outcomes* the thesis depends on (vs the drivers, which are the *mechanisms*).",
+            )
             catalysts = st.text_area(
                 "Expected catalysts (one per line)",
-                value=("\n".join(core.expected_catalysts) if core else ""),
+                value=_join(core.expected_catalysts if core else None),
                 placeholder="Q3 product launch\nFDA decision in 2027",
-                height=100,
+                height=80,
             )
             moat = st.text_input(
                 "Expected moat",
-                value=(core.expected_moat if core else ""),
+                value=_val("expected_moat"),
                 placeholder="Switching costs from data lock-in",
             )
             mgmt = st.text_input(
                 "Expected management behavior",
-                value=(core.expected_management if core else ""),
+                value=_val("expected_management"),
                 placeholder="Capital-disciplined; consistent guidance",
             )
         with c2:
             risks = st.text_area(
                 "Key risks accepted at purchase (one per line)",
-                value=("\n".join(core.key_risks) if core else ""),
+                value=_join(core.key_risks if core else None),
                 placeholder="Customer concentration\nFX exposure",
                 height=100,
             )
+            mgmt_exec = st.text_area(
+                "Required management execution assumptions (one per line)",
+                value=_join(core.management_execution_assumptions if core else None),
+                placeholder="Maintain R&D investment pace\nNo dilutive M&A",
+                height=80,
+                help="Explicit assumptions about how management must execute for the thesis to play out.",
+            )
             margin = st.text_input(
                 "Expected margin profile",
-                value=(core.expected_margin_profile if core else ""),
+                value=_val("expected_margin_profile"),
                 placeholder="Operating margin expanding to 30%+",
             )
             growth = st.text_input(
                 "Expected growth profile",
-                value=(core.expected_growth_profile if core else ""),
+                value=_val("expected_growth_profile"),
                 placeholder="15-20% revenue CAGR for 3 years",
             )
             horizon_idx = (
@@ -1795,14 +2004,107 @@ def _render_core_thesis_form(
             )
             valuation = st.text_input(
                 "Expected valuation thesis",
-                value=(core.valuation_thesis if core else ""),
+                value=_val("valuation_thesis"),
                 placeholder="Re-rates to 25× FCF as margins expand",
             )
 
+        # ── Scenarios ───────────────────────────────────────────────────────
+        st.divider()
+        st.markdown("##### 🎲 Scenarios (Bull / Base / Bear)")
+        st.caption(
+            "Seed probabilities sum to 100. The engine will auto-adjust them as "
+            "new evidence arrives (events, breaks, confirmations)."
+        )
+        bull_prob_default = float(core.scenario_bull.probability) if core else 25.0
+        base_prob_default = float(core.scenario_base.probability) if core else 55.0
+        bear_prob_default = float(core.scenario_bear.probability) if core else 20.0
+
+        sc_a, sc_b, sc_c = st.columns(3)
+        with sc_a:
+            st.markdown("**📗 Bull**")
+            bull_desc = st.text_area(
+                "Bull thesis",
+                value=(core.scenario_bull.description if core else ""),
+                placeholder="Everything goes right…", height=80,
+                label_visibility="collapsed",
+            )
+            bull_prob = st.slider(
+                "Probability %", 5, 90, int(bull_prob_default),
+                key=f"bull_prob_{ticker}",
+            )
+            bull_tgt = st.text_input(
+                "Valuation target",
+                value=(core.scenario_bull.valuation_target if core else ""),
+                placeholder="$250/share at 25× FCF",
+                key=f"bull_tgt_{ticker}",
+            )
+            bull_kas = st.text_area(
+                "Key assumptions (one per line)",
+                value=_join(core.scenario_bull.key_assumptions if core else None),
+                placeholder="Hyperscaler capex sustained\nNo regulatory action",
+                height=70, key=f"bull_kas_{ticker}",
+            )
+        with sc_b:
+            st.markdown("**📘 Base**")
+            base_desc = st.text_area(
+                "Base thesis",
+                value=(core.scenario_base.description if core else ""),
+                placeholder="Most likely outcome…", height=80,
+                label_visibility="collapsed",
+            )
+            base_prob = st.slider(
+                "Probability %", 5, 90, int(base_prob_default),
+                key=f"base_prob_{ticker}",
+            )
+            base_tgt = st.text_input(
+                "Valuation target",
+                value=(core.scenario_base.valuation_target if core else ""),
+                placeholder="$180/share at 20× FCF",
+                key=f"base_tgt_{ticker}",
+            )
+            base_kas = st.text_area(
+                "Key assumptions (one per line)",
+                value=_join(core.scenario_base.key_assumptions if core else None),
+                placeholder="Steady AI growth\nMargins stable",
+                height=70, key=f"base_kas_{ticker}",
+            )
+        with sc_c:
+            st.markdown("**📕 Bear**")
+            bear_desc = st.text_area(
+                "Bear thesis",
+                value=(core.scenario_bear.description if core else ""),
+                placeholder="What kills the thesis…", height=80,
+                label_visibility="collapsed",
+            )
+            bear_prob = st.slider(
+                "Probability %", 5, 90, int(bear_prob_default),
+                key=f"bear_prob_{ticker}",
+            )
+            bear_tgt = st.text_input(
+                "Valuation target",
+                value=(core.scenario_bear.valuation_target if core else ""),
+                placeholder="$80/share at 12× FCF",
+                key=f"bear_tgt_{ticker}",
+            )
+            bear_kas = st.text_area(
+                "Key assumptions (one per line)",
+                value=_join(core.scenario_bear.key_assumptions if core else None),
+                placeholder="Custom silicon adoption\nCustomer concentration realized",
+                height=70, key=f"bear_kas_{ticker}",
+            )
+        st.caption(
+            f"Probabilities will be normalized to sum to 100 (currently "
+            f"{bull_prob + base_prob + bear_prob}). Engine deltas from "
+            f"validation events are applied separately."
+        )
+
+        # ── Action buttons ──────────────────────────────────────────────────
+        st.divider()
         bc1, bc2 = st.columns([3, 1])
         with bc1:
             submitted = st.form_submit_button(
-                "💾 Save Core Thesis", use_container_width=True, type="primary",
+                "💾 Save Thesis & Scenarios",
+                use_container_width=True, type="primary",
             )
         with bc2:
             delete_clicked = st.form_submit_button(
@@ -1814,20 +2116,34 @@ def _render_core_thesis_form(
             def _split(s: str) -> list[str]:
                 return [line.strip() for line in (s or "").splitlines() if line.strip()]
             upsert_fn(
-                ticker                  = ticker,
-                company_name            = holding.company_name,
-                rationale               = rationale.strip(),
-                thesis_drivers          = _split(drivers),
-                expected_catalysts      = _split(catalysts),
-                key_risks               = _split(risks),
-                expected_moat           = moat.strip(),
-                expected_management     = mgmt.strip(),
-                expected_margin_profile = margin.strip(),
-                expected_growth_profile = growth.strip(),
-                time_horizon            = horizon,
-                valuation_thesis        = valuation.strip(),
+                ticker                            = ticker,
+                company_name                      = holding.company_name,
+                rationale                         = rationale.strip(),
+                thesis_drivers                    = _split(drivers),
+                expected_value_drivers            = _split(value_drivers),
+                expected_catalysts                = _split(catalysts),
+                key_risks                         = _split(risks),
+                expected_moat                     = moat.strip(),
+                expected_management               = mgmt.strip(),
+                expected_margin_profile           = margin.strip(),
+                expected_growth_profile           = growth.strip(),
+                time_horizon                      = horizon,
+                valuation_thesis                  = valuation.strip(),
+                management_execution_assumptions  = _split(mgmt_exec),
+                bull_description                  = bull_desc.strip(),
+                bull_probability                  = float(bull_prob),
+                bull_valuation_target             = bull_tgt.strip(),
+                bull_key_assumptions              = _split(bull_kas),
+                base_description                  = base_desc.strip(),
+                base_probability                  = float(base_prob),
+                base_valuation_target             = base_tgt.strip(),
+                base_key_assumptions              = _split(base_kas),
+                bear_description                  = bear_desc.strip(),
+                bear_probability                  = float(bear_prob),
+                bear_valuation_target             = bear_tgt.strip(),
+                bear_key_assumptions              = _split(bear_kas),
             )
-            st.success(f"Core thesis saved for {ticker}.", icon="✅")
+            st.success(f"Thesis saved for {ticker}.", icon="✅")
             st.rerun()
         if delete_clicked and core is not None:
             delete_fn(ticker)

@@ -67,6 +67,7 @@ ACTION_BADGE: dict[str, tuple[str, str]] = {
 
 SIGNAL_NAMES: dict[str, str] = {
     "core_thesis_status":     "Core Thesis Status",
+    "thesis_dynamics":        "Thesis Dynamics (events · risks · conviction)",
     "position_size":          "Position Size",
     "thesis_strength":        "Filing Thesis Strength",
     "valuation":              "Valuation Attractiveness",
@@ -80,9 +81,12 @@ SIGNAL_NAMES: dict[str, str] = {
 }
 
 # Core thesis status is the heaviest signal — it represents the PM's
-# original intent, against which everything else is measured.
+# original intent. `thesis_dynamics` is the second heaviest — it surfaces
+# Break / Deterioration / Optionality events, active critical risks,
+# and conviction collapse.
 _SIGNAL_WEIGHTS: dict[str, float] = {
     "core_thesis_status":     2.0,
+    "thesis_dynamics":        1.8,
     "position_size":          1.5,
     "thesis_strength":        1.5,
     "valuation":              1.0,
@@ -271,6 +275,54 @@ def _sig_core_thesis_status(core_thesis) -> tuple[int, str]:
     return base, f"Core thesis: {core_thesis.thesis_status}"
 
 
+def _sig_thesis_dynamics(core_thesis) -> tuple[int, str]:
+    """Surfaces recent validation events, active critical risks, and
+    conviction-trend collapse — second-heaviest signal in the engine."""
+    if core_thesis is None:
+        return 30, "No thesis dynamics tracked"
+
+    events = list(getattr(core_thesis, "validation_events", []) or [])
+    risks  = list(getattr(core_thesis, "risk_matrix",       []) or [])
+    trend  = getattr(core_thesis, "conviction_trend", "Stable")
+
+    # Recent (newest-first) — look at the last 3 events
+    recent = events[:3]
+    has_break        = any(getattr(e, "event_type", "") == "Break" for e in recent)
+    has_deterior     = any(getattr(e, "event_type", "") == "Deterioration" for e in recent)
+    has_optionality  = any(getattr(e, "event_type", "") == "New Optionality" for e in recent)
+    has_confirmation = any(getattr(e, "event_type", "") == "Confirmation" for e in recent)
+
+    # Active risks by severity
+    def _active(sev):
+        return [r for r in risks
+                if getattr(r, "current_status", "") == "Active"
+                and getattr(r, "severity", "") == sev]
+    crit_active = _active("Critical")
+    high_active = _active("High")
+
+    # Hard escalations first
+    if has_break:
+        return 100, "🚨 Recent BREAK event in thesis validation"
+    if crit_active:
+        return 95, f"🚨 Active CRITICAL risk: {crit_active[0].name}"
+    if has_deterior:
+        return 80, "⚠️ Recent deterioration event"
+    if high_active:
+        return 65, f"⚠️ Active high-severity risk: {high_active[0].name}"
+    if trend == "Falling":
+        return 70, "📉 Conviction trend: Falling"
+
+    # Positive cases pull priority DOWN
+    if has_optionality and trend == "Rising":
+        return 10, "✨ New optionality + rising conviction"
+    if has_confirmation and trend in ("Rising", "Stable"):
+        return 20, "✅ Recent thesis confirmation"
+    if trend == "Rising":
+        return 22, "↗️ Conviction trend: Rising"
+
+    return 30, f"Stable thesis dynamics · conviction trend: {trend}"
+
+
 def _sig_confidence(entry) -> tuple[int, str]:
     if entry is None:
         return 60, "No analysis — confidence unknown"
@@ -363,6 +415,7 @@ def compute_holding_decision(
 
     raw_signals: dict[str, tuple[int, str]] = {
         "core_thesis_status":   _sig_core_thesis_status(core_thesis),
+        "thesis_dynamics":      _sig_thesis_dynamics(core_thesis),
         "position_size":        _sig_position_size(weight_pct),
         "thesis_strength":      _sig_thesis_strength(watchlist_entry),
         "valuation":            _sig_valuation(watchlist_entry),
