@@ -1,69 +1,94 @@
 """
 market_prices.py
 ----------------
-Live market data fetching via yfinance with in-memory + session-state caching.
+Live market data fetching via yfinance with a transparent price-source chain.
 
-Design principles:
+Price priority (per ticker):
+  1. fast_info.last_price
+  2. info["regularMarketPrice"]
+  3. history(period="1d", interval="1m") — last intraday close
+  4. previous_close_fallback (clearly labelled)
+
+Design rules:
 - Never crashes the app. Every public function returns a safe fallback.
-- Does NOT overwrite manually-entered prices unless the caller explicitly
-  decides to apply the fetched prices.
-- 5-minute in-memory TTL cache shared across the process (fast repeated calls).
-- Session-state cache mirrors the in-memory cache so the UI can inspect it.
-- Bulk refresh uses a single yfinance.download() call for efficiency.
-- Market-session awareness for US equities.
+- Does NOT overwrite manually-entered prices unless the caller explicitly applies.
+- 60-second in-memory TTL cache.
+- Manual refresh always bypasses the cache (force=True).
+- Session-state mirrors in-memory cache for UI inspection.
+- All raw probe values are stored for the debug table.
 """
 
 from __future__ import annotations
 
 import time
 import threading
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-CACHE_TTL_SECONDS = 300          # 5 minutes
-_SESSION_CACHE_KEY = "mp_price_cache"   # st.session_state key
+CACHE_TTL_SECONDS      = 60          # 1 minute — short so "Refresh" always gets fresh data
+_SESSION_CACHE_KEY     = "mp_price_cache"
 _SESSION_LAST_REFRESH_KEY = "mp_last_refresh"
 
-# ── In-process cache (thread-safe) ────────────────────────────────────────────
+PRICE_SOURCES = {
+    "last_price":              "fast_info.last_price",
+    "regularMarketPrice":      "info.regularMarketPrice",
+    "intraday_1m_close":       "history(1d,1m) close",
+    "previous_close_fallback": "⚠️ previousClose (fallback — may not reflect today)",
+    "none":                    "—",
+}
 
-_cache: dict[str, tuple["MarketData", float]] = {}   # ticker → (data, ts)
+# ── In-process cache ───────────────────────────────────────────────────────────
+
+_cache: dict[str, tuple["MarketData", float]] = {}
 _cache_lock = threading.Lock()
 
 
-# ── Data structures ───────────────────────────────────────────────────────────
+# ── Data structures ────────────────────────────────────────────────────────────
 
 @dataclass
 class MarketData:
-    """Live market snapshot for one ticker."""
+    """Live (or best-available) market snapshot for one ticker."""
     ticker:               str
+
+    # Selected price and metadata
     current_price:        Optional[float] = None
-    previous_close:       Optional[float] = None
-    daily_change_pct:     Optional[float] = None   # % change vs previous_close
+    price_source:         str             = "none"   # key from PRICE_SOURCES
+    price_timestamp:      str             = ""        # ISO UTC of fetch
+    daily_change_pct:     Optional[float] = None
+
+    # Raw probe values (for debug table)
+    raw_last_price:       Optional[float] = None   # fast_info.last_price
+    raw_regular_market:   Optional[float] = None   # info.regularMarketPrice
+    raw_intraday_close:   Optional[float] = None   # history 1m last Close
+    raw_previous_close:   Optional[float] = None   # fast_info.previous_close
+
+    # Secondary info
     market_cap:           Optional[float] = None
     volume:               Optional[float] = None
     beta:                 Optional[float] = None
     currency:             str             = "USD"
-    timestamp:            str             = ""     # ISO UTC
-    error:                Optional[str]  = None    # set when fetch failed
+    error:                Optional[str]  = None
 
     # ── Derived helpers ───────────────────────────────────────────────────────
+
     @property
     def is_ok(self) -> bool:
         return self.error is None and self.current_price is not None
 
     @property
+    def is_fallback(self) -> bool:
+        return self.price_source == "previous_close_fallback"
+
+    @property
     def day_indicator(self) -> str:
-        """🟢 / 🔴 / ⚪ based on daily change."""
+        if self.is_fallback:
+            return "⚪"
         if self.daily_change_pct is None:
             return "⚪"
-        if self.daily_change_pct > 0:
-            return "🟢"
-        if self.daily_change_pct < 0:
-            return "🔴"
-        return "⚪"
+        return "🟢" if self.daily_change_pct > 0 else ("🔴" if self.daily_change_pct < 0 else "⚪")
 
     @property
     def change_str(self) -> str:
@@ -73,92 +98,130 @@ class MarketData:
         return f"{sign}{self.daily_change_pct:.2f}%"
 
     @property
+    def source_label(self) -> str:
+        return PRICE_SOURCES.get(self.price_source, self.price_source)
+
+    @property
     def price_str(self) -> str:
         if self.current_price is None:
-            return "Market data unavailable"
+            return "Unavailable"
         return f"{self.current_price:.2f} {self.currency}"
 
 
-def _error_data(ticker: str, reason: str) -> MarketData:
-    return MarketData(ticker=ticker, error=reason,
-                      timestamp=datetime.now(timezone.utc).isoformat())
+def _error_data(ticker: str, reason: str) -> "MarketData":
+    return MarketData(
+        ticker          = ticker,
+        error           = reason,
+        price_timestamp = datetime.now(timezone.utc).isoformat(),
+    )
 
 
 # ── Single-ticker fetch ────────────────────────────────────────────────────────
 
-def get_market_data(ticker: str) -> MarketData:
+def get_market_data(ticker: str, *, force: bool = False) -> "MarketData":
     """
-    Fetch live market data for *ticker*.
+    Fetch live market data for *ticker* using the full source priority chain.
 
-    Returns a MarketData object — check `.is_ok` or `.error` before using the
-    price. Never raises; all errors are captured in `.error`.
-    Caches results for CACHE_TTL_SECONDS in the process-level cache.
+    Set force=True to bypass the in-memory cache (used by manual refresh).
+    Never raises; all errors are captured in .error.
     """
     ticker = (ticker or "").strip().upper()
     if not ticker:
         return _error_data(ticker, "Empty ticker")
 
-    # Check in-process cache first
-    now = time.monotonic()
-    with _cache_lock:
-        cached = _cache.get(ticker)
-        if cached and (now - cached[1]) < CACHE_TTL_SECONDS:
-            return cached[0]
+    now_mono = time.monotonic()
+    if not force:
+        with _cache_lock:
+            cached = _cache.get(ticker)
+            if cached and (now_mono - cached[1]) < CACHE_TTL_SECONDS:
+                return cached[0]
 
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)
-        fi = t.fast_info          # fast_info avoids downloading full history
 
-        raw_price = getattr(fi, "last_price", None)
-        raw_prev  = getattr(fi, "previous_close", None)
-        raw_cap   = getattr(fi, "market_cap", None)
-        raw_vol   = getattr(fi, "three_month_average_volume", None)
-        raw_cur   = getattr(fi, "currency", "USD") or "USD"
+        # ── Probe 1: fast_info ─────────────────────────────────────────────
+        fi = t.fast_info
+        raw_lp  = _safe_float(getattr(fi, "last_price",      None))
+        raw_pc  = _safe_float(getattr(fi, "previous_close",  None))
+        raw_cap = _safe_float(getattr(fi, "market_cap",      None))
+        raw_vol = _safe_float(getattr(fi, "three_month_average_volume", None))
+        currency = str(getattr(fi, "currency", None) or "USD")
 
-        # current_price fallback chain
-        price = None
-        if raw_price and float(raw_price) > 0:
-            price = float(raw_price)
-
-        prev_close = float(raw_prev) if raw_prev and float(raw_prev) > 0 else None
-
-        daily_chg: Optional[float] = None
-        if price and prev_close and prev_close > 0:
-            daily_chg = (price - prev_close) / prev_close * 100.0
-
-        # Beta: only from .info to keep fast_info call cheap
-        beta: Optional[float] = None
+        # ── Probe 2: info (regularMarketPrice + beta) ─────────────────────
+        raw_rmp:  Optional[float] = None
+        raw_beta: Optional[float] = None
         try:
             info = t.info or {}
-            raw_beta = info.get("beta")
-            if raw_beta is not None:
-                beta = float(raw_beta)
+            raw_rmp  = _safe_float(info.get("regularMarketPrice"))
+            raw_beta = _safe_float(info.get("beta"))
+            # info may have a better previousClose
+            if raw_pc is None:
+                raw_pc = _safe_float(info.get("previousClose"))
+            if currency == "USD":
+                currency = str(info.get("currency") or "USD")
         except Exception:
             pass
 
+        # ── Probe 3: intraday 1m history ──────────────────────────────────
+        raw_intra: Optional[float] = None
+        try:
+            hist = t.history(period="1d", interval="1m")
+            if hist is not None and not hist.empty and "Close" in hist.columns:
+                closes = hist["Close"].dropna()
+                if len(closes) > 0:
+                    raw_intra = float(closes.iloc[-1])
+        except Exception:
+            pass
+
+        # ── Select price by priority ──────────────────────────────────────
+        price:  Optional[float] = None
+        source: str             = "none"
+
+        if raw_lp and raw_lp > 0:
+            price  = raw_lp
+            source = "last_price"
+        elif raw_rmp and raw_rmp > 0:
+            price  = raw_rmp
+            source = "regularMarketPrice"
+        elif raw_intra and raw_intra > 0:
+            price  = raw_intra
+            source = "intraday_1m_close"
+        elif raw_pc and raw_pc > 0:
+            price  = raw_pc
+            source = "previous_close_fallback"
+
+        # ── Daily change ──────────────────────────────────────────────────
+        daily_chg: Optional[float] = None
+        if price and raw_pc and raw_pc > 0 and source != "previous_close_fallback":
+            daily_chg = (price - raw_pc) / raw_pc * 100.0
+
         if price is None:
-            data = _error_data(ticker, "No price returned — ticker may be delisted or invalid")
+            data = _error_data(ticker, "No price returned — ticker may be delisted, unavailable, or rate-limited")
         else:
             data = MarketData(
-                ticker        = ticker,
-                current_price = price,
-                previous_close= prev_close,
-                daily_change_pct = daily_chg,
-                market_cap    = float(raw_cap) if raw_cap else None,
-                volume        = float(raw_vol) if raw_vol else None,
-                beta          = beta,
-                currency      = str(raw_cur),
-                timestamp     = datetime.now(timezone.utc).isoformat(),
-                error         = None,
+                ticker            = ticker,
+                current_price     = price,
+                price_source      = source,
+                price_timestamp   = datetime.now(timezone.utc).isoformat(),
+                daily_change_pct  = daily_chg,
+                raw_last_price    = raw_lp,
+                raw_regular_market= raw_rmp,
+                raw_intraday_close= raw_intra,
+                raw_previous_close= raw_pc,
+                market_cap        = raw_cap,
+                volume            = raw_vol,
+                beta              = raw_beta,
+                currency          = currency,
+                error             = None,
             )
+
     except Exception as exc:  # noqa: BLE001
         msg = str(exc)
-        # Friendly messages for common failure modes
         if "429" in msg or "rate" in msg.lower():
-            msg = "Rate limit reached — try again in a few minutes"
+            msg = "Rate-limited by Yahoo Finance — try again in a few minutes"
         elif "no data" in msg.lower() or "empty" in msg.lower():
-            msg = "No data available for this ticker"
+            msg = "No data returned — ticker may be invalid or delisted"
         data = _error_data(ticker, msg)
 
     with _cache_lock:
@@ -167,115 +230,49 @@ def get_market_data(ticker: str) -> MarketData:
     return data
 
 
+def _safe_float(v) -> Optional[float]:
+    """Convert a value to float, returning None on failure or non-positive."""
+    try:
+        f = float(v)
+        return f if (f == f) else None    # NaN check
+    except (TypeError, ValueError):
+        return None
+
+
 # ── Bulk refresh ──────────────────────────────────────────────────────────────
 
 def refresh_all_prices(
     ticker_list: list[str],
     *,
-    progress_callback=None,        # optional fn(done: int, total: int)
-) -> dict[str, MarketData]:
+    force: bool = False,
+) -> dict[str, "MarketData"]:
     """
     Fetch live prices for all tickers in *ticker_list*.
 
-    Uses a single yfinance.download() call for efficiency where possible,
-    then falls back to individual Ticker() calls for tickers that failed.
+    force=True: bypasses the in-memory cache for all tickers (used by the
+    manual "Refresh Market Prices" button).
 
-    Returns dict[ticker → MarketData]. Never raises.
+    Strategy: individual per-ticker fetches using the full source-chain so
+    every ticker gets the best available price and we can expose the debug
+    table. Returns dict[ticker → MarketData].  Never raises.
     """
     tickers = [t.strip().upper() for t in (ticker_list or []) if t.strip()]
     if not tickers:
         return {}
 
     results: dict[str, MarketData] = {}
-    now = time.monotonic()
+    now_mono = time.monotonic()
 
-    # 1. Check cache for still-fresh entries
-    fresh: set[str] = set()
-    with _cache_lock:
-        for t in tickers:
-            cached = _cache.get(t)
-            if cached and (now - cached[1]) < CACHE_TTL_SECONDS:
-                results[t] = cached[0]
-                fresh.add(t)
+    if not force:
+        with _cache_lock:
+            for t in tickers:
+                cached = _cache.get(t)
+                if cached and (now_mono - cached[1]) < CACHE_TTL_SECONDS:
+                    results[t] = cached[0]
 
-    stale = [t for t in tickers if t not in fresh]
-    if not stale:
-        return results
-
-    # 2. Batch download via yfinance.download (period=1d for today's OHLCV)
-    try:
-        import yfinance as yf
-        raw = yf.download(
-            tickers   = stale,
-            period    = "2d",           # 2 days to get today + prev close
-            interval  = "1d",
-            auto_adjust = True,
-            progress  = False,
-            threads   = True,
-            timeout   = 20,
-        )
-
-        # yfinance returns multi-level columns when >1 ticker
-        if len(stale) == 1:
-            ticker = stale[0]
-            close_col = "Close"
-            try:
-                closes = raw[close_col].dropna()
-                price     = float(closes.iloc[-1]) if len(closes) >= 1 else None
-                prev_cls  = float(closes.iloc[-2]) if len(closes) >= 2 else None
-                daily_chg = ((price - prev_cls) / prev_cls * 100) if price and prev_cls else None
-                data = MarketData(
-                    ticker           = ticker,
-                    current_price    = price,
-                    previous_close   = prev_cls,
-                    daily_change_pct = daily_chg,
-                    currency         = "USD",
-                    timestamp        = datetime.now(timezone.utc).isoformat(),
-                )
-            except Exception:
-                data = _error_data(ticker, "Could not parse download data")
-            results[ticker] = data
-            with _cache_lock:
-                _cache[ticker] = (data, now)
-        else:
-            # Multi-ticker: columns are (field, ticker)
-            for ticker in stale:
-                try:
-                    closes = raw["Close"][ticker].dropna()
-                    price    = float(closes.iloc[-1]) if len(closes) >= 1 else None
-                    prev_cls = float(closes.iloc[-2]) if len(closes) >= 2 else None
-                    daily_chg = ((price - prev_cls) / prev_cls * 100) if price and prev_cls else None
-                    data = MarketData(
-                        ticker           = ticker,
-                        current_price    = price,
-                        previous_close   = prev_cls,
-                        daily_change_pct = daily_chg,
-                        currency         = "USD",
-                        timestamp        = datetime.now(timezone.utc).isoformat(),
-                    )
-                except Exception:
-                    data = _error_data(ticker, "Could not parse download data")
-                results[ticker] = data
-                with _cache_lock:
-                    _cache[ticker] = (data, now)
-
-    except Exception as exc:  # noqa: BLE001
-        # Batch failed — fall through to individual fetches
-        for ticker in stale:
-            if ticker not in results:
-                data = get_market_data(ticker)
-                results[ticker] = data
-            if progress_callback:
-                done = sum(1 for t in tickers if t in results)
-                progress_callback(done, len(tickers))
-
-    # 3. Individual fallback for tickers still missing
-    missing = [t for t in stale if t not in results]
-    for i, ticker in enumerate(missing):
-        results[ticker] = get_market_data(ticker)
-        if progress_callback:
-            done = len(fresh) + len(stale) - len(missing) + i + 1
-            progress_callback(done, len(tickers))
+    stale = [t for t in tickers if t not in results]
+    for t in stale:
+        results[t] = get_market_data(t, force=force)
 
     return results
 
@@ -283,21 +280,19 @@ def refresh_all_prices(
 # ── Market session awareness ──────────────────────────────────────────────────
 
 def is_us_market_open() -> bool:
-    """Return True during approximate US regular market hours (9:30–16:00 ET)."""
     try:
         from zoneinfo import ZoneInfo
         et = datetime.now(ZoneInfo("America/New_York"))
-        if et.weekday() >= 5:          # Saturday=5, Sunday=6
+        if et.weekday() >= 5:
             return False
-        open_time  = et.replace(hour=9,  minute=30, second=0, microsecond=0)
-        close_time = et.replace(hour=16, minute=0,  second=0, microsecond=0)
-        return open_time <= et <= close_time
+        open_t  = et.replace(hour=9,  minute=30, second=0, microsecond=0)
+        close_t = et.replace(hour=16, minute=0,  second=0, microsecond=0)
+        return open_t <= et <= close_t
     except Exception:
         return False
 
 
 def market_session_label() -> tuple[str, str]:
-    """Return (icon, label) describing the current market session."""
     try:
         from zoneinfo import ZoneInfo
         et = datetime.now(ZoneInfo("America/New_York"))
@@ -321,19 +316,20 @@ def market_session_label() -> tuple[str, str]:
 # ── Session-state helpers ─────────────────────────────────────────────────────
 
 def save_to_session(results: dict[str, "MarketData"]) -> None:
-    """Persist fetched MarketData into Streamlit session state."""
+    """Persist ALL fetched MarketData (ok and failed) into Streamlit session state."""
     try:
         import streamlit as st
         existing: dict = st.session_state.get(_SESSION_CACHE_KEY, {})
-        existing.update({t: d for t, d in results.items() if d.is_ok})
-        st.session_state[_SESSION_CACHE_KEY] = existing
-        st.session_state[_SESSION_LAST_REFRESH_KEY] = datetime.now().strftime("%H:%M:%S")
+        existing.update(results)          # store everything, including failures
+        st.session_state[_SESSION_CACHE_KEY]     = existing
+        st.session_state[_SESSION_LAST_REFRESH_KEY] = (
+            datetime.now().strftime("%H:%M:%S")
+        )
     except Exception:
         pass
 
 
 def get_from_session(ticker: str) -> Optional["MarketData"]:
-    """Retrieve last-fetched MarketData from session state (no TTL check)."""
     try:
         import streamlit as st
         cache: dict = st.session_state.get(_SESSION_CACHE_KEY, {})
@@ -343,7 +339,6 @@ def get_from_session(ticker: str) -> Optional["MarketData"]:
 
 
 def get_all_from_session() -> dict[str, "MarketData"]:
-    """Return full session-state price cache."""
     try:
         import streamlit as st
         return dict(st.session_state.get(_SESSION_CACHE_KEY, {}))

@@ -771,10 +771,10 @@ def render_portfolio_dashboard() -> None:
                 "🔄 Refresh Market Prices",
                 use_container_width=True,
                 key="refresh_mp_watchlist",
-                help="Fetch live prices for all watchlist tickers.",
+                help="Force-fetches live prices from yfinance, bypassing cache.",
             ):
                 with st.spinner("Fetching live prices…"):
-                    fetched = refresh_all_prices(wl_tickers)
+                    fetched = refresh_all_prices(wl_tickers, force=True)
                 save_to_session(fetched)
                 ok = [t for t, d in fetched.items() if d.is_ok]
                 if ok:
@@ -1489,7 +1489,7 @@ def render_holdings_tab() -> None:
         # ── Live market prices panel ────────────────────────────────────────
         from market_prices import (
             get_all_from_session, market_session_label,
-            refresh_all_prices, save_to_session,
+            refresh_all_prices, save_to_session, PRICE_SOURCES,
         )
         sess_icon, sess_label = market_session_label()
         mp1, mp2, mp3 = st.columns([1, 2, 2])
@@ -1498,10 +1498,10 @@ def render_holdings_tab() -> None:
                 "🔄 Refresh Market Prices",
                 use_container_width=True,
                 key="refresh_mp_holdings",
-                help="Fetch live prices from yfinance for all holdings.",
+                help="Force-fetches live prices from yfinance, bypassing cache.",
             ):
                 with st.spinner("Fetching live prices…"):
-                    fetched = refresh_all_prices(list(holdings.keys()))
+                    fetched = refresh_all_prices(list(holdings.keys()), force=True)
                 save_to_session(fetched)
                 ok   = [t for t, d in fetched.items() if d.is_ok]
                 fail = [t for t, d in fetched.items() if not d.is_ok]
@@ -1519,50 +1519,85 @@ def render_holdings_tab() -> None:
 
         live_cache   = get_all_from_session()
         live_rows    = []
-        live_ok_map: dict[str, float] = {}    # ticker → confirmed live price
+        debug_rows   = []
+        live_ok_map: dict[str, float] = {}
         for t_key in sorted(holdings.keys()):
             md     = live_cache.get(t_key)
             stored = holdings[t_key].current_price
+
+            if md:
+                # Debug row — always populated when we have any fetch attempt
+                debug_rows.append({
+                    "Ticker":          t_key,
+                    "last_price":      f"{md.raw_last_price:.4f}"     if md.raw_last_price    is not None else "—",
+                    "regularMktPrice": f"{md.raw_regular_market:.4f}" if md.raw_regular_market is not None else "—",
+                    "previousClose":   f"{md.raw_previous_close:.4f}" if md.raw_previous_close is not None else "—",
+                    "intraday1m":      f"{md.raw_intraday_close:.4f}" if md.raw_intraday_close  is not None else "—",
+                    "storedPrice":     f"{stored:.4f}",
+                    "selectedPrice":   f"{md.current_price:.4f}"      if md.current_price     is not None else "—",
+                    "source":          md.source_label,
+                    "fetchedAt (UTC)": md.price_timestamp[:19].replace("T", " ") if md.price_timestamp else "—",
+                })
+
             if md and md.is_ok:
                 live_ok_map[t_key] = md.current_price
+                ts_short = md.price_timestamp[:19].replace("T", " ") if md.price_timestamp else "—"
                 live_rows.append({
-                    "Status":     md.day_indicator,
+                    "":           md.day_indicator,
                     "Ticker":     t_key,
-                    "Source":     "📡 Live",
                     "Price":      round(md.current_price, 2),
-                    "Stored":     round(stored, 2),
                     "Day Change": md.change_str,
-                    "Market Cap": (f"${md.market_cap / 1e9:.1f}B"
-                                   if md.market_cap else "—"),
+                    "Source":     md.source_label,
+                    "Fetched (UTC)": ts_short,
+                    "Stored":     round(stored, 2),
                     "Beta":       (f"{md.beta:.2f}" if md.beta else "—"),
                     "Currency":   md.currency,
                 })
             elif md and not md.is_ok:
                 live_rows.append({
-                    "Status":     "⚪",
+                    "":           "⚠️",
                     "Ticker":     t_key,
-                    "Source":     "⚠️ Fetch failed",
-                    "Price":      round(stored, 2),
+                    "Price":      "—",
+                    "Day Change": "—",
+                    "Source":     f"Fetch failed: {md.error or 'unknown'}",
+                    "Fetched (UTC)": "—",
                     "Stored":     round(stored, 2),
-                    "Day Change": f"Unavailable — {md.error or 'unknown'}",
-                    "Market Cap": "—",
                     "Beta":       "—",
                     "Currency":   "—",
                 })
 
         if live_rows:
             ok_count = len(live_ok_map)
+            has_fallback = any(
+                live_cache.get(t) and live_cache[t].is_ok
+                and live_cache[t].price_source == "previous_close_fallback"
+                for t in holdings
+            )
             with st.expander(
-                f"📡 Live Market Prices ({ok_count}/{len(live_rows)} fetched successfully)",
+                f"📡 Live Market Prices ({ok_count}/{len(live_rows)} fetched)",
                 expanded=True,
             ):
-                live_df = pd.DataFrame(live_rows)
+                st.warning(
+                    "⚠️ Price may be delayed or unavailable from yfinance. "
+                    "Always verify against your broker or Yahoo Finance directly.",
+                    icon="⚠️",
+                )
+                if has_fallback:
+                    st.error(
+                        "One or more prices are showing **previousClose** as a "
+                        "fallback — no live or intraday price was available. "
+                        "These are marked with ⚠️ in the Source column.",
+                        icon="🔴",
+                    )
+
+                live_df = pd.DataFrame(live_rows).astype(str)
                 st.dataframe(live_df, hide_index=True, use_container_width=True)
+
                 if ok_count:
                     if st.button(
                         "✅ Apply live prices to holdings",
                         type="primary", key="apply_live_prices_btn",
-                        help="Writes fetched prices to holdings. "
+                        help="Writes fetched prices to holdings storage. "
                              "Only tickers with a successful fetch are updated — "
                              "manually-entered prices are preserved when fetch failed.",
                     ):
@@ -1570,6 +1605,18 @@ def render_holdings_tab() -> None:
                             update_current_price(t_key, price)
                         st.toast(f"Applied {ok_count} live price(s)", icon="✅")
                         st.rerun()
+
+                if debug_rows:
+                    with st.expander("🔬 Debug: raw yfinance probe values", expanded=False):
+                        st.caption(
+                            "All four price probes attempted for each ticker. "
+                            "The selected price follows the priority: "
+                            "last_price → regularMarketPrice → intraday1m → previousClose."
+                        )
+                        st.dataframe(
+                            pd.DataFrame(debug_rows).astype(str),
+                            hide_index=True, use_container_width=True,
+                        )
 
         save_cols = st.columns([1, 1, 4])
         with save_cols[0]:
