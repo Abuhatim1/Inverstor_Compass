@@ -1,5 +1,99 @@
 [
   {
+    "ticker": "DOCS",
+    "company_name": "Doximity, Inc.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T11:25:52",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "DOCS",
+    "company_name": "Doximity, Inc.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T11:25:35",
+    "thesis_prev": "—",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 72,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for DOCS."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  },
+  {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T11:22:24",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T11:22:02",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 84,
+    "conviction_new": 72,
+    "conviction_delta": -12,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 84 → 72 (-12)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
     "ticker": "VCYT",
     "company_name": "VERACYTE, INC.",
     "filing_type": "10-K",

@@ -1,5 +1,121 @@
 [
   {
+    "ticker": "DOCS",
+    "company_name": "Doximity, Inc.",
+    "filing_type": "10-K",
+    "accession": "0001516513-25-000056",
+    "timestamp": "2026-05-28T11:25:52",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
+    "ticker": "DOCS",
+    "company_name": "Doximity, Inc.",
+    "filing_type": "10-K",
+    "accession": "0001516513-26-000025",
+    "timestamp": "2026-05-28T11:25:35",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "accession": "0001384101-24-000017",
+    "timestamp": "2026-05-28T11:22:24",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
+    "ticker": "VCYT",
+    "company_name": "VERACYTE, INC.",
+    "filing_type": "10-K",
+    "accession": "0001384101-26-000010",
+    "timestamp": "2026-05-28T11:22:02",
+    "what_improved": [
+      "Revenue growth accelerated to 14% from 9% prior year",
+      "Operating margins expanded 200 bps to 28%",
+      "Management raised full-year guidance by 5%"
+    ],
+    "what_weakened": [
+      "International growth slightly below domestic pace"
+    ],
+    "new_concerns": [
+      "FX headwind on ~35% of international revenues"
+    ],
+    "new_catalysts": [
+      "New enterprise contract wins",
+      "Expanded $500M buyback"
+    ],
+    "revenue_growth_trend": "improving",
+    "margin_trend": "improving",
+    "cash_trend": "stable",
+    "debt_trend": "stable",
+    "management_tone": "positive",
+    "guidance_trend": "raised",
+    "conviction_adjustment": 12
+  },
+  {
     "ticker": "VCYT",
     "company_name": "VERACYTE, INC.",
     "filing_type": "10-K",

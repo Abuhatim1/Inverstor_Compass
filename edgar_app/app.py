@@ -30,6 +30,11 @@ from ai.uploader import (
     analyze_uploaded, extract_text,
 )
 from ai.valuation import DRIVER_DISPLAY, VALUATION_IMPACT_BADGE
+from ai.explainability import (
+    CAUSE_DISPLAY,
+    EXPLAINABILITY_TOPICS,
+    UNCERTAINTY_BADGE as EXPLAIN_BADGE,
+)
 from portfolio import (
     # state
     PortfolioEntry,
@@ -269,6 +274,10 @@ def render_analysis(result: AnalysisResult) -> None:
     if result.valuation:
         _render_valuation_section(result.valuation)
 
+    # ── Explainability & Uncertainty Layer ────────────────────────────────────
+    if result.uncertainty:
+        _render_explainability_section(result.uncertainty)
+
 
 def _render_evidence_section(evidence: list, has_comparison: bool) -> None:
     """Render collapsible evidence cards — one per financial field."""
@@ -388,6 +397,99 @@ def _render_valuation_section(val) -> None:
             st.markdown("**Valuation Reasoning** *(evidence-grounded)*")
             for reason in val.valuation_reasoning:
                 st.markdown(f"- {reason}")
+
+
+def _render_explainability_section(unc) -> None:
+    """Render the Explainability & Uncertainty Layer section."""
+    icon, label = EXPLAIN_BADGE.get(unc.overall_uncertainty, ("❓", unc.overall_uncertainty))
+    overconf_warn = " ⚠️ Overconfidence flag" if unc.overconfidence_flag else ""
+
+    st.divider()
+    with st.expander(
+        f"🔍 Explainability & Uncertainty — {icon} {label}{overconf_warn}",
+        expanded=False,
+    ):
+        st.caption(
+            "Every conclusion is explained: what the system believes, why, "
+            "which assumptions were made, and what evidence is missing."
+        )
+
+        # ── Overall uncertainty + causes ──────────────────────────────────────
+        row1, row2 = st.columns([2, 3])
+        with row1:
+            st.metric("Overall Uncertainty", f"{icon} {label}")
+
+        with row2:
+            if unc.uncertainty_causes:
+                st.markdown("**Detected uncertainty sources:**")
+                cause_chips = "  ".join(
+                    f"`{CAUSE_DISPLAY.get(c, ('⚠️', c))[0]} {CAUSE_DISPLAY.get(c, ('⚠️', c))[1]}`"
+                    for c in unc.uncertainty_causes
+                )
+                st.markdown(cause_chips)
+            else:
+                st.markdown("*No significant uncertainty sources detected.*")
+
+        # ── Overconfidence warning ────────────────────────────────────────────
+        if unc.overconfidence_flag:
+            st.warning(
+                "**Overconfidence flag:** Management language is more positive than the "
+                "numerical evidence supports. Treat qualitative conclusions with extra caution.",
+                icon="⚠️",
+            )
+
+        # ── What Could Break This Thesis? ─────────────────────────────────────
+        if unc.what_could_break:
+            st.divider()
+            st.markdown("#### 🔥 What Could Break This Thesis?")
+            st.caption(
+                "Specific, falsifiable scenarios that would directly contradict the "
+                "evidence used to reach the current conclusion."
+            )
+            for scenario in unc.what_could_break:
+                st.markdown(f"- {scenario}")
+
+        # ── What Would Change Our View? ───────────────────────────────────────
+        if unc.what_would_change_view:
+            st.divider()
+            st.markdown("#### 🔄 What Would Change Our View?")
+            st.caption(
+                "Concrete future data points or events that would trigger an "
+                "upgrade or downgrade of this analysis."
+            )
+            for trigger in unc.what_would_change_view:
+                st.markdown(f"- {trigger}")
+
+        # ── Per-topic explainability cards (2 × 2 grid) ───────────────────────
+        if unc.cards:
+            st.divider()
+            st.markdown("#### 🃏 Conclusion Explainability Cards")
+            st.caption(
+                "Four key conclusions explained in detail — reasoning, assumptions, "
+                "strongest evidence, and what data is weak or missing."
+            )
+            cols = st.columns(2)
+            for idx, card in enumerate(unc.cards):
+                topic_label = EXPLAINABILITY_TOPICS.get(card.topic, card.topic.replace("_", " ").title())
+                c_icon, c_label = EXPLAIN_BADGE.get(card.uncertainty, ("❓", card.uncertainty))
+
+                with cols[idx % 2]:
+                    with st.container(border=True):
+                        st.markdown(f"**{topic_label}** — {c_icon} {c_label}")
+
+                        st.markdown("**Why we believe this:**")
+                        st.markdown(card.reasoning)
+
+                        if card.assumptions:
+                            st.markdown("**Assumptions:**")
+                            for assumption in card.assumptions:
+                                st.markdown(f"- *{assumption}*")
+
+                        st.markdown("**Strongest evidence:**")
+                        st.success(card.strongest_evidence, icon="✅")
+
+                        st.markdown("**Weak or missing evidence:**")
+                        st.info(card.weak_evidence, icon="⚠️")
 
 
 def render_delta_card(d: DeltaRecord) -> None:

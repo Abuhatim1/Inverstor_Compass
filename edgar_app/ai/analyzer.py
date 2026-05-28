@@ -37,6 +37,13 @@ from .valuation import (
     valuation_from_cached,
     VALUATION_SCHEMA,
 )
+from .explainability import (
+    UncertaintyAnalysis,
+    ExplainabilityCard,
+    explainability_from_dict,
+    explainability_from_cached,
+    EXPLAINABILITY_SCHEMA,
+)
 from .fetcher import (
     FetchError,
     FilingTooLargeError,
@@ -62,6 +69,108 @@ class AnalysisResult:
     evidence:         list[EvidenceItem] = field(default_factory=list)
     source_label:     str = "SEC"            # e.g. "SEC Filing", "Tadawul Announcement"
     valuation:        ValuationResult | None = None  # Damodaran value driver analysis
+    uncertainty:      UncertaintyAnalysis | None = None  # Explainability & uncertainty layer
+
+
+# ── Demo uncertainty ──────────────────────────────────────────────────────────
+
+_DEMO_UNCERTAINTY = UncertaintyAnalysis(
+    overall_uncertainty="Medium Confidence",
+    uncertainty_causes=["Macro-sensitive assumptions", "Non-recurring gains or losses"],
+    what_could_break=[
+        "Next quarter revenue guidance cut would signal demand softening, invalidating the growth thesis.",
+        "A significant FX headwind exceeding 35% international exposure could erase margin gains.",
+        "Loss of a key enterprise contract would reduce revenue visibility and switching-cost moat.",
+    ],
+    what_would_change_view=[
+        "Second consecutive quarter of 14%+ revenue growth with stable or improving margins would upgrade conviction.",
+        "Guidance reduction or margin compression below 25% would trigger a downgrade to Weak / Hold.",
+        "A competitor product launch with comparable switching costs would weaken the moat conclusion.",
+    ],
+    overconfidence_flag=False,
+    cards=[
+        ExplainabilityCard(
+            topic="valuation_impact",
+            reasoning=(
+                "Revenue growth acceleration combined with 200 bps margin expansion on 14% revenue growth "
+                "indicates compounding FCF improvement, supporting a Value Accretive classification."
+            ),
+            assumptions=[
+                "Margin expansion is structural (operating leverage), not driven by one-time cost cuts.",
+                "Enterprise contract wins are genuinely multi-year and not subject to early termination.",
+            ],
+            strongest_evidence=(
+                "Operating margin expanded to 28% from 26%, confirmed by both the MD&A narrative and "
+                "the reported income statement — narrative and numbers are aligned."
+            ),
+            weak_evidence=(
+                "FCF conversion ratio not explicitly stated; margin sustainability beyond one quarter "
+                "is inferred, not confirmed by the filing excerpt."
+            ),
+            uncertainty="Medium Confidence",
+        ),
+        ExplainabilityCard(
+            topic="growth_quality",
+            reasoning=(
+                "Growth at 14% is driven by new enterprise contracts (multi-year, high switching costs) "
+                "rather than price increases or volume fluctuations, indicating fundamental demand strength."
+            ),
+            assumptions=[
+                "Enterprise contracts reflect genuine demand and are not one-time catch-up purchases.",
+                "The software segment (higher-margin) will maintain its share of total revenue.",
+            ],
+            strongest_evidence=(
+                "New multi-year enterprise contract wins are specifically called out in management commentary, "
+                "with a $500M buyback expansion signalling internal confidence."
+            ),
+            weak_evidence=(
+                "Customer concentration is not disclosed; if contract wins are concentrated in 1-2 clients, "
+                "growth quality is weaker than it appears."
+            ),
+            uncertainty="Medium Confidence",
+        ),
+        ExplainabilityCard(
+            topic="moat_direction",
+            reasoning=(
+                "Multi-year enterprise contracts raise switching costs; expanding buyback signals surplus FCF "
+                "and pricing power. Moat is assessed as Strengthening."
+            ),
+            assumptions=[
+                "Enterprise contract lock-in translates to actual pricing power at renewal.",
+                "No disruptive competitor product has been launched in the period.",
+            ],
+            strongest_evidence=(
+                "Multi-year contract wins explicitly mentioned in management commentary; "
+                "200 bps margin expansion is consistent with pricing power, not just cost efficiency."
+            ),
+            weak_evidence=(
+                "Competitive landscape analysis is absent from the excerpt; market share data "
+                "would provide stronger moat confirmation."
+            ),
+            uncertainty="Medium Confidence",
+        ),
+        ExplainabilityCard(
+            topic="capital_risk",
+            reasoning=(
+                "Debt reduced, FX hedging covers ~60% of international exposure, and no new significant "
+                "liabilities are mentioned. Capital risk is assessed as Low."
+            ),
+            assumptions=[
+                "FX hedging program remains in place and is not reduced in the next period.",
+                "No undisclosed off-balance-sheet obligations exist.",
+            ],
+            strongest_evidence=(
+                "Long-term debt decreased to $800M following scheduled repayments, "
+                "confirmed in the Balance Sheet section."
+            ),
+            weak_evidence=(
+                "Covenant terms and hedging instrument details are not in the excerpt; "
+                "the 40% unhedged international exposure remains an unquantified FX risk."
+            ),
+            uncertainty="High Confidence",
+        ),
+    ],
+)
 
 
 # ── Demo valuation ────────────────────────────────────────────────────────────
@@ -140,6 +249,7 @@ _DEMO_RESULT = AnalysisResult(
         conviction_adjustment=12,
     ),
     valuation=_DEMO_VALUATION,
+    uncertainty=_DEMO_UNCERTAINTY,
     evidence=[
         EvidenceItem(
             field="revenue_growth",
@@ -275,6 +385,7 @@ _SYSTEM_PROMPT = (
     '  "confidence_score": 0-100,\n'
     + _EVIDENCE_SCHEMA +
     VALUATION_SCHEMA +
+    EXPLAINABILITY_SCHEMA +
     "}\n\n"
     "Definitions:\n"
     "- thesis_impact: effect on a long investment thesis\n"
@@ -317,6 +428,8 @@ _COMPARISON_SYSTEM_PROMPT = (
     "- For evidence: previous_value and delta MUST use PREVIOUS filing data for comparison\n"
     + VALUATION_SCHEMA +
     "- For value_drivers: base ratings on what actually CHANGED between current and previous filing\n"
+    + EXPLAINABILITY_SCHEMA +
+    "- For explainability: overconfidence_flag should be true if narrative_vs_numbers is Diverging\n"
 )
 
 
@@ -340,16 +453,17 @@ def _result_to_dict(r: AnalysisResult) -> dict:
 
 def _dict_to_cached_result(d: dict) -> AnalysisResult:
     """Re-hydrate a cached dict. Evidence + valuation are reconstructed; no comparison."""
-    _skip = {"is_cached", "error", "cached_at", "comparison", "evidence", "valuation"}
-    evidence  = evidence_from_list(d.get("evidence") or [])
-    valuation = valuation_from_cached(d.get("valuation"))
-    filtered  = {
+    _skip = {"is_cached", "error", "cached_at", "comparison", "evidence", "valuation", "uncertainty"}
+    evidence    = evidence_from_list(d.get("evidence") or [])
+    valuation   = valuation_from_cached(d.get("valuation"))
+    uncertainty = explainability_from_cached(d.get("uncertainty"))
+    filtered    = {
         k: v for k, v in d.items()
         if k in AnalysisResult.__dataclass_fields__ and k not in _skip
     }
     return AnalysisResult(
         **filtered, is_cached=True, error=None,
-        evidence=evidence, valuation=valuation,
+        evidence=evidence, valuation=valuation, uncertainty=uncertainty,
     )
 
 
@@ -453,7 +567,7 @@ def analyze_filing(
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=2400,   # evidence + comparison + value_drivers + core fields
+            max_tokens=3000,   # evidence + comparison + value_drivers + explainability + core
         )
 
         raw_json = response.choices[0].message.content or "{}"
@@ -485,6 +599,11 @@ def analyze_filing(
                 confidence_score=confidence_score,
             )
 
+        # Parse explainability / uncertainty block (always requested)
+        uncertainty: UncertaintyAnalysis | None = explainability_from_dict(
+            data.get("explainability")
+        )
+
         result = AnalysisResult(
             what_changed=data.get("what_changed", "No summary returned."),
             key_catalysts=data.get("key_catalysts", []),
@@ -496,6 +615,7 @@ def analyze_filing(
             evidence=evidence,
             source_label=source_label,
             valuation=valuation,
+            uncertainty=uncertainty,
         )
 
         if cache_key:
@@ -517,6 +637,7 @@ def analyze_filing(
                 comparison=demo.comparison,
                 evidence=demo.evidence,
                 valuation=demo.valuation,
+                uncertainty=demo.uncertainty,
                 error="OpenAI quota exceeded — showing demo analysis. "
                       "Check billing at platform.openai.com.",
             )
