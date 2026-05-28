@@ -24,13 +24,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd edgar_app && streamlit run app.py --server.port 5000"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "streamlit run edgar_app/app.py --server.address=0.0.0.0 --server.port=5000"
+waitForPort = 5000
 
 [agent]
 stack = "PNPM_WORKSPACE"

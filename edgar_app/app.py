@@ -9,6 +9,15 @@ Structure:
   app.py       — This file: Streamlit UI only
 """
 
+import sys
+import os
+
+# Ensure edgar/ and ai/ modules are importable whether the app is run from
+# the workspace root (streamlit run edgar_app/app.py) or from edgar_app/.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
 import streamlit as st
 
 from edgar import EdgarAPIError, get_filings, lookup_company
