@@ -1600,11 +1600,247 @@ def render_holdings_tab() -> None:
         st.caption("No transactions recorded yet.")
 
 
+def render_thesis_memory_tab() -> None:
+    """Thesis Memory Layer — author, edit, and track original investment theses."""
+    from portfolio import (
+        THESIS_STATUS_BADGE, THESIS_STATUS_BROKEN,
+        THESIS_STATUS_STABLE, THESIS_STATUS_STRENGTHENING,
+        THESIS_STATUS_WEAKENING, TIME_HORIZONS,
+        delete_core_thesis, load_all_core_theses, load_holdings,
+        upsert_core_thesis_fields,
+    )
+
+    st.header("📜 Thesis Memory")
+    st.caption(
+        "Capture the **original investment thesis** for every holding once. "
+        "The system then compares every new SEC filing against this stable "
+        "reference and tracks whether the thesis is **Strengthening**, "
+        "**Stable**, **Weakening**, or **Broken** — plus detects when the "
+        "company narrative drifts materially from your original case."
+    )
+
+    holdings = load_holdings()
+    theses   = load_all_core_theses()
+
+    if not holdings:
+        st.info(
+            "Add positions in the **💼 Holdings** tab first, then return here "
+            "to author the original investment thesis for each one.",
+            icon="💡",
+        )
+        return
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    counts = {
+        THESIS_STATUS_STRENGTHENING: 0,
+        THESIS_STATUS_STABLE:        0,
+        THESIS_STATUS_WEAKENING:     0,
+        THESIS_STATUS_BROKEN:        0,
+    }
+    no_thesis = 0
+    drift_count = 0
+    for t in holdings:
+        c = theses.get(t)
+        if c is None:
+            no_thesis += 1
+        else:
+            counts[c.thesis_status] = counts.get(c.thesis_status, 0) + 1
+            if c.drift_detected:
+                drift_count += 1
+
+    s1, s2, s3, s4, s5 = st.columns(5)
+    s1.metric("📈 Strengthening", counts[THESIS_STATUS_STRENGTHENING])
+    s2.metric("➖ Stable",         counts[THESIS_STATUS_STABLE])
+    s3.metric("📉 Weakening",      counts[THESIS_STATUS_WEAKENING])
+    s4.metric("💔 Broken",         counts[THESIS_STATUS_BROKEN])
+    s5.metric("📝 No Thesis Yet",  no_thesis)
+
+    if drift_count:
+        st.warning(
+            f"⚠️ Thesis drift detected on **{drift_count}** holding(s) — "
+            "the company narrative has materially diverged from the original "
+            "investment case. Review CIO commentary below.",
+            icon="🧭",
+        )
+    st.divider()
+
+    # ── Per-holding editor cards ──────────────────────────────────────────────
+    # Sort: holdings with a thesis first (worst status first), then unauthored
+    _STATUS_ORDER = {
+        THESIS_STATUS_BROKEN:        0,
+        THESIS_STATUS_WEAKENING:     1,
+        THESIS_STATUS_STABLE:        2,
+        THESIS_STATUS_STRENGTHENING: 3,
+    }
+    def _sort_key(item):
+        ticker, h = item
+        c = theses.get(ticker)
+        if c is None:
+            return (5, ticker)  # unauthored at bottom
+        return (_STATUS_ORDER.get(c.thesis_status, 4),
+                0 if c.drift_detected else 1,
+                ticker)
+
+    for ticker, h in sorted(holdings.items(), key=_sort_key):
+        c = theses.get(ticker)
+        with st.container(border=True):
+            # Header row
+            hc1, hc2, hc3 = st.columns([2.5, 2, 1.5])
+            with hc1:
+                st.markdown(f"### {ticker}")
+                st.caption(f"{h.company_name} · {h.sector} · {h.market}")
+            with hc2:
+                if c is None:
+                    st.markdown("**Status:** _no thesis recorded yet_")
+                else:
+                    icon, lbl = THESIS_STATUS_BADGE.get(
+                        c.thesis_status, ("⚪", c.thesis_status))
+                    st.markdown(f"**Status:** {icon} {lbl}")
+                    if c.last_status_change:
+                        st.caption(f"Since: {c.last_status_change}")
+            with hc3:
+                if c is not None:
+                    st.caption(
+                        f"Evaluations: {c.evaluations_count}"
+                        + (f" · Horizon: {c.time_horizon}" if c.time_horizon else "")
+                    )
+
+            # CIO Commentary + drift
+            if c is not None:
+                if c.cio_commentary:
+                    st.markdown(f"**🧑‍💼 CIO Commentary:** {c.cio_commentary}")
+                if c.drift_detected and c.drift_summary:
+                    st.warning(f"🧭 **Drift:** {c.drift_summary}", icon="⚠️")
+                if not c.cio_commentary and c.evaluations_count == 0:
+                    st.caption(
+                        "Commentary will appear after the next filing analysis "
+                        "for this ticker."
+                    )
+
+            # ── Editor form ──
+            expander_label = (
+                "✏️ Edit Core Thesis" if c is not None
+                else "📜 Author Core Thesis"
+            )
+            with st.expander(expander_label, expanded=(c is None)):
+                _render_core_thesis_form(
+                    ticker, h, c,
+                    upsert_fn=upsert_core_thesis_fields,
+                    delete_fn=delete_core_thesis,
+                    time_horizons=TIME_HORIZONS,
+                )
+
+
+def _render_core_thesis_form(
+    ticker, holding, core, *,
+    upsert_fn, delete_fn, time_horizons,
+) -> None:
+    """Inline form to author/edit a CoreThesis for one ticker."""
+    form_key = f"core_thesis_form_{ticker}"
+    with st.form(key=form_key, clear_on_submit=False):
+        rationale = st.text_area(
+            "Why this position exists",
+            value=(core.rationale if core else ""),
+            placeholder="e.g. Dominant share in a structurally growing market...",
+            height=80,
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            drivers = st.text_area(
+                "Thesis drivers (one per line)",
+                value=("\n".join(core.thesis_drivers) if core else ""),
+                placeholder="Pricing power\nNetwork effects\nRecurring revenue",
+                height=100,
+            )
+            catalysts = st.text_area(
+                "Expected catalysts (one per line)",
+                value=("\n".join(core.expected_catalysts) if core else ""),
+                placeholder="Q3 product launch\nFDA decision in 2027",
+                height=100,
+            )
+            moat = st.text_input(
+                "Expected moat",
+                value=(core.expected_moat if core else ""),
+                placeholder="Switching costs from data lock-in",
+            )
+            mgmt = st.text_input(
+                "Expected management behavior",
+                value=(core.expected_management if core else ""),
+                placeholder="Capital-disciplined; consistent guidance",
+            )
+        with c2:
+            risks = st.text_area(
+                "Key risks accepted at purchase (one per line)",
+                value=("\n".join(core.key_risks) if core else ""),
+                placeholder="Customer concentration\nFX exposure",
+                height=100,
+            )
+            margin = st.text_input(
+                "Expected margin profile",
+                value=(core.expected_margin_profile if core else ""),
+                placeholder="Operating margin expanding to 30%+",
+            )
+            growth = st.text_input(
+                "Expected growth profile",
+                value=(core.expected_growth_profile if core else ""),
+                placeholder="15-20% revenue CAGR for 3 years",
+            )
+            horizon_idx = (
+                list(time_horizons).index(core.time_horizon)
+                if core and core.time_horizon in time_horizons
+                else 1
+            )
+            horizon = st.selectbox(
+                "Expected time horizon", time_horizons, index=horizon_idx,
+            )
+            valuation = st.text_input(
+                "Expected valuation thesis",
+                value=(core.valuation_thesis if core else ""),
+                placeholder="Re-rates to 25× FCF as margins expand",
+            )
+
+        bc1, bc2 = st.columns([3, 1])
+        with bc1:
+            submitted = st.form_submit_button(
+                "💾 Save Core Thesis", use_container_width=True, type="primary",
+            )
+        with bc2:
+            delete_clicked = st.form_submit_button(
+                "🗑️ Delete", use_container_width=True,
+                disabled=(core is None),
+            )
+
+        if submitted:
+            def _split(s: str) -> list[str]:
+                return [line.strip() for line in (s or "").splitlines() if line.strip()]
+            upsert_fn(
+                ticker                  = ticker,
+                company_name            = holding.company_name,
+                rationale               = rationale.strip(),
+                thesis_drivers          = _split(drivers),
+                expected_catalysts      = _split(catalysts),
+                key_risks               = _split(risks),
+                expected_moat           = moat.strip(),
+                expected_management     = mgmt.strip(),
+                expected_margin_profile = margin.strip(),
+                expected_growth_profile = growth.strip(),
+                time_horizon            = horizon,
+                valuation_thesis        = valuation.strip(),
+            )
+            st.success(f"Core thesis saved for {ticker}.", icon="✅")
+            st.rerun()
+        if delete_clicked and core is not None:
+            delete_fn(ticker)
+            st.warning(f"Core thesis for {ticker} deleted.", icon="🗑️")
+            st.rerun()
+
+
 def render_decision_queue_tab() -> None:
     """Portfolio Decision Ranking — attention allocation, not trading signals."""
     from portfolio import (
         ACTION_BADGE, URGENCY_BADGE,
         compute_decision_queue,
+        load_all_core_theses,
         load_comparison_history, load_delta_history,
         load_holdings, load_market_intel_state, load_portfolio,
     )
@@ -1633,6 +1869,7 @@ def render_decision_queue_tab() -> None:
         market_intel_state = load_market_intel_state(),
         delta_history      = load_delta_history(),
         comparison_history = load_comparison_history(),
+        core_theses        = load_all_core_theses(),
     )
 
     # ── Queue summary ─────────────────────────────────────────────────────────
@@ -1854,12 +2091,13 @@ st.caption(
 )
 
 (tab_search, tab_upload, tab_market_intel,
- tab_watchlist, tab_holdings, tab_decisions, tab_risk) = st.tabs([
+ tab_watchlist, tab_holdings, tab_thesis, tab_decisions, tab_risk) = st.tabs([
     "🔍 Filing Search",
     "📂 Upload Filing",
     "🌐 Market Intel",
     "🔬 Research Watchlist",
     "💼 Holdings",
+    "📜 Thesis Memory",
     "🎯 Decision Queue",
     "🛡️ Portfolio Risk",
 ])
@@ -1869,6 +2107,9 @@ with tab_watchlist:
 
 with tab_holdings:
     render_holdings_tab()
+
+with tab_thesis:
+    render_thesis_memory_tab()
 
 with tab_decisions:
     render_decision_queue_tab()

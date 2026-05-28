@@ -98,6 +98,23 @@ from .decision_ranking import (
     compute_decision_queue,
     compute_holding_decision,
 )
+from .core_thesis import (
+    THESIS_STATUSES,
+    THESIS_STATUS_BADGE,
+    THESIS_STATUS_BROKEN,
+    THESIS_STATUS_STABLE,
+    THESIS_STATUS_STRENGTHENING,
+    THESIS_STATUS_WEAKENING,
+    TIME_HORIZONS,
+    CoreThesis,
+    apply_evaluation,
+    delete_core_thesis,
+    evaluate_thesis_against_analysis,
+    load_all_core_theses,
+    load_core_thesis,
+    save_core_thesis,
+    upsert_core_thesis_fields,
+)
 
 __all__ = [
     # Research Watchlist (state)
@@ -161,4 +178,20 @@ __all__ = [
     "DecisionQueueResult",
     "compute_holding_decision",
     "compute_decision_queue",
+    # Thesis Memory Layer
+    "CoreThesis",
+    "THESIS_STATUSES",
+    "THESIS_STATUS_BADGE",
+    "THESIS_STATUS_STRENGTHENING",
+    "THESIS_STATUS_STABLE",
+    "THESIS_STATUS_WEAKENING",
+    "THESIS_STATUS_BROKEN",
+    "TIME_HORIZONS",
+    "load_core_thesis",
+    "load_all_core_theses",
+    "save_core_thesis",
+    "delete_core_thesis",
+    "upsert_core_thesis_fields",
+    "evaluate_thesis_against_analysis",
+    "apply_evaluation",
 ]

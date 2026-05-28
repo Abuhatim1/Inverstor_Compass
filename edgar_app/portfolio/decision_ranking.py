@@ -66,8 +66,9 @@ ACTION_BADGE: dict[str, tuple[str, str]] = {
 }
 
 SIGNAL_NAMES: dict[str, str] = {
+    "core_thesis_status":     "Core Thesis Status",
     "position_size":          "Position Size",
-    "thesis_strength":        "Thesis Strength",
+    "thesis_strength":        "Filing Thesis Strength",
     "valuation":              "Valuation Attractiveness",
     "market_divergence":      "Market Intel Divergence",
     "risk_deterioration":     "Risk Deterioration",
@@ -78,7 +79,10 @@ SIGNAL_NAMES: dict[str, str] = {
     "confidence":             "Analysis Confidence",
 }
 
+# Core thesis status is the heaviest signal — it represents the PM's
+# original intent, against which everything else is measured.
 _SIGNAL_WEIGHTS: dict[str, float] = {
+    "core_thesis_status":     2.0,
     "position_size":          1.5,
     "thesis_strength":        1.5,
     "valuation":              1.0,
@@ -249,6 +253,24 @@ def _sig_sentiment_extremes(mi: dict | None) -> tuple[int, str]:
     return 25, f"External market view: {view or 'Neutral'}"
 
 
+def _sig_core_thesis_status(core_thesis) -> tuple[int, str]:
+    """Heaviest signal — original PM intent vs current reality."""
+    if core_thesis is None:
+        return 35, "No core thesis recorded (author one in 📜 Thesis Memory)"
+    mapping = {
+        "Strengthening": 5,
+        "Stable":        30,
+        "Weakening":     80,
+        "Broken":        100,
+    }
+    base = mapping.get(getattr(core_thesis, "thesis_status", "Stable"), 35)
+    if getattr(core_thesis, "drift_detected", False):
+        boosted = min(100, base + 15)
+        return boosted, (f"Core thesis: {core_thesis.thesis_status} · "
+                         f"⚠️ DRIFT DETECTED")
+    return base, f"Core thesis: {core_thesis.thesis_status}"
+
+
 def _sig_confidence(entry) -> tuple[int, str]:
     if entry is None:
         return 60, "No analysis — confidence unknown"
@@ -267,14 +289,22 @@ def _sig_confidence(entry) -> tuple[int, str]:
 
 def _suggest_action(
     entry,                  # PortfolioEntry | None
+    core_thesis,            # CoreThesis | None
     weight_pct: float,
     sigs: dict[str, DecisionSignal],
 ) -> str:
     thesis = getattr(entry, "thesis_status", "Unknown") if entry else "Unknown"
     val_priority = int(getattr(entry, "priority_score", 0) or 0) if entry else 0
     confidence = sigs["confidence"].score   # lower = more confident
+    core_status = getattr(core_thesis, "thesis_status", "") if core_thesis else ""
 
-    # Exit Watch — broken thesis on a real position
+    # Core thesis overrides — PM intent takes precedence over filing-level reads
+    if core_status == "Broken" and weight_pct >= 1.0:
+        return "Exit Watch"
+    if core_status == "Weakening" and weight_pct >= 5.0:
+        return "Reduce"
+
+    # Exit Watch — broken filing thesis on a real position
     if thesis == "Broken" and weight_pct >= 1.0:
         return "Exit Watch"
 
@@ -291,9 +321,13 @@ def _suggest_action(
     if 0 < val_priority <= 25 and weight_pct >= 5.0:
         return "Reduce"
 
-    # Increase — strong/solid thesis + very attractive valuation + high confidence
-    # + undersized position
-    if (thesis in ("Strong", "Solid")
+    # Increase — strong/solid filing thesis + very attractive valuation +
+    # high confidence + undersized position. Never increase when core thesis
+    # is degrading (Weakening/Broken handled above; also block on drift).
+    drift = bool(getattr(core_thesis, "drift_detected", False))
+    if (thesis in ("Strong", "Solid", "Stable")
+            and core_status in ("", "Strengthening", "Stable")
+            and not drift
             and val_priority >= 75
             and confidence <= 30
             and weight_pct < 10.0
@@ -322,11 +356,13 @@ def compute_holding_decision(
     market_intel:       dict | None,
     delta_history:      list[DeltaRecord],
     comparison_history: list[ComparisonRecord],
+    core_thesis=None,                                 # CoreThesis | None
 ) -> HoldingDecision:
-    """Score one holding across all 10 signals."""
+    """Score one holding across all 11 signals."""
     ticker = holding.ticker
 
     raw_signals: dict[str, tuple[int, str]] = {
+        "core_thesis_status":   _sig_core_thesis_status(core_thesis),
         "position_size":        _sig_position_size(weight_pct),
         "thesis_strength":      _sig_thesis_strength(watchlist_entry),
         "valuation":            _sig_valuation(watchlist_entry),
@@ -356,7 +392,7 @@ def compute_holding_decision(
     priority_score = int(round(sum(s.score * s.weight for s in signals) / total_w))
 
     urgency = _urgency_band(priority_score)
-    suggested = _suggest_action(watchlist_entry, weight_pct, sigs_by_key)
+    suggested = _suggest_action(watchlist_entry, core_thesis, weight_pct, sigs_by_key)
 
     # Build key-reason from the top 2 contributing signals (signal_score * weight)
     contribs = sorted(signals, key=lambda s: -(s.score * s.weight))
@@ -386,6 +422,7 @@ def compute_decision_queue(
     market_intel_state: dict[str, dict],
     delta_history:      list[DeltaRecord],
     comparison_history: list[ComparisonRecord],
+    core_theses:        dict | None = None,            # {ticker: CoreThesis}
 ) -> DecisionQueueResult:
     """Score every holding and rank them by attention priority (desc)."""
     if not holdings:
@@ -396,6 +433,7 @@ def compute_decision_queue(
             computed_at=datetime.now().isoformat(),
         )
 
+    core_theses = core_theses or {}
     weights = portfolio_weights(holdings)
     decisions: list[HoldingDecision] = []
     for ticker, h in holdings.items():
@@ -406,6 +444,7 @@ def compute_decision_queue(
             market_intel=market_intel_state.get(ticker),
             delta_history=delta_history,
             comparison_history=comparison_history,
+            core_thesis=core_theses.get(ticker),
         )
         decisions.append(d)
 

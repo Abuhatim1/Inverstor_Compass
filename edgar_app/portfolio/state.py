@@ -126,6 +126,23 @@ def update_portfolio(
     )
     portfolio[ticker.upper()] = entry
     save_portfolio(portfolio)
+
+    # ── Thesis Memory Layer: compare latest filing vs original core thesis ──
+    # If the user has authored a CoreThesis for this ticker, evaluate it
+    # against the new filing and update its live status / drift / commentary.
+    # Best-effort: never break the core flow.
+    try:
+        from .core_thesis import apply_evaluation, load_core_thesis
+        core = load_core_thesis(ticker)
+        if core is not None:
+            apply_evaluation(
+                core,
+                analysis,
+                comparison=getattr(analysis, "comparison", None),
+            )
+    except Exception:
+        pass
+
     return entry, delta
 
 
