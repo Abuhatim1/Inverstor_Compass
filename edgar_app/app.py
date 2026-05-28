@@ -78,9 +78,31 @@ from portfolio import (
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="SEC EDGAR Filing Research",
-    page_icon="📋",
+    page_title="بوصلة",
+    page_icon="🧭",
     layout="centered",
+)
+
+# ── Arabic / brand CSS ────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <style>
+    /* Proper bidirectional rendering for Arabic text */
+    .bousala-title {
+        direction: rtl;
+        unicode-bidi: embed;
+        text-align: center;
+        font-family: 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
+    }
+    /* Preserve bidi for all markdown containers */
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] div,
+    [data-testid="stMarkdownContainer"] span {
+        unicode-bidi: plaintext;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -134,6 +156,17 @@ _ai_ready = bool(_api_key)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown(
+        """
+        <div class="bousala-title" style="padding:0.6rem 0 0.2rem 0;">
+          <div style="font-size:2rem; line-height:1.2;">🧭</div>
+          <div style="font-size:1.4rem; font-weight:700;">بوصلة</div>
+          <div style="font-size:0.82rem; color:#888; margin-top:0.15rem;">بوصلة المستثمر</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.divider()
     st.header("⚙️ Settings")
 
     demo_mode = st.toggle(
@@ -3525,9 +3558,20 @@ def render_upload_tab() -> None:
 
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
-st.title("📋 SEC EDGAR Filing Research")
+st.markdown(
+    """
+    <div class="bousala-title" style="padding:1.2rem 0 0.4rem 0;">
+      <div style="font-size:3.2rem; line-height:1.1;">🧭</div>
+      <div style="font-size:2.4rem; font-weight:800; letter-spacing:0.02em;">بوصلة</div>
+      <div style="font-size:1.15rem; color:#888; margin-top:0.3rem; font-weight:400;">
+        بوصلة المستثمر
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 st.caption(
-    "Look up SEC filings · Upload reports · AI analysis · Portfolio state · Delta intelligence"
+    "SEC filings · AI analysis · Portfolio state · Delta intelligence · Market prices"
 )
 
 (tab_command, tab_search, tab_upload, tab_market_intel,
