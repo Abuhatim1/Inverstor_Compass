@@ -1686,6 +1686,7 @@ def render_thesis_memory_tab() -> None:
         save_thesis=save_core_thesis,
         ImportError_=ThesisImportError,
         QuotaExceeded=ThesisQuotaExceeded,
+        demo_mode=demo_mode,
     )
     st.divider()
 
@@ -1822,6 +1823,7 @@ def _render_thesis_import_section(
     extract_text, extract_thesis, extract_thesis_rule_based,
     build_preview, preview_summary_fn,
     save_thesis, ImportError_, QuotaExceeded,
+    demo_mode: bool = False,
 ) -> None:
     """📥 Import Thesis From Report — upload PDF/DOCX/TXT and extract via AI.
 
@@ -1935,6 +1937,21 @@ def _render_thesis_import_section(
                 st.info("Add at least one holding first.")
                 return
 
+            # Warn about Demo Mode limitations before the user uploads
+            if demo_mode:
+                st.warning(
+                    "**Demo extraction is limited.** The rule-based parser "
+                    "can only find content that is explicitly labelled with "
+                    "recognised section headers (e.g. *Thesis Drivers:*, "
+                    "*Catalysts:*, *Key Risks:*, *Bull Case:* …). "
+                    "For full thesis extraction from Arabic/English research "
+                    "reports, DOCX tables, and unstructured prose, "
+                    "**enable Live AI extraction** by adding your "
+                    "`OPENAI_API_KEY` in Replit Secrets and turning off "
+                    "Demo Analysis Mode.",
+                    icon="⚠️",
+                )
+
             ic1, ic2 = st.columns([1, 2])
             with ic1:
                 t_choice = st.selectbox(
@@ -1950,48 +1967,73 @@ def _render_thesis_import_section(
                     help="PDF, DOCX, TXT, or Markdown · max 8 MB",
                 )
 
-            extract_clicked = st.button(
-                "🤖 Extract Thesis from Document", type="primary",
-                use_container_width=True,
-                disabled=(uploaded is None),
-            )
+            if demo_mode:
+                extract_clicked = st.button(
+                    "🛟 Extract with rule-based parser (Demo Mode)",
+                    type="primary", use_container_width=True,
+                    disabled=(uploaded is None),
+                    help="Scans the document for labelled section headers. "
+                         "Best effort — results will be partial for most "
+                         "documents.",
+                )
+            else:
+                extract_clicked = st.button(
+                    "🤖 Extract Thesis from Document", type="primary",
+                    use_container_width=True,
+                    disabled=(uploaded is None),
+                )
+
             if extract_clicked and uploaded is not None:
                 ticker_sel = t_choice
                 holding    = holdings[ticker_sel]
                 try:
                     with st.spinner("Extracting text from document…"):
                         text, kind = extract_text(uploaded.getvalue(), uploaded.name)
-                    with st.spinner(
-                        "AI is reading the document and structuring the thesis "
-                        "(this can take 10-30 seconds)…"
-                    ):
-                        # Pass st.secrets so import matches analyzer's API-key
-                        # resolution path (env first, then st.secrets fallback).
-                        try:
-                            _secrets = st.secrets
-                        except Exception:
-                            _secrets = None
-                        extracted = extract_thesis(
-                            text, ticker_sel, holding.company_name,
-                            st_secrets=_secrets,
+
+                    if demo_mode:
+                        # Skip AI entirely — go straight to rule-based
+                        with st.spinner("Running rule-based section parser…"):
+                            extracted = extract_thesis_rule_based(text)
+                        preview = build_preview(
+                            ticker_sel, holding.company_name, extracted,
+                            filename=uploaded.name, source_kind=kind,
                         )
-                    preview = build_preview(
-                        ticker_sel, holding.company_name, extracted,
-                        filename=uploaded.name, source_kind=kind,
-                    )
-                    st.session_state[PENDING_KEY] = {
-                        "ticker":   ticker_sel,
-                        "filename": uploaded.name,
-                        "kind":     kind,
-                        "preview":  preview,
-                        "demo_mode": False,
-                    }
-                    st.session_state.pop(LAST_SAVED_KEY, None)
-                    st.rerun()
+                        st.session_state[PENDING_KEY] = {
+                            "ticker":    ticker_sel,
+                            "filename":  uploaded.name,
+                            "kind":      kind,
+                            "preview":   preview,
+                            "demo_mode": True,
+                        }
+                        st.session_state.pop(LAST_SAVED_KEY, None)
+                        st.rerun()
+                    else:
+                        with st.spinner(
+                            "AI is reading the document and structuring the "
+                            "thesis (this can take 10-30 seconds)…"
+                        ):
+                            try:
+                                _secrets = st.secrets
+                            except Exception:
+                                _secrets = None
+                            extracted = extract_thesis(
+                                text, ticker_sel, holding.company_name,
+                                st_secrets=_secrets,
+                            )
+                        preview = build_preview(
+                            ticker_sel, holding.company_name, extracted,
+                            filename=uploaded.name, source_kind=kind,
+                        )
+                        st.session_state[PENDING_KEY] = {
+                            "ticker":   ticker_sel,
+                            "filename": uploaded.name,
+                            "kind":     kind,
+                            "preview":  preview,
+                            "demo_mode": False,
+                        }
+                        st.session_state.pop(LAST_SAVED_KEY, None)
+                        st.rerun()
                 except QuotaExceeded:
-                    # Quota path: stash extracted text so the user can opt
-                    # into the rule-based Demo Mode fallback without
-                    # re-uploading the document.
                     st.session_state[QUOTA_KEY] = {
                         "ticker":       ticker_sel,
                         "company_name": holding.company_name,
@@ -2013,13 +2055,18 @@ def _render_thesis_import_section(
         kind     = pending["kind"]
         existing = existing_theses.get(ticker)
 
-        if pending.get("demo_mode"):
-            st.info(
-                f"🛟 **Demo Mode extraction** for **{ticker}** from "
-                f"`{filename}` ({kind}). Built from document headers using "
-                "the rule-based parser (no AI was called). Some fields may "
-                "be missing — fill them in below before saving.",
-                icon="🛟",
+        is_demo_pending = pending.get("demo_mode", False)
+
+        if is_demo_pending:
+            st.warning(
+                f"**Demo extraction is limited** — rule-based parser ran on "
+                f"`{filename}` ({kind}) for **{ticker}**. No AI was called.\n\n"
+                "The parser can only extract content that is explicitly "
+                "labelled with recognised section headers. It cannot interpret "
+                "unstructured prose, tables without headers, or context that "
+                "requires reading comprehension. **For full extraction from "
+                "Arabic/English research reports, enable Live AI extraction.**",
+                icon="⚠️",
             )
         else:
             st.success(
@@ -2027,6 +2074,46 @@ def _render_thesis_import_section(
                 f"({kind}). Review the preview below before saving.",
                 icon="📥",
             )
+
+        # ── Field completeness check (demo mode) ─────────────────────────
+        summ = preview_summary_fn(preview)
+        _populated_fields = (
+            (1 if preview.rationale else 0)
+            + summ["drivers_count"]
+            + summ["catalysts_count"]
+            + summ["risks_count"]
+            + (1 if preview.valuation_thesis else 0)
+            + (1 if preview.expected_moat else 0)
+            + summ["risk_matrix_count"]
+            + (1 if preview.scenario_bull.description else 0)
+            + (1 if preview.scenario_base.description else 0)
+            + (1 if preview.scenario_bear.description else 0)
+        )
+        _FIELD_THRESHOLD = 4  # warn if fewer than this many items found
+
+        if is_demo_pending and _populated_fields < _FIELD_THRESHOLD:
+            st.error(
+                f"⚠️ **Most fields are empty** — only {_populated_fields} "
+                f"item(s) were extracted from the document. "
+                "The document may lack clearly labelled section headers, or "
+                "use a format the rule-based parser does not recognise. "
+                "You can:\n"
+                "- Fill in the empty fields manually in the form below, then "
+                "save the partial thesis as a starting point.\n"
+                "- Or cancel and re-import using **Live AI extraction** for "
+                "better results.",
+                icon="🚨",
+            )
+
+        # Preview summary metrics
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("Drivers found",     summ["drivers_count"])
+        sc1.metric("Catalysts found",   summ["catalysts_count"])
+        sc2.metric("Risks found",       summ["risks_count"])
+        sc2.metric("Risk matrix rows",  summ["risk_matrix_count"])
+        sc3.metric("Bull / Base / Bear",
+                   f"{summ['bull_prob']:.0f} / {summ['base_prob']:.0f} / "
+                   f"{summ['bear_prob']:.0f}")
 
         # ── 🐞 Debug: parsed JSON BEFORE save ────────────────────────────
         with st.expander(
@@ -2043,17 +2130,6 @@ def _render_thesis_import_section(
                 st.json(asdict(preview))
             except Exception as _e:  # noqa: BLE001
                 st.error(f"Could not render parsed JSON: {_e}")
-
-        # Preview summary metrics (read-only counters above the form)
-        summ = preview_summary_fn(preview)
-        sc1, sc2, sc3 = st.columns(3)
-        sc1.metric("Drivers found",     summ["drivers_count"])
-        sc1.metric("Catalysts found",   summ["catalysts_count"])
-        sc2.metric("Risks found",       summ["risks_count"])
-        sc2.metric("Risk matrix rows",  summ["risk_matrix_count"])
-        sc3.metric("Bull / Base / Bear",
-                   f"{summ['bull_prob']:.0f} / {summ['base_prob']:.0f} / "
-                   f"{summ['bear_prob']:.0f}")
 
         # ── Overwrite confirmation (outside the form, no submit needed) ──
         confirm_ok = True
@@ -2073,9 +2149,14 @@ def _render_thesis_import_section(
                 key=f"confirm_overwrite_{ticker}",
             )
             if confirm_ok:
+                _save_btn_label = (
+                    "💾 Confirm overwrite — save extracted fields"
+                    if is_demo_pending else
+                    "✅ Confirm Save Imported Thesis"
+                )
                 st.info(
-                    "✅ Overwrite confirmed. Scroll to the bottom of the "
-                    "form and click **✅ Confirm Save Imported Thesis** "
+                    f"✅ Overwrite confirmed. Scroll to the bottom of the "
+                    f"form and click **{_save_btn_label}** "
                     "to write this thesis to disk.",
                     icon="👇",
                 )
@@ -2085,15 +2166,33 @@ def _render_thesis_import_section(
                     "checkbox above._"
                 )
 
-        st.caption(
-            "✏️ **Review and edit every field below before saving.** "
-            "Nothing has been written to your holdings yet. After saving, "
-            "you can still fine-tune the thesis in the holding's card below."
-        )
+        if is_demo_pending:
+            st.caption(
+                "✏️ **Review the extracted fields below** — empty fields were "
+                "not found by the rule-based parser. You can fill them in "
+                "manually before saving, or save the partial thesis as a "
+                "starting point and complete it later."
+            )
+        else:
+            st.caption(
+                "✏️ **Review and edit every field below before saving.** "
+                "Nothing has been written to your holdings yet. After saving, "
+                "you can still fine-tune the thesis in the holding's card below."
+            )
 
+        _cancel_label = (
+            "❌ Cancel — use Live AI extraction instead"
+            if is_demo_pending else
+            "❌ Discard import"
+        )
+        _cancel_help = (
+            "Discard the rule-based preview. Turn off Demo Mode in the "
+            "sidebar and re-upload the document to get full AI extraction."
+            if is_demo_pending else
+            "Throw away the extracted preview without saving."
+        )
         cancel_clicked = st.button(
-            "❌ Discard import", key="discard_import", help="Throw away the "
-            "extracted preview without saving.",
+            _cancel_label, key="discard_import", help=_cancel_help,
         )
         if cancel_clicked:
             del st.session_state[PENDING_KEY]
@@ -2105,6 +2204,7 @@ def _render_thesis_import_section(
             save_thesis=save_thesis, filename=filename, kind=kind,
             load_thesis=load_core_thesis,
             last_saved_key=LAST_SAVED_KEY,
+            demo_mode=is_demo_pending,
         )
         if saved:
             del st.session_state[PENDING_KEY]
@@ -2123,6 +2223,7 @@ def _render_import_preview_form(
     *, preview, ticker: str, confirm_ok: bool,
     save_thesis, filename: str, kind: str,
     load_thesis=None, last_saved_key: str = "last_saved_thesis_import",
+    demo_mode: bool = False,
 ) -> bool:
     """Editable form bound to the pending-import preview. Returns True if
     the user submitted and the thesis was saved."""
@@ -2325,11 +2426,20 @@ def _render_import_preview_form(
                     "possible_hedge":           hedge,
                 })
 
+        _submit_label = (
+            f"💾 Save only extracted fields ({ticker})"
+            if demo_mode else
+            f"✅ Confirm Save Imported Thesis ({ticker})"
+        )
         submitted = st.form_submit_button(
-            f"✅ Confirm Save Imported Thesis ({ticker})",
+            _submit_label,
             type="primary", use_container_width=True,
             disabled=(not confirm_ok),
             help=(
+                "Saves the extracted fields (which may be partial) to "
+                "portfolio/core_theses.json. You can fill in the remaining "
+                "empty fields from the holding card below after saving."
+                if demo_mode else
                 "Writes the thesis (with your edits) to "
                 "portfolio/core_theses.json. Disabled until the overwrite "
                 "checkbox above is ticked (when a thesis already exists)."
