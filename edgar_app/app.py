@@ -12,8 +12,6 @@ Structure:
 import sys
 import os
 
-# Ensure edgar/ and ai/ modules are importable whether the app is run from
-# the workspace root (streamlit run edgar_app/app.py) or from edgar_app/.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
@@ -22,7 +20,7 @@ import streamlit as st
 
 from edgar import EdgarAPIError, get_filings, lookup_company
 from edgar.filings import Filing
-from ai.analyzer import OPENAI_AVAILABLE, AnalysisResult, analyze_filing
+from ai.analyzer import AnalysisResult, analyze_filing, get_api_key
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -38,19 +36,19 @@ FILING_TYPES = {
     "8-K":  {"label": "8-K — Current Report (material events)", "limit": 5},
 }
 
-# ── Thesis impact colour map ──────────────────────────────────────────────────
-_IMPACT_COLOR = {
-    "Strong": "🟢",
-    "Stable": "🔵",
-    "Weak":   "🟡",
-    "Broken": "🔴",
-}
-_ACTION_COLOR = {
-    "Buy":    "🟢",
-    "Hold":   "🔵",
-    "Reduce": "🟡",
-    "Exit":   "🔴",
-}
+_IMPACT_COLOR = {"Strong": "🟢", "Stable": "🔵", "Weak": "🟡", "Broken": "🔴"}
+_ACTION_COLOR  = {"Buy": "🟢", "Hold": "🔵", "Reduce": "🟡", "Exit": "🔴"}
+
+
+# ── Resolve API key (checked fresh on every page load) ───────────────────────
+def _st_secrets():
+    try:
+        return st.secrets
+    except Exception:
+        return None
+
+_api_key = get_api_key(_st_secrets())
+_ai_ready = bool(_api_key)
 
 
 # ── Helper: render AI analysis result ────────────────────────────────────────
@@ -59,12 +57,9 @@ def render_analysis(result: AnalysisResult) -> None:
         st.error(f"**Analysis failed:** {result.error}")
         return
 
-    # Top metrics row
-    impact_icon  = _IMPACT_COLOR.get(result.thesis_impact, "⚪")
-    action_icon  = _ACTION_COLOR.get(result.suggested_action, "⚪")
     col1, col2, col3 = st.columns(3)
-    col1.metric("Thesis Impact",    f"{impact_icon} {result.thesis_impact}")
-    col2.metric("Suggested Action", f"{action_icon} {result.suggested_action}")
+    col1.metric("Thesis Impact",    f"{_IMPACT_COLOR.get(result.thesis_impact, '⚪')} {result.thesis_impact}")
+    col2.metric("Suggested Action", f"{_ACTION_COLOR.get(result.suggested_action, '⚪')} {result.suggested_action}")
     col3.metric("Confidence",       f"{result.confidence_score} / 100")
 
     st.markdown("**What changed**")
@@ -96,26 +91,30 @@ def render_filing_card(filing: Filing, company_name: str, index: int) -> None:
         with col_right:
             analyze_key = f"analyze_{filing.accession}"
             result_key  = f"result_{filing.accession}"
-            if st.button("Analyze Filing", key=analyze_key, use_container_width=True):
-                st.session_state[result_key] = None   # clear any prior result
+            btn = st.button(
+                "Analyze Filing",
+                key=analyze_key,
+                use_container_width=True,
+                disabled=not _ai_ready,
+                help=None if _ai_ready else "Add OPENAI_API_KEY to Replit Secrets to enable",
+            )
+            if btn:
+                st.session_state[result_key] = None
                 with st.spinner("Fetching filing and running AI analysis…"):
                     st.session_state[result_key] = analyze_filing(
-                        filing.url, filing.form_type, company_name
+                        filing.url,
+                        filing.form_type,
+                        company_name,
+                        st_secrets=_st_secrets(),
                     )
 
-        # Show result if available for this filing
         if st.session_state.get(result_key) is not None:
             st.divider()
             render_analysis(st.session_state[result_key])
 
 
 # ── Helper: render a filing section ──────────────────────────────────────────
-def render_section(
-    form_type: str,
-    filings: list[Filing],
-    company_name: str,
-    label: str,
-) -> None:
+def render_section(form_type, filings, company_name, label):
     st.subheader(label)
     if not filings:
         st.warning(f"No {form_type} filings found for this company.")
@@ -131,13 +130,20 @@ st.caption(
     "Data is sourced directly from [SEC EDGAR](https://www.sec.gov/cgi-bin/browse-edgar)."
 )
 
-# AI key status banner
-if not OPENAI_AVAILABLE:
-    st.warning(
-        "**AI analysis is disabled** — `OPENAI_API_KEY` not found in secrets. "
-        "Add it in the Replit Secrets panel to enable the Analyze Filing button.",
-        icon="🔑",
-    )
+# ── Debug: API key status (does not reveal the key value) ────────────────────
+with st.expander("🔑 API Key Status (debug)", expanded=not _ai_ready):
+    if _ai_ready:
+        st.success("API key found — AI analysis is enabled.", icon="✅")
+    else:
+        st.error("API key missing — OPENAI_API_KEY not found in environment or Replit Secrets.", icon="❌")
+        st.markdown(
+            "**To fix:**\n"
+            "1. Open the **Secrets** panel (lock icon in the left sidebar)\n"
+            "2. Add a secret named exactly `OPENAI_API_KEY`\n"
+            "3. Click **Restart app** below to reload with the new secret"
+        )
+        if st.button("🔄 Restart app to reload secrets"):
+            st.rerun()
 
 st.divider()
 
@@ -165,7 +171,6 @@ if search_clicked or ticker_input:
             st.error(str(e))
             st.stop()
 
-    # Company header
     st.divider()
     st.markdown(f"### {company.name}")
     col1, col2, col3 = st.columns(3)
@@ -174,7 +179,6 @@ if search_clicked or ticker_input:
     col3.metric("Filings Source", "SEC EDGAR")
     st.divider()
 
-    # Fetch all three filing types
     with st.spinner("Fetching filings from SEC EDGAR…"):
         results: dict[str, list[Filing]] = {}
         errors: dict[str, str] = {}
@@ -188,7 +192,6 @@ if search_clicked or ticker_input:
     for form_type, msg in errors.items():
         st.warning(f"Could not fetch {form_type} filings: {msg}")
 
-    # Tabs — one per filing type
     tabs = st.tabs([cfg["label"] for cfg in FILING_TYPES.values()])
     for tab, (form_type, cfg) in zip(tabs, FILING_TYPES.items()):
         with tab:
@@ -212,5 +215,3 @@ else:
 | **10-Q** | Quarterly Report | Unaudited financial report filed each quarter |
 | **8-K** | Current Report | Material events (earnings, mergers, leadership changes) |
         """)
-    if OPENAI_AVAILABLE:
-        st.success("✅ OpenAI API key detected — AI analysis is ready.", icon="🤖")

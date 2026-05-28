@@ -3,19 +3,15 @@ ai/analyzer.py
 --------------
 Real AI analysis of SEC filings using the OpenAI API.
 
-Reads OPENAI_API_KEY from environment (set it in Replit Secrets).
-Returns a structured AnalysisResult dataclass with investment-relevant fields.
+Reads OPENAI_API_KEY dynamically on every call (not at import time),
+so secrets added after startup are picked up without a restart.
 """
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .fetcher import FetchError, fetch_filing_text
-
-# ── Check for API key at import time (soft check — no crash) ─────────────────
-_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_AVAILABLE = bool(_API_KEY)
 
 
 @dataclass
@@ -27,6 +23,33 @@ class AnalysisResult:
     suggested_action: str     # "Buy" | "Hold" | "Reduce" | "Exit"
     confidence_score: int     # 0–100
     error: str | None = None  # set if analysis failed
+
+
+def get_api_key(st_secrets=None) -> str:
+    """
+    Return the OpenAI API key, checking two sources in order:
+      1. os.environ  (Replit Secrets → env vars)
+      2. st.secrets  (Streamlit secrets.toml, if provided)
+
+    Always evaluated fresh — never cached at module level.
+    Does NOT log or expose the key value.
+    """
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if key:
+        return key
+
+    if st_secrets is not None:
+        try:
+            key = (st_secrets.get("OPENAI_API_KEY") or "").strip()
+        except Exception:
+            pass
+
+    return key
+
+
+# Legacy module-level flag kept for backward compat — reads env at import time.
+# Use get_api_key() instead for reliable runtime checks.
+OPENAI_AVAILABLE: bool = bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
 
 _SYSTEM_PROMPT = """\
@@ -55,15 +78,17 @@ def analyze_filing(
     filing_url: str,
     form_type: str,
     company_name: str,
+    st_secrets=None,
 ) -> AnalysisResult:
     """
     Fetch a filing from SEC.gov and return a structured AI analysis.
 
-    Returns an AnalysisResult with `error` set (and other fields as empty
-    defaults) if the API key is missing or any step fails — never raises.
+    Pass st_secrets=st.secrets from the Streamlit app as a fallback key source.
+    Returns an AnalysisResult with `error` set if anything fails — never raises.
     """
-    # ── Guard: no API key ─────────────────────────────────────────────────────
-    if not OPENAI_AVAILABLE:
+    api_key = get_api_key(st_secrets)
+
+    if not api_key:
         return AnalysisResult(
             what_changed="",
             key_catalysts=[],
@@ -72,12 +97,12 @@ def analyze_filing(
             suggested_action="Hold",
             confidence_score=0,
             error=(
-                "OPENAI_API_KEY is not set. "
-                "Add it to Replit Secrets to enable AI analysis."
+                "OPENAI_API_KEY not found. "
+                "Add it in Replit Secrets (key name must be exactly OPENAI_API_KEY), "
+                "then restart the app."
             ),
         )
 
-    # ── Step 1: Fetch filing text ─────────────────────────────────────────────
     try:
         filing_text = fetch_filing_text(filing_url)
     except FetchError as exc:
@@ -91,11 +116,10 @@ def analyze_filing(
             error=f"Could not fetch filing text: {exc}",
         )
 
-    # ── Step 2: Call OpenAI ───────────────────────────────────────────────────
     try:
-        from openai import OpenAI  # imported here so missing package doesn't break the whole module
+        from openai import OpenAI
 
-        client = OpenAI(api_key=_API_KEY)
+        client = OpenAI(api_key=api_key)
         user_prompt = (
             f"Company: {company_name}\n"
             f"Filing type: {form_type}\n\n"
@@ -115,7 +139,7 @@ def analyze_filing(
         raw_json = response.choices[0].message.content or "{}"
         data = json.loads(raw_json)
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return AnalysisResult(
             what_changed="",
             key_catalysts=[],
@@ -126,7 +150,6 @@ def analyze_filing(
             error=f"OpenAI error: {exc}",
         )
 
-    # ── Step 3: Parse response into dataclass ─────────────────────────────────
     return AnalysisResult(
         what_changed=data.get("what_changed", "No summary returned."),
         key_catalysts=data.get("key_catalysts", []),
