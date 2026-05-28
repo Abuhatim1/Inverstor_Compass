@@ -1814,120 +1814,242 @@ def render_holdings_tab() -> None:
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
     with st.expander("➕ Add / Update Holding", expanded=not holdings):
+        from ticker_validator import validate_yahoo_ticker, suggest_saudi_ticker
+
         st.caption(
-            "Holdings are independent from SEC search. Add any asset — stocks, ETFs, "
-            "gold, cash, commodities — with or without a market ticker."
+            "Holdings are fully independent from SEC search. "
+            "Add any asset — stocks, ETFs, gold, cash, commodities — "
+            "with or without a market ticker."
         )
+
+        # ══════════════════════════════════════════════════════════════════
+        # Step 1 — Ticker lookup  (outside form so yfinance call is safe)
+        # ══════════════════════════════════════════════════════════════════
+        st.markdown("#### Step 1 — Ticker / Asset ID")
+        _ah_has_tk = st.checkbox(
+            "Has a market ticker (Yahoo Finance)",
+            value=True,
+            key="ah_has_tk_outer",
+        )
+
+        if _ah_has_tk:
+            tk_c1, tk_c2 = st.columns([3, 1])
+            with tk_c1:
+                _ah_tk_input = st.text_input(
+                    "Ticker symbol",
+                    key="ah_tk_input",
+                    placeholder="AAPL  ·  1120.SR  ·  GLD  ·  GC=F  ·  XAUUSD=X",
+                    help=(
+                        "US equity: AAPL, MSFT  |  Saudi: 1120.SR, 2222.SR  |  "
+                        "Gold ETF: GLD, IAU  |  Gold futures: GC=F  |  "
+                        "Silver futures: SI=F  |  Forex: XAUUSD=X"
+                    ),
+                )
+            with tk_c2:
+                st.write("")
+                _do_validate = st.button(
+                    "🔍 Validate",
+                    key="ah_validate_btn",
+                    use_container_width=True,
+                    help="Check this ticker on Yahoo Finance and auto-fill details.",
+                )
+
+            # ── Watchlist quick-fill ─────────────────────────────────────
+            _wl_opts = sorted(watchlist.keys())
+            if _wl_opts:
+                wl_c1, wl_c2 = st.columns([3, 1])
+                with wl_c1:
+                    _wl_pick = st.selectbox(
+                        "Or quick-fill from Research Watchlist",
+                        options=["— enter manually —"] + _wl_opts,
+                        key="ah_wl_pick_outer",
+                        label_visibility="visible",
+                    )
+                with wl_c2:
+                    st.write("")
+                    if (
+                        st.button("📋 Use", key="ah_wl_use_btn", use_container_width=True)
+                        and _wl_pick != "— enter manually —"
+                    ):
+                        _do_validate = True
+                        st.session_state["ah_tk_input"] = _wl_pick
+                        _ah_tk_input = _wl_pick
+
+            # ── Saudi 4-digit shorthand suggestion ───────────────────────
+            _sa_sug = suggest_saudi_ticker(_ah_tk_input)
+            if _sa_sug:
+                sa_c1, sa_c2 = st.columns([3, 1])
+                with sa_c1:
+                    st.caption(
+                        f"💡 Looks like a Saudi stock code — did you mean **{_sa_sug}** "
+                        "(Yahoo Finance format)?"
+                    )
+                with sa_c2:
+                    if st.button(f"Use {_sa_sug}", key="ah_sa_btn", use_container_width=True):
+                        st.session_state["ah_tk_input"] = _sa_sug
+                        _ah_tk_input = _sa_sug
+                        _do_validate = True
+
+            # ── Run validation ───────────────────────────────────────────
+            if _do_validate:
+                _tk_to_check = _ah_tk_input.strip().upper()
+                if _tk_to_check:
+                    with st.spinner(f"Checking **{_tk_to_check}** on Yahoo Finance…"):
+                        _vr = validate_yahoo_ticker(_tk_to_check)
+                    st.session_state["ah_validation"] = _vr
+
+            # ── Show result badge ────────────────────────────────────────
+            _val = st.session_state.get("ah_validation")
+            if _val:
+                if _val.exists:
+                    st.success(
+                        f"✅ **Yahoo-linked** — {_val.resolved_ticker}  "
+                        f"·  {_val.company_name or '—'}"
+                    )
+                    _vc1, _vc2, _vc3, _vc4 = st.columns(4)
+                    _vc1.metric("Live Price", f"{_val.current_price:.4f}" if _val.current_price else "—")
+                    _vc2.metric("Currency",   _val.currency  or "—")
+                    _vc3.metric("Exchange",   _val.exchange  or "—")
+                    _vc4.metric("Type",       _val.asset_type or "—")
+                else:
+                    st.warning(
+                        f"⚠️ **Yahoo unavailable** — {_val.resolved_ticker} not found on "
+                        "Yahoo Finance. Asset will be saved as **Manual-priced**."
+                    )
+                    if _val.error:
+                        st.caption(f"Reason: {_val.error}")
+        else:
+            _val = None
+            st.info(
+                "ℹ️ No ticker — price and valuation will be entered manually. "
+                "yfinance will not be used for this asset.",
+                icon="ℹ️",
+            )
+
+        st.divider()
+
+        # ══════════════════════════════════════════════════════════════════
+        # Step 2 — Holding details  (inside form)
+        # ══════════════════════════════════════════════════════════════════
+        st.markdown("#### Step 2 — Holding Details")
+
+        _val = st.session_state.get("ah_validation")
+
+        # Pre-fill helpers from validation result
+        _pf_ticker = _val.resolved_ticker if _val and _val.exists else ""
+        _pf_name   = _val.company_name    if _val and _val.exists else ""
+        _pf_price  = float(_val.current_price or 0.0) if _val and _val.exists else 0.0
+        _pf_cur_idx = 0
+        if _val and _val.exists and _val.currency and _val.currency in CURRENCIES:
+            _pf_cur_idx = CURRENCIES.index(_val.currency)
+        _pf_type_idx = 0
+        if _val and _val.exists and _val.asset_type and _val.asset_type in ASSET_TYPES:
+            _pf_type_idx = ASSET_TYPES.index(_val.asset_type)
+
         with st.form("add_holding_manual", clear_on_submit=True):
 
-            # ── Identifier row ────────────────────────────────────────────────
-            id_c1, id_c2, id_c3 = st.columns([1, 2, 2])
-            with id_c1:
-                ah_has_ticker = st.checkbox("Has market ticker", value=True, key="ah_has_tk")
-            with id_c2:
-                if ah_has_ticker:
-                    ah_ticker_raw = st.text_input(
-                        "Ticker symbol",
-                        key="ah_tk",
-                        placeholder="AAPL · 1120.SR · GLD · GC=F · 7010.SR",
-                        help=(
-                            "US: AAPL, MSFT | Saudi: 1120.SR, 2222.SR | "
-                            "Gold ETF: GLD, IAU | Futures: GC=F"
-                        ),
-                    )
-                else:
-                    ah_ticker_raw = st.text_input(
-                        "Asset ID (unique slug, no spaces)",
-                        key="ah_tk",
-                        placeholder="PHYS_GOLD · CASH_SAR · GOLD_COINS",
-                        help=(
-                            "Short identifier used as the storage key. "
-                            "Use underscores, no spaces. E.g. PHYS_GOLD, CASH_SAR."
-                        ),
-                    )
-            with id_c3:
-                # Optional: pre-fill from watchlist
-                wl_options = sorted(watchlist.keys())
-                ah_wl_pick = st.selectbox(
-                    "Or pick from Research Watchlist",
-                    options=["— enter manually —"] + wl_options,
-                    key="ah_wl",
-                    help="Selecting a watchlist ticker pre-fills the ticker field.",
+            # ── Identifier ────────────────────────────────────────────────
+            if _ah_has_tk:
+                ah_ticker_input = st.text_input(
+                    "Ticker symbol (confirm / edit)",
+                    value=_pf_ticker,
+                    key="ah_tk_form",
+                    help="Pre-filled from validation above. Edit if needed.",
+                )
+            else:
+                ah_ticker_input = st.text_input(
+                    "Asset ID (unique slug, no spaces)",
+                    key="ah_tk_form",
+                    placeholder="PHYS_GOLD · CASH_SAR · GOLD_COINS",
+                    help=(
+                        "Short key used for storage — no spaces, use underscores. "
+                        "Examples: PHYS_GOLD, CASH_SAR, GOLD_COINS."
+                    ),
                 )
 
-            # ── Core fields ───────────────────────────────────────────────────
+            # ── Core fields ────────────────────────────────────────────────
             fc1, fc2 = st.columns(2)
             with fc1:
-                _wl_name = (
-                    watchlist[ah_wl_pick].company_name
-                    if ah_wl_pick != "— enter manually —" and ah_wl_pick in watchlist
-                    else ""
-                )
                 ah_name = st.text_input(
                     "Asset name / company",
-                    value=_wl_name,
-                    key="ah_co",
+                    value=_pf_name,
+                    key="ah_co_form",
                     placeholder="Apple Inc. · Physical Gold · Cash - Saudi Riyal",
                 )
-                ah_asset_type = st.selectbox("Asset type", ASSET_TYPES, key="ah_type")
-                ah_market = st.selectbox("Market", MARKETS, key="ah_mkt")
-                ah_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="ah_sec")
+                ah_asset_type = st.selectbox(
+                    "Asset type", ASSET_TYPES,
+                    index=_pf_type_idx,
+                    key="ah_type_form",
+                )
+                ah_market = st.selectbox("Market", MARKETS, key="ah_mkt_form")
+                ah_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="ah_sec_form")
             with fc2:
-                ah_currency = st.selectbox("Currency", CURRENCIES, key="ah_cur")
+                ah_currency = st.selectbox(
+                    "Currency", CURRENCIES,
+                    index=_pf_cur_idx,
+                    key="ah_cur_form",
+                )
                 ah_qty = st.number_input(
-                    "Quantity", min_value=0.0, step=1.0, format="%.4f", key="ah_qty",
+                    "Quantity",
+                    min_value=0.0, step=1.0, format="%.4f",
+                    key="ah_qty_form",
                 )
                 ah_cost = st.number_input(
                     "Avg cost per unit",
-                    min_value=0.0, step=0.01, format="%.4f", key="ah_cost",
+                    min_value=0.0, step=0.01, format="%.4f",
+                    key="ah_cost_form",
                     help="Weighted-average cost you paid per share / unit / gram.",
                 )
                 ah_price = st.number_input(
                     "Current price per unit",
-                    min_value=0.0, step=0.01, format="%.4f", key="ah_price",
+                    value=_pf_price,
+                    min_value=0.0, step=0.01, format="%.4f",
+                    key="ah_price_form",
                     help=(
-                        "For manual assets (no ticker) this is your best estimate. "
-                        "For ticker assets, yfinance will override this on next refresh."
+                        "Auto-filled from Yahoo Finance when validated. "
+                        "For manual assets enter your best estimate."
                     ),
                 )
 
-            # ── Optional fields ───────────────────────────────────────────────
+            # ── Optional fields ───────────────────────────────────────────
             opt1, opt2 = st.columns(2)
             with opt1:
                 ah_pdate = st.date_input(
-                    "Purchase date (optional)", value=None, key="ah_pdate",
+                    "Purchase date (optional)", value=None, key="ah_pdate_form",
                 )
             with opt2:
                 ah_notes = st.text_input(
-                    "Notes (optional)", key="ah_notes", max_chars=200,
+                    "Notes (optional)", key="ah_notes_form", max_chars=200,
                     placeholder="e.g. bought via Tadawul, held in safe deposit box…",
                 )
 
-            # ── SEC-link indicator ────────────────────────────────────────────
-            _sec_linked = (
-                ah_has_ticker
+            # ── Status badges ─────────────────────────────────────────────
+            _yahoo_linked = bool(_val and _val.exists and _ah_has_tk)
+            _sec_linked   = (
+                _yahoo_linked
                 and ah_market == "US"
                 and ah_asset_type in ("Stock", "ETF")
             )
-            if _sec_linked:
-                st.info(
-                    "🏛️ US equity / ETF — filing intelligence may be available via "
-                    "SEC EDGAR. Run a **🔍 Filing Search** to link this ticker.",
-                    icon="ℹ️",
-                )
+            _badges = []
+            if _yahoo_linked:
+                _badges.append("✅ Yahoo-linked")
             else:
+                _badges.append("⚠️ Manual-priced")
+            if _sec_linked:
+                _badges.append("🏛️ SEC-linked")
+            else:
+                _badges.append("ℹ️ No SEC link")
+            st.caption("  ·  ".join(_badges))
+
+            if not _sec_linked:
                 st.caption(
-                    "ℹ️ No SEC link — manual / market-data mode. "
-                    "Filing intelligence unavailable for this asset."
+                    "Filing intelligence unavailable for this asset — "
+                    "only US equities/ETFs with a verified ticker have SEC access."
                 )
 
+            # ── Submit ────────────────────────────────────────────────────
             if st.form_submit_button("💼 Add / Update Holding", type="primary"):
-                # Resolve ticker: prefer watchlist pick if "enter manually" not chosen
-                if ah_wl_pick != "— enter manually —" and ah_wl_pick:
-                    ticker_key = ah_wl_pick.strip().upper()
-                else:
-                    ticker_key = ah_ticker_raw.strip().replace(" ", "_").upper()
-
+                ticker_key = ah_ticker_input.strip().replace(" ", "_").upper()
                 if not ticker_key:
                     st.error("Ticker / Asset ID is required.")
                 elif ah_qty <= 0:
@@ -1943,13 +2065,15 @@ def render_holdings_tab() -> None:
                         current_price=ah_price,
                         asset_type=ah_asset_type,
                         currency=ah_currency,
-                        has_ticker=ah_has_ticker,
+                        has_ticker=_ah_has_tk,
                         sec_linked=_sec_linked,
                         purchase_date=str(ah_pdate) if ah_pdate else "",
                         notes=ah_notes,
-                        price_source="manual",
+                        price_source="yfinance" if _yahoo_linked else "manual",
                         price_date=date.today().isoformat(),
                     )
+                    # Clear validation so next open starts fresh
+                    st.session_state.pop("ah_validation", None)
                     st.toast(f"{ticker_key} added / updated in Holdings", icon="💼")
                     st.rerun()
 
