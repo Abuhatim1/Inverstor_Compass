@@ -1,0 +1,83 @@
+Update the investment engine by adding a Damodaran-Informed Value Driver Engine before the Signal Prioritization Engine.
+
+Purpose:
+The system should not prioritize events only because they look positive or negative. It should prioritize based on whether the event changes intrinsic value drivers.
+
+Core valuation logic:
+Every event, SEC filing, uploaded report, or company update must be evaluated across the following Damodaran-style value drivers:
+
+1. Cash Flow Impact
+- Does the event improve or weaken operating cash flows?
+- Is the impact temporary or recurring?
+- Is the company moving closer to sustainable free cash flow?
+
+2. Growth Quality
+- Is revenue growth accelerating or decelerating?
+- Is growth supported by fundamentals or just narrative?
+- Is growth value-creating or value-destroying?
+
+3. Reinvestment Efficiency
+- Is the company reinvesting effectively?
+- Are R&D, CAPEX, acquisitions, or working capital producing better growth?
+- If reinvestment rises without better growth, flag as negative.
+
+4. Margin Trajectory
+- Are operating margins improving, stable, or compressing?
+- Is margin improvement structural or one-off?
+- Compare current margin direction with previous filings or uploaded reports.
+
+5. Cost of Capital / Risk
+- Does the event increase business risk, financial risk, regulatory risk, or country risk?
+- Does leverage, uncertainty, litigation, cyclicality, or macro sensitivity increase?
+- If risk rises, increase discount-rate pressure.
+
+6. Competitive Advantage / Moat
+- Does the event strengthen or weaken pricing power, market share, switching costs, data advantage, regulatory moat, reimbursement access, or brand strength?
+- Separate real moat from management claims.
+
+7. Narrative vs Numbers Consistency
+- Compare management narrative with actual numbers.
+- If management tone is positive but numbers deteriorate, flag narrative risk.
+- If numbers confirm the thesis, increase confidence.
+
+8. Valuation Gap / Repricing Risk
+- Decide whether the event is likely to change market expectations.
+- Classify repricing probability as Low / Medium / High.
+- Distinguish accounting noise from true value-driver change.
+
+Output required for each analyzed document or event:
+
+A. Damodaran Value Driver Summary
+- Cash Flow Impact: Positive / Neutral / Negative
+- Growth Quality: Improving / Stable / Weakening
+- Reinvestment Efficiency: Improving / Stable / Weakening / Unknown
+- Margin Trajectory: Improving / Stable / Weakening
+- Cost of Capital Pressure: Low / Medium / High
+- Moat Direction: Strengthening / Stable / Weakening
+- Narrative vs Numbers: Aligned / Mixed / Diverging
+- Repricing Risk: Low / Medium / High
+
+B. Valuation Impact
+Classify:
+- Value Accretive
+- Neutral
+- Value Destructive
+- Unclear / Low Confidence
+
+C. Reasoning
+Provide 3-5 concise reasons grounded in evidence from the filing or uploaded document.
+
+D. Evidence Requirement
+Every valuation conclusion must include:
+- source section if available
+- extracted metric or quoted text
+- confidence level
+
+E. Feed into prioritization
+Create a future-ready priority formula:
+
+Priority Score =
+Thesis Impact × Valuation Impact × Risk Change × Confidence × Portfolio Weight
+
+Do not build a full DCF yet.
+Keep it rule-based, lightweight, and explainable.

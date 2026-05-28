@@ -29,6 +29,7 @@ from ai.uploader import (
     SOURCE_ICON, SOURCE_LABELS,
     analyze_uploaded, extract_text,
 )
+from ai.valuation import DRIVER_DISPLAY, VALUATION_IMPACT_BADGE
 from portfolio import (
     # state
     PortfolioEntry,
@@ -264,6 +265,10 @@ def render_analysis(result: AnalysisResult) -> None:
     if result.evidence:
         _render_evidence_section(result.evidence, has_comparison=result.comparison is not None)
 
+    # ── Damodaran Value Driver Analysis ───────────────────────────────────────
+    if result.valuation:
+        _render_valuation_section(result.valuation)
+
 
 def _render_evidence_section(evidence: list, has_comparison: bool) -> None:
     """Render collapsible evidence cards — one per financial field."""
@@ -322,6 +327,67 @@ def _render_evidence_card(ev, has_comparison: bool) -> None:
         # Interpretation
         if ev.interpretation:
             st.info(f"💡 {ev.interpretation}", icon="💡")
+
+
+def _render_valuation_section(val) -> None:
+    """Render the Damodaran Value Driver Analysis section."""
+    from ai.valuation import DRIVER_DISPLAY, VALUATION_IMPACT_BADGE
+
+    v_icon, v_label = VALUATION_IMPACT_BADGE.get(
+        val.valuation_impact, ("❓", val.valuation_impact)
+    )
+    priority = val.priority_score
+
+    # Priority colour
+    if priority >= 65:
+        p_color = "🟢"
+    elif priority >= 35:
+        p_color = "🟡"
+    else:
+        p_color = "🔴"
+
+    st.divider()
+    with st.expander(
+        f"📈 Damodaran Value Driver Analysis — {v_icon} {v_label} · "
+        f"Priority {p_color} {priority}/100"
+    ):
+        st.caption(
+            "Every conclusion is grounded in evidence from the filing. "
+            "Priority = Thesis × Valuation × Risk × Confidence."
+        )
+
+        # ── 8-driver grid (4 columns × 2 rows) ───────────────────────────────
+        drivers = val.drivers
+        cols = st.columns(4)
+        for idx, (field_attr, notes_attr, label, icon_map) in enumerate(DRIVER_DISPLAY):
+            rating = getattr(drivers, field_attr, "—")
+            notes  = getattr(drivers, notes_attr, "")
+            icon   = icon_map.get(rating, "❓")
+            with cols[idx % 4]:
+                st.metric(label, f"{icon} {rating}")
+                if notes:
+                    st.caption(notes)
+
+        # ── Valuation impact + priority ───────────────────────────────────────
+        st.divider()
+        pi1, pi2 = st.columns([2, 1])
+        with pi1:
+            st.markdown(f"**Overall Valuation Impact:** {v_icon} **{v_label}**")
+        with pi2:
+            st.metric(
+                "Priority Score",
+                f"{p_color} {priority} / 100",
+                help=(
+                    "Priority = Thesis × Valuation × Risk Factor × Confidence. "
+                    "High score = event likely to move intrinsic value meaningfully."
+                ),
+            )
+
+        # ── Reasoning bullets ─────────────────────────────────────────────────
+        if val.valuation_reasoning:
+            st.markdown("**Valuation Reasoning** *(evidence-grounded)*")
+            for reason in val.valuation_reasoning:
+                st.markdown(f"- {reason}")
 
 
 def render_delta_card(d: DeltaRecord) -> None:

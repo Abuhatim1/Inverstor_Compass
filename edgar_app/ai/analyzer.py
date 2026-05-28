@@ -29,6 +29,14 @@ from .cache import (
 )
 from .comparator import FilingComparison, comparison_from_dict
 from .evidence import EvidenceItem, evidence_from_list
+from .valuation import (
+    ValuationResult,
+    ValueDrivers,
+    compute_priority_score,
+    valuation_from_dict,
+    valuation_from_cached,
+    VALUATION_SCHEMA,
+)
 from .fetcher import (
     FetchError,
     FilingTooLargeError,
@@ -53,6 +61,43 @@ class AnalysisResult:
     comparison:       FilingComparison | None = None
     evidence:         list[EvidenceItem] = field(default_factory=list)
     source_label:     str = "SEC"            # e.g. "SEC Filing", "Tadawul Announcement"
+    valuation:        ValuationResult | None = None  # Damodaran value driver analysis
+
+
+# ── Demo valuation ────────────────────────────────────────────────────────────
+
+_DEMO_VALUATION = ValuationResult(
+    drivers=ValueDrivers(
+        cash_flow_impact="Positive",
+        cash_flow_notes="Operating cash flow rose ~20%, driven by 14% revenue growth and 200 bps margin expansion.",
+        growth_quality="Improving",
+        growth_quality_notes="Growth acceleration is supported by new enterprise contracts, not just volume.",
+        reinvestment_efficiency="Improving",
+        reinvestment_notes="R&D spend rose 12% while revenue grew 14%, suggesting productive reinvestment above hurdle rate.",
+        margin_trajectory="Improving",
+        margin_notes="Operating margin expanded to 28% from 26% — driven by operating leverage, not one-off items.",
+        cost_of_capital_pressure="Low",
+        capital_pressure_notes="Debt reduced, FX hedging covers ~60% of international exposure; no new material liabilities.",
+        moat_direction="Strengthening",
+        moat_notes="Multi-year enterprise contracts increase switching costs and add revenue visibility.",
+        narrative_vs_numbers="Aligned",
+        narrative_notes="Management raised guidance and the reported numbers confirm the positive trajectory.",
+        repricing_risk="Medium",
+        repricing_notes="Margin expansion and guidance raise are positive surprises that may not be fully priced in.",
+    ),
+    valuation_impact="Value Accretive",
+    valuation_reasoning=[
+        "Operating cash flow grew ~20% on 14% revenue growth and 200 bps margin expansion — a compounding positive.",
+        "New enterprise contracts improve growth quality and reduce churn, lifting the long-run growth rate assumption.",
+        "Guidance raised at midpoint by ~$1B signals management confidence in sustained demand; repricing risk is medium.",
+    ],
+    priority_score=compute_priority_score(
+        thesis_impact="Strong",
+        valuation_impact="Value Accretive",
+        cost_of_capital_pressure="Low",
+        confidence_score=72,
+    ),
+)
 
 
 # ── Demo result ───────────────────────────────────────────────────────────────
@@ -94,6 +139,7 @@ _DEMO_RESULT = AnalysisResult(
         guidance_trend="raised",
         conviction_adjustment=12,
     ),
+    valuation=_DEMO_VALUATION,
     evidence=[
         EvidenceItem(
             field="revenue_growth",
@@ -228,6 +274,7 @@ _SYSTEM_PROMPT = (
     '  "suggested_action": "Buy | Hold | Reduce | Exit",\n'
     '  "confidence_score": 0-100,\n'
     + _EVIDENCE_SCHEMA +
+    VALUATION_SCHEMA +
     "}\n\n"
     "Definitions:\n"
     "- thesis_impact: effect on a long investment thesis\n"
@@ -268,6 +315,8 @@ _COMPARISON_SYSTEM_PROMPT = (
     "- management_tone: tone of CURRENT filing language vs PREVIOUS filing\n"
     "- what_improved / what_weakened: specific, concrete, with numbers where possible\n"
     "- For evidence: previous_value and delta MUST use PREVIOUS filing data for comparison\n"
+    + VALUATION_SCHEMA +
+    "- For value_drivers: base ratings on what actually CHANGED between current and previous filing\n"
 )
 
 
@@ -290,16 +339,18 @@ def _result_to_dict(r: AnalysisResult) -> dict:
 
 
 def _dict_to_cached_result(d: dict) -> AnalysisResult:
-    """Re-hydrate a cached dict. Evidence items are reconstructed; no comparison data."""
-    _skip = {"is_cached", "error", "cached_at", "comparison", "evidence"}
-    # Reconstruct evidence list
-    evidence = evidence_from_list(d.get("evidence") or [])
-    # Filter remaining fields
-    filtered = {
+    """Re-hydrate a cached dict. Evidence + valuation are reconstructed; no comparison."""
+    _skip = {"is_cached", "error", "cached_at", "comparison", "evidence", "valuation"}
+    evidence  = evidence_from_list(d.get("evidence") or [])
+    valuation = valuation_from_cached(d.get("valuation"))
+    filtered  = {
         k: v for k, v in d.items()
         if k in AnalysisResult.__dataclass_fields__ and k not in _skip
     }
-    return AnalysisResult(**filtered, is_cached=True, error=None, evidence=evidence)
+    return AnalysisResult(
+        **filtered, is_cached=True, error=None,
+        evidence=evidence, valuation=valuation,
+    )
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -402,11 +453,14 @@ def analyze_filing(
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=1800,   # room for evidence + comparison + core fields
+            max_tokens=2400,   # evidence + comparison + value_drivers + core fields
         )
 
         raw_json = response.choices[0].message.content or "{}"
         data     = json.loads(raw_json)
+
+        thesis_impact    = data.get("thesis_impact", "Stable")
+        confidence_score = int(data.get("confidence_score", 0))
 
         # Parse comparison block (comparison mode only)
         comparison: FilingComparison | None = None
@@ -419,15 +473,29 @@ def analyze_filing(
         # Parse evidence block (always requested)
         evidence = evidence_from_list(data.get("evidence") or [])
 
+        # Parse Damodaran value driver block (always requested)
+        valuation: ValuationResult | None = valuation_from_dict(
+            data.get("value_drivers")
+        )
+        if valuation is not None:
+            valuation.priority_score = compute_priority_score(
+                thesis_impact=thesis_impact,
+                valuation_impact=valuation.valuation_impact,
+                cost_of_capital_pressure=valuation.drivers.cost_of_capital_pressure,
+                confidence_score=confidence_score,
+            )
+
         result = AnalysisResult(
             what_changed=data.get("what_changed", "No summary returned."),
             key_catalysts=data.get("key_catalysts", []),
             key_risks=data.get("key_risks", []),
-            thesis_impact=data.get("thesis_impact", "Stable"),
+            thesis_impact=thesis_impact,
             suggested_action=data.get("suggested_action", "Hold"),
-            confidence_score=int(data.get("confidence_score", 0)),
+            confidence_score=confidence_score,
             comparison=comparison,
             evidence=evidence,
+            source_label=source_label,
+            valuation=valuation,
         )
 
         if cache_key:
@@ -448,6 +516,7 @@ def analyze_filing(
                 is_demo=True,
                 comparison=demo.comparison,
                 evidence=demo.evidence,
+                valuation=demo.valuation,
                 error="OpenAI quota exceeded — showing demo analysis. "
                       "Check billing at platform.openai.com.",
             )
