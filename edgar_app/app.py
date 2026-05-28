@@ -1810,6 +1810,7 @@ def _render_thesis_import_section(
     that runs a rule-based section parser on the document instead.
     """
     from dataclasses import asdict
+    from portfolio import load_core_thesis
 
     PENDING_KEY    = "pending_thesis_import"
     QUOTA_KEY      = "pending_thesis_quota_fallback"
