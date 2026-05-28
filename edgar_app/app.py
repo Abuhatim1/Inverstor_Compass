@@ -2,12 +2,12 @@
 app.py — SEC EDGAR Filing Research Tool
 ----------------------------------------
 Streamlit UI for SEC filings with AI analysis, Portfolio State Engine,
-and Delta Intelligence Engine.
+Delta Intelligence Engine, and Historical Filing Comparison.
 
 Structure:
   edgar/       — EDGAR API data layer
-  ai/          — AI analysis (fetcher + analyzer)
-  portfolio/   — Portfolio state (state.py) + delta detection (delta.py)
+  ai/          — AI analysis: fetcher, analyzer, cache, comparator
+  portfolio/   — State engine, delta detection, comparison store
   app.py       — This file: UI only
 """
 
@@ -25,8 +25,14 @@ from edgar.filings import Filing
 from ai.analyzer import AnalysisResult, analyze_filing, get_api_key
 from ai.cache import DAILY_LIMIT, cache_size, get_today_count
 from portfolio import (
-    DeltaRecord,
+    # state
     PortfolioEntry,
+    delete_ticker,
+    load_portfolio,
+    update_portfolio,
+    # delta
+    DeltaRecord,
+    load_delta_history,
     ALERT_ACTION_DOWNGRADED,
     ALERT_ACTION_UPGRADED,
     ALERT_CONVICTION_DROPPED,
@@ -35,10 +41,14 @@ from portfolio import (
     ALERT_RISING_RISK,
     ALERT_THESIS_IMPROVED,
     ALERT_THESIS_WEAKENED,
-    delete_ticker,
-    load_delta_history,
-    load_portfolio,
-    update_portfolio,
+    # comparison
+    ComparisonRecord,
+    TREND_ICON,
+    TONE_ICON,
+    GUIDANCE_ICON,
+    build_comparison_record,
+    load_comparison_history,
+    save_comparison,
 )
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -58,7 +68,6 @@ FILING_TYPES = {
 _IMPACT_COLOR = {"Strong": "🟢", "Stable": "🔵", "Weak": "🟡", "Broken": "🔴"}
 _ACTION_COLOR  = {"Buy": "🟢",   "Hold": "🔵",  "Reduce": "🟡", "Exit": "🔴"}
 
-# Alert → (icon, short label) for the Recent Changes panel
 _ALERT_DISPLAY = {
     ALERT_THESIS_WEAKENED:    ("🔴", "Thesis weakened"),
     ALERT_THESIS_IMPROVED:    ("🟢", "Thesis improved"),
@@ -68,6 +77,22 @@ _ALERT_DISPLAY = {
     ALERT_ACTION_UPGRADED:    ("🟢", "Action upgraded"),
     ALERT_CONVICTION_DROPPED: ("🔴", "Conviction dropped"),
     ALERT_CONVICTION_IMPROVED:("🟢", "Conviction improved"),
+}
+
+# Trend label → human-friendly text for comparison table
+_TREND_LABEL = {
+    "improving": "Improving",
+    "stable":    "Stable",
+    "declining": "Declining",
+    "positive":  "Positive",
+    "neutral":   "Neutral",
+    "cautious":  "Cautious",
+    "negative":  "Negative",
+    "raised":    "Raised",
+    "maintained":"Maintained",
+    "lowered":   "Lowered",
+    "withdrawn": "Withdrawn",
+    "not_mentioned": "—",
 }
 
 
@@ -127,8 +152,13 @@ with st.sidebar:
 _analyze_enabled = _ai_ready or demo_mode
 
 
-# ── Helper: render AI analysis result ────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Render helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def render_analysis(result: AnalysisResult) -> None:
+    """Render one AnalysisResult: status badge, metrics, narrative, comparison."""
+    # ── Status banner ─────────────────────────────────────────────────────────
     if result.is_cached:
         st.success("📦 Cached result — loaded instantly, no API call made.", icon="📦")
     elif result.is_demo:
@@ -140,6 +170,7 @@ def render_analysis(result: AnalysisResult) -> None:
         st.error(f"**Analysis failed:** {result.error}")
         return
 
+    # ── Core metrics ──────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
     col1.metric("Thesis Impact",    f"{_IMPACT_COLOR.get(result.thesis_impact,'⚪')} {result.thesis_impact}")
     col2.metric("Suggested Action", f"{_ACTION_COLOR.get(result.suggested_action,'⚪')} {result.suggested_action}")
@@ -158,34 +189,75 @@ def render_analysis(result: AnalysisResult) -> None:
         for item in result.key_risks:
             st.markdown(f"- {item}")
 
+    # ── Historical Comparison (only when available) ───────────────────────────
+    if result.comparison:
+        c = result.comparison
+        adj = c.conviction_adjustment
+        adj_sign = "+" if adj > 0 else ""
+        adj_color = "🟢" if adj > 0 else ("🔴" if adj < 0 else "⚪")
 
-# ── Helper: render a delta record card ───────────────────────────────────────
+        st.divider()
+        st.markdown(
+            f"**📊 vs. Previous {result.suggested_action and 'Filing'} Comparison** — "
+            f"Conviction adjustment: {adj_color} {adj_sign}{adj}"
+        )
+
+        # Trend grid
+        trend_rows = [
+            ("Revenue growth",   c.revenue_growth_trend, TREND_ICON),
+            ("Margins",          c.margin_trend,          TREND_ICON),
+            ("Cash position",    c.cash_trend,            TREND_ICON),
+            ("Debt / leverage",  c.debt_trend,            TREND_ICON),
+            ("Management tone",  c.management_tone,       TONE_ICON),
+            ("Guidance",         c.guidance_trend,        GUIDANCE_ICON),
+        ]
+        cols = st.columns(3)
+        for idx, (label, value, icon_map) in enumerate(trend_rows):
+            icon = icon_map.get(value, "❓")
+            txt  = _TREND_LABEL.get(value, value.title())
+            cols[idx % 3].metric(label, f"{icon} {txt}")
+
+        # Four narrative sections
+        with st.expander("What improved / weakened / new"):
+            nc1, nc2 = st.columns(2)
+            with nc1:
+                if c.what_improved:
+                    st.markdown("**✅ What improved**")
+                    for item in c.what_improved:
+                        st.markdown(f"- {item}")
+                if c.new_catalysts:
+                    st.markdown("**🚀 New catalysts**")
+                    for item in c.new_catalysts:
+                        st.markdown(f"- {item}")
+            with nc2:
+                if c.what_weakened:
+                    st.markdown("**⚠️ What weakened**")
+                    for item in c.what_weakened:
+                        st.markdown(f"- {item}")
+                if c.new_concerns:
+                    st.markdown("**🔴 New concerns**")
+                    for item in c.new_concerns:
+                        st.markdown(f"- {item}")
+
+
 def render_delta_card(d: DeltaRecord) -> None:
-    # Pick border colour based on most severe alert present
     has_red = any(a in d.alerts for a in (
         ALERT_THESIS_WEAKENED, ALERT_RISING_RISK,
         ALERT_ACTION_DOWNGRADED, ALERT_CONVICTION_DROPPED,
     ))
-    has_green = any(a in d.alerts for a in (
-        ALERT_THESIS_IMPROVED, ALERT_FALLING_RISK,
-        ALERT_ACTION_UPGRADED, ALERT_CONVICTION_IMPROVED,
-    ))
 
     with st.container(border=True):
-        # Header row
         hc1, hc2, hc3 = st.columns([2, 4, 2])
         with hc1:
             st.markdown(f"**{d.ticker}**")
             st.caption(d.company_name)
         with hc2:
-            # Alert badges
             if d.is_first_analysis:
                 st.caption("🆕 First analysis")
             elif d.alerts:
                 badges = " · ".join(
                     f"{_ALERT_DISPLAY[a][0]} {_ALERT_DISPLAY[a][1]}"
-                    for a in d.alerts
-                    if a in _ALERT_DISPLAY
+                    for a in d.alerts if a in _ALERT_DISPLAY
                 )
                 if has_red:
                     st.error(badges)
@@ -197,13 +269,8 @@ def render_delta_card(d: DeltaRecord) -> None:
             st.caption(f"📄 {d.filing_type}")
             st.caption(f"🕐 {d.timestamp[:16].replace('T', ' ')}")
 
-        # State comparison (skip for first analysis)
         if not d.is_first_analysis:
             sc1, sc2, sc3 = st.columns(3)
-            thesis_arrow = (
-                "⬆️" if _IMPACT_COLOR.get(d.thesis_new,"") != _IMPACT_COLOR.get(d.thesis_prev,"")
-                and d.thesis_changed else ""
-            )
             sc1.metric(
                 "Thesis",
                 f"{_IMPACT_COLOR.get(d.thesis_new,'⚪')} {d.thesis_new}",
@@ -221,20 +288,86 @@ def render_delta_card(d: DeltaRecord) -> None:
                 delta_color="normal",
             )
 
-        # What changed lines
         with st.expander("What changed"):
             for line in d.what_changed:
                 st.markdown(f"- {line}")
             if d.catalyst_trend != "same":
-                icon = "📈" if d.catalyst_trend == "more" else "📉"
-                st.markdown(f"- {icon} Catalyst count: {d.catalyst_trend}")
+                st.markdown(f"- {'📈' if d.catalyst_trend == 'more' else '📉'} Catalyst count: {d.catalyst_trend}")
             if d.risk_trend != "same":
-                icon = "⚠️" if d.risk_trend == "more" else "✅"
-                st.markdown(f"- {icon} Risk count: {d.risk_trend}")
+                st.markdown(f"- {'⚠️' if d.risk_trend == 'more' else '✅'} Risk count: {d.risk_trend}")
 
 
-# ── Helper: render a single filing card ──────────────────────────────────────
-def render_filing_card(filing: Filing, company_name: str, ticker: str, index: int) -> None:
+def render_comparison_card(rec: ComparisonRecord) -> None:
+    """Render one ComparisonRecord in the Historical Delta Analysis section."""
+    adj = rec.conviction_adjustment
+    adj_sign  = "+" if adj > 0 else ""
+    adj_color = "🟢" if adj > 0 else ("🔴" if adj < 0 else "⚪")
+
+    with st.container(border=True):
+        hc1, hc2, hc3 = st.columns([2, 4, 2])
+        with hc1:
+            st.markdown(f"**{rec.ticker}**")
+            st.caption(rec.company_name)
+        with hc2:
+            adj_msg = f"Conviction {adj_sign}{adj}"
+            if adj > 0:
+                st.success(f"{adj_color} {adj_msg}")
+            elif adj < 0:
+                st.error(f"{adj_color} {adj_msg}")
+            else:
+                st.caption(f"{adj_color} No conviction change")
+        with hc3:
+            st.caption(f"📄 {rec.filing_type}")
+            st.caption(f"🕐 {rec.timestamp[:16].replace('T', ' ')}")
+
+        # Trend grid (6 cells, 3 per row)
+        tc = st.columns(6)
+        trend_cells = [
+            ("Revenue",  rec.revenue_growth_trend, TREND_ICON),
+            ("Margins",  rec.margin_trend,          TREND_ICON),
+            ("Cash",     rec.cash_trend,            TREND_ICON),
+            ("Debt",     rec.debt_trend,            TREND_ICON),
+            ("Tone",     rec.management_tone,       TONE_ICON),
+            ("Guidance", rec.guidance_trend,        GUIDANCE_ICON),
+        ]
+        for col, (label, value, icon_map) in zip(tc, trend_cells):
+            col.metric(label, f"{icon_map.get(value, '❓')} {_TREND_LABEL.get(value, value)}")
+
+        # Narrative sections (collapsed by default)
+        has_content = any([
+            rec.what_improved, rec.what_weakened,
+            rec.new_catalysts, rec.new_concerns,
+        ])
+        if has_content:
+            with st.expander("Detailed comparison"):
+                nc1, nc2 = st.columns(2)
+                with nc1:
+                    if rec.what_improved:
+                        st.markdown("**✅ Improved**")
+                        for i in rec.what_improved:
+                            st.markdown(f"- {i}")
+                    if rec.new_catalysts:
+                        st.markdown("**🚀 New catalysts**")
+                        for i in rec.new_catalysts:
+                            st.markdown(f"- {i}")
+                with nc2:
+                    if rec.what_weakened:
+                        st.markdown("**⚠️ Weakened**")
+                        for i in rec.what_weakened:
+                            st.markdown(f"- {i}")
+                    if rec.new_concerns:
+                        st.markdown("**🔴 New concerns**")
+                        for i in rec.new_concerns:
+                            st.markdown(f"- {i}")
+
+
+def render_filing_card(
+    filing: Filing,
+    company_name: str,
+    ticker: str,
+    index: int,
+    previous_filing: Filing | None = None,
+) -> None:
     with st.container(border=True):
         col_left, col_mid, col_right = st.columns([3, 1, 1])
         with col_left:
@@ -243,12 +376,18 @@ def render_filing_card(filing: Filing, company_name: str, ticker: str, index: in
             if filing.report_date != "N/A":
                 st.write(f"📆 Period: {filing.report_date}")
             st.caption(f"Accession: {filing.accession}")
+            if previous_filing:
+                st.caption(f"📊 Comparison: vs. {previous_filing.filing_date}")
         with col_mid:
             st.link_button("View on SEC.gov", filing.url, use_container_width=True)
         with col_right:
             analyze_key = f"analyze_{filing.accession}"
             result_key  = f"result_{filing.accession}"
-            btn_label   = "🧪 Demo Analysis" if (demo_mode and not _ai_ready) else "Analyze Filing"
+            has_prev    = previous_filing is not None
+            btn_label   = (
+                "🧪 Demo Analysis" if (demo_mode and not _ai_ready)
+                else ("Analyze + Compare" if has_prev else "Analyze Filing")
+            )
 
             if st.button(
                 btn_label,
@@ -258,7 +397,10 @@ def render_filing_card(filing: Filing, company_name: str, ticker: str, index: in
                 help=None if _analyze_enabled else "Enable Demo Mode or add OPENAI_API_KEY",
             ):
                 st.session_state[result_key] = None
-                spinner_msg = "Loading demo analysis…" if demo_mode else "Fetching and analysing filing…"
+                spinner_msg = (
+                    "Loading demo analysis…" if demo_mode
+                    else ("Fetching & comparing filings…" if has_prev else "Fetching and analysing filing…")
+                )
                 with st.spinner(spinner_msg):
                     result = analyze_filing(
                         filing_url=filing.url,
@@ -267,14 +409,30 @@ def render_filing_card(filing: Filing, company_name: str, ticker: str, index: in
                         st_secrets=_st_secrets(),
                         demo_mode=demo_mode,
                         cache_key=filing.accession,
+                        previous_filing_url=previous_filing.url if previous_filing else None,
+                        previous_cache_key=previous_filing.accession if previous_filing else None,
                     )
                     st.session_state[result_key] = result
 
                     if result.what_changed:
+                        adj = result.comparison.conviction_adjustment if result.comparison else 0
                         _entry, delta = update_portfolio(
-                            ticker, company_name, result, filing.form_type
+                            ticker, company_name, result, filing.form_type,
+                            conviction_adjustment=adj,
                         )
-                        # Toast: surface any red alerts, else generic confirmation
+
+                        # Save comparison record if we have comparison data
+                        if result.comparison:
+                            rec = build_comparison_record(
+                                ticker=ticker,
+                                company_name=company_name,
+                                filing_type=filing.form_type,
+                                accession=filing.accession,
+                                comparison=result.comparison,
+                            )
+                            save_comparison(rec)
+
+                        # Toast
                         red_alerts = [
                             _ALERT_DISPLAY[a][1]
                             for a in delta.alerts
@@ -282,6 +440,9 @@ def render_filing_card(filing: Filing, company_name: str, ticker: str, index: in
                         ]
                         if red_alerts:
                             st.toast(f"⚠️ {ticker}: {', '.join(red_alerts)}", icon="🔴")
+                        elif adj != 0:
+                            sign = "+" if adj > 0 else ""
+                            st.toast(f"Portfolio updated · conviction {sign}{adj}", icon="💾")
                         else:
                             st.toast(f"Portfolio updated for {ticker}", icon="💾")
 
@@ -290,22 +451,30 @@ def render_filing_card(filing: Filing, company_name: str, ticker: str, index: in
             render_analysis(st.session_state[result_key])
 
 
-# ── Helper: render a filing section ──────────────────────────────────────────
-def render_section(form_type: str, filings: list[Filing], company_name: str, ticker: str, label: str) -> None:
+def render_section(
+    form_type: str,
+    filings: list[Filing],
+    company_name: str,
+    ticker: str,
+    label: str,
+) -> None:
     st.subheader(label)
     if not filings:
         st.warning(f"No {form_type} filings found.")
         return
-    for i, filing in enumerate(filings, start=1):
-        render_filing_card(filing, company_name, ticker, i)
+    for idx, filing in enumerate(filings):
+        # filings are newest-first; filings[idx+1] is the previous one
+        prev = filings[idx + 1] if idx + 1 < len(filings) else None
+        render_filing_card(filing, company_name, ticker, idx + 1, previous_filing=prev)
 
 
 # ── Portfolio Dashboard ───────────────────────────────────────────────────────
 def render_portfolio_dashboard() -> None:
-    portfolio = load_portfolio()
-    history   = load_delta_history()
+    portfolio    = load_portfolio()
+    delta_hist   = load_delta_history()
+    compare_hist = load_comparison_history()
 
-    # ── Current state section ─────────────────────────────────────────────────
+    # ── 1. Current Portfolio State ────────────────────────────────────────────
     st.header("📊 Portfolio State")
 
     if not portfolio:
@@ -349,28 +518,65 @@ def render_portfolio_dashboard() -> None:
                             st.markdown(f"- {r}")
                     st.caption(f"Analyses run: {entry.analyses_count}")
 
-    # ── Recent Changes section ────────────────────────────────────────────────
+    # ── 2. Historical Delta Analysis ──────────────────────────────────────────
+    st.divider()
+    st.header("📈 Historical Delta Analysis")
+    st.caption("Filing-over-filing comparisons: revenue, margins, cash, debt, tone, guidance")
+
+    if not compare_hist:
+        st.info(
+            "No comparisons yet. Click **Analyze + Compare** on any filing "
+            "(available when at least 2 filings of the same type exist).",
+            icon="📭",
+        )
+    else:
+        cf1, cf2 = st.columns([2, 1])
+        with cf1:
+            cmp_filter = st.selectbox(
+                "Filter by ticker",
+                options=["All"] + sorted({r.ticker for r in compare_hist}),
+                key="cmp_filter_ticker",
+            )
+        with cf2:
+            cmp_adj_only = st.toggle(
+                "Conviction changes only",
+                value=False,
+                key="cmp_adj_only",
+            )
+
+        filtered_cmp = [
+            r for r in compare_hist
+            if (cmp_filter == "All" or r.ticker == cmp_filter)
+            and (not cmp_adj_only or r.conviction_adjustment != 0)
+        ]
+
+        if not filtered_cmp:
+            st.info("No records match the current filter.")
+        else:
+            st.caption(f"Showing {len(filtered_cmp)} of {len(compare_hist)} comparison(s)")
+            for rec in filtered_cmp:
+                render_comparison_card(rec)
+
+    # ── 3. Recent Changes (Delta Engine) ─────────────────────────────────────
     st.divider()
     st.header("🔄 Recent Changes")
 
-    if not history:
+    if not delta_hist:
         st.info("No change history yet. Run an analysis to start tracking deltas.", icon="📭")
         return
 
-    # Filter controls
     fc1, fc2 = st.columns([2, 1])
     with fc1:
         filter_ticker = st.selectbox(
             "Filter by ticker",
-            options=["All"] + sorted({d.ticker for d in history}),
+            options=["All"] + sorted({d.ticker for d in delta_hist}),
             key="delta_filter_ticker",
         )
     with fc2:
         alerts_only = st.toggle("Alerts only", value=False, key="delta_alerts_only")
 
-    # Apply filters
     filtered = [
-        d for d in history
+        d for d in delta_hist
         if (filter_ticker == "All" or d.ticker == filter_ticker)
         and (not alerts_only or d.alerts)
     ]
@@ -379,7 +585,7 @@ def render_portfolio_dashboard() -> None:
         st.info("No records match the current filter.")
         return
 
-    st.caption(f"Showing {len(filtered)} of {len(history)} record(s)")
+    st.caption(f"Showing {len(filtered)} of {len(delta_hist)} record(s)")
     for d in filtered:
         render_delta_card(d)
 
@@ -387,7 +593,7 @@ def render_portfolio_dashboard() -> None:
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("📋 SEC EDGAR Filing Research")
 st.caption(
-    "Look up SEC filings · AI analysis · Portfolio state · Delta intelligence"
+    "Look up SEC filings · AI analysis · Filing comparison · Portfolio state · Delta intelligence"
 )
 
 tab_search, tab_portfolio = st.tabs(["🔍 Filing Search", "📊 Portfolio & Changes"])

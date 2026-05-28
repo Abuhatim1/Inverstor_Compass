@@ -6,11 +6,11 @@ Used by analyzer.py before sending to OpenAI.
 
 Size protections
 ----------------
-MAX_RAW_BYTES   — hard cap on the raw download (before decompression).
-                  Filings larger than this are rejected immediately so we
-                  never waste bandwidth on unusable documents.
-MAX_CHARS       — how many plain-text characters are forwarded to OpenAI.
-                  ~15 000 chars ≈ ~4 000 tokens, well within gpt-4o-mini.
+MAX_RAW_BYTES  — hard cap on the raw download (before decompression).
+MAX_CHARS      — how many plain-text chars are forwarded to OpenAI for the
+                 primary (current) filing.
+PREV_MAX_CHARS — smaller cap used for the previous filing text in comparison
+                 mode, to keep the combined prompt within a reasonable token budget.
 """
 
 import gzip
@@ -18,11 +18,9 @@ import re
 import urllib.error
 import urllib.request
 
-# Reject raw downloads larger than 10 MB (HTML filings can be huge)
-MAX_RAW_BYTES = 10_000_000   # 10 MB
-
-# Truncate extracted plain text sent to OpenAI
-MAX_CHARS = 15_000
+MAX_RAW_BYTES  = 10_000_000   # 10 MB — reject before wasting bandwidth
+MAX_CHARS      = 15_000       # ~4 000 tokens — current filing sent to OpenAI
+PREV_MAX_CHARS =  7_500       # ~2 000 tokens — previous filing for comparison
 
 HEADERS = {
     "User-Agent": "edgar-app contact@example.com",
@@ -46,10 +44,13 @@ def _strip_html(html: str) -> str:
     return html.strip()
 
 
-def fetch_filing_text(url: str) -> str:
+def fetch_filing_text(url: str, max_chars: int = MAX_CHARS) -> str:
     """
     Download a filing from SEC.gov and return cleaned plain text,
-    truncated to MAX_CHARS.
+    truncated to `max_chars`.
+
+    Pass max_chars=PREV_MAX_CHARS when fetching a previous filing for
+    comparison to reduce token usage.
 
     Raises FilingTooLargeError if the raw download exceeds MAX_RAW_BYTES.
     Raises FetchError on network or HTTP problems.
@@ -62,10 +63,10 @@ def fetch_filing_text(url: str) -> str:
             if content_length and int(content_length) > MAX_RAW_BYTES:
                 size_mb = int(content_length) / 1_000_000
                 raise FilingTooLargeError(
-                    f"Filing is {size_mb:.1f} MB — exceeds the {MAX_RAW_BYTES // 1_000_000} MB limit. "
-                    "This filing is too large to analyse. Try a different filing."
+                    f"Filing is {size_mb:.1f} MB — exceeds the "
+                    f"{MAX_RAW_BYTES // 1_000_000} MB limit. "
+                    "Try a different filing."
                 )
-
             raw = resp.read()
     except FilingTooLargeError:
         raise
@@ -78,8 +79,9 @@ def fetch_filing_text(url: str) -> str:
     if len(raw) > MAX_RAW_BYTES:
         size_mb = len(raw) / 1_000_000
         raise FilingTooLargeError(
-            f"Filing is {size_mb:.1f} MB — exceeds the {MAX_RAW_BYTES // 1_000_000} MB limit. "
-            "This filing is too large to analyse. Try a different filing."
+            f"Filing is {size_mb:.1f} MB — exceeds the "
+            f"{MAX_RAW_BYTES // 1_000_000} MB limit. "
+            "Try a different filing."
         )
 
     # ── Decompress if needed ──────────────────────────────────────────────────
@@ -97,7 +99,7 @@ def fetch_filing_text(url: str) -> str:
     text = _strip_html(text)
 
     # ── Truncate for OpenAI ───────────────────────────────────────────────────
-    if len(text) > MAX_CHARS:
-        text = text[:MAX_CHARS] + "\n\n[... filing truncated for analysis ...]"
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n[... filing truncated for analysis ...]"
 
     return text

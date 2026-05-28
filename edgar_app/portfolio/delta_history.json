@@ -1,5 +1,51 @@
 [
   {
+    "ticker": "TEST2",
+    "company_name": "Test2 Corp",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:27:41",
+    "thesis_prev": "Strong",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "Buy",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 75,
+    "conviction_new": 60,
+    "conviction_delta": -15,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "Conviction score: 75 → 60 (-15)"
+    ],
+    "alerts": [
+      "conviction_dropped"
+    ],
+    "is_first_analysis": false
+  },
+  {
+    "ticker": "TEST2",
+    "company_name": "Test2 Corp",
+    "filing_type": "10-K",
+    "timestamp": "2026-05-28T10:27:41",
+    "thesis_prev": "—",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 60,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for TEST2."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  },
+  {
     "ticker": "VCYT",
     "company_name": "VERACYTE, INC.",
     "filing_type": "10-K",

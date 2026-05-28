@@ -1,9 +1,18 @@
 """
 portfolio/__init__.py
 ---------------------
-Portfolio State Engine + Delta Intelligence Engine.
+Portfolio State Engine + Delta Intelligence Engine + Historical Comparison Store.
 """
 
+from .comparison_store import (
+    ComparisonRecord,
+    TREND_ICON,
+    TONE_ICON,
+    GUIDANCE_ICON,
+    build_comparison_record,
+    load_comparison_history,
+    save_comparison,
+)
 from .delta import (
     ALERT_ACTION_DOWNGRADED,
     ALERT_ACTION_UPGRADED,
@@ -44,4 +53,12 @@ __all__ = [
     "ALERT_ACTION_UPGRADED",
     "ALERT_CONVICTION_DROPPED",
     "ALERT_CONVICTION_IMPROVED",
+    # Comparison
+    "ComparisonRecord",
+    "TREND_ICON",
+    "TONE_ICON",
+    "GUIDANCE_ICON",
+    "build_comparison_record",
+    "load_comparison_history",
+    "save_comparison",
 ]
