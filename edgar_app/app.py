@@ -1544,7 +1544,7 @@ def render_portfolio_risk_tab() -> None:
 def render_holdings_tab() -> None:
     """Actual Holdings + Transactions tab."""
     from portfolio import (
-        DEFAULT_SECTORS, MARKETS,
+        ASSET_TYPES, CURRENCIES, DEFAULT_SECTORS, MARKETS,
         delete_holding,
         load_holdings, load_portfolio, load_transactions,
         portfolio_weights, record_transaction,
@@ -1597,28 +1597,39 @@ def render_holdings_tab() -> None:
         weights = portfolio_weights(holdings)
         rows = []
         for ticker, h in sorted(holdings.items()):
+            has_tk  = getattr(h, "has_ticker", True)
+            p_src   = getattr(h, "price_source", "manual")
+            sec_lnk = getattr(h, "sec_linked", False)
+            price_src_label = (
+                "📡 yfinance" if p_src == "yfinance"
+                else ("⚠️ Manual (no ticker)" if not has_tk else "📝 Manual")
+            )
             rows.append({
                 "Ticker":         ticker,
                 "Company":        h.company_name,
+                "Type":           getattr(h, "asset_type", "Stock"),
                 "Market":         h.market,
+                "Ccy":            getattr(h, "currency", "USD"),
                 "Sector":         h.sector,
                 "Quantity":       round(h.quantity, 4),
-                "Avg Cost":       round(h.avg_cost, 2),
-                "Current Price":  round(h.current_price, 2),
+                "Avg Cost":       round(h.avg_cost, 4),
+                "Current Price":  round(h.current_price, 4),
                 "Market Value":   round(h.market_value, 2),
                 "Cost Basis":     round(h.cost_basis, 2),
                 "Unreal. P&L":    round(h.unrealized_pnl, 2),
                 "P&L %":          round(h.unrealized_pnl_pct, 2),
                 "Weight %":       round(weights.get(ticker, 0.0), 2),
+                "Price Src":      price_src_label,
+                "SEC":            "🏛️" if sec_lnk else "—",
             })
         df = pd.DataFrame(rows)
         edited = st.data_editor(
             df,
             hide_index=True,
             use_container_width=True,
-            disabled=["Ticker", "Company", "Market", "Sector", "Quantity",
-                      "Avg Cost", "Market Value", "Cost Basis",
-                      "Unreal. P&L", "P&L %", "Weight %"],
+            disabled=["Ticker", "Company", "Type", "Market", "Ccy", "Sector",
+                      "Quantity", "Avg Cost", "Market Value", "Cost Basis",
+                      "Unreal. P&L", "P&L %", "Weight %", "Price Src", "SEC"],
             column_config={
                 "Current Price": st.column_config.NumberColumn(
                     "Current Price", min_value=0.0, step=0.01, format="%.2f",
@@ -1642,7 +1653,9 @@ def render_holdings_tab() -> None:
                 help="Force-fetches live prices from yfinance, bypassing cache.",
             ):
                 with st.spinner("Fetching live prices…"):
-                    fetched = refresh_all_prices(list(holdings.keys()), force=True)
+                    ticker_keys = [t for t, h in holdings.items()
+                                   if getattr(h, "has_ticker", True)]
+                    fetched = refresh_all_prices(ticker_keys, force=True)
                 save_to_session(fetched)
                 ok   = [t for t, d in fetched.items() if d.is_ok]
                 fail = [t for t, d in fetched.items() if not d.is_ok]
@@ -1663,6 +1676,21 @@ def render_holdings_tab() -> None:
         debug_rows   = []
         live_ok_map: dict[str, float] = {}
         for t_key in sorted(holdings.keys()):
+            h_entry = holdings[t_key]
+            if not getattr(h_entry, "has_ticker", True):
+                # No-ticker asset — show manual-price row, skip yfinance
+                live_rows.append({
+                    "":           "📝",
+                    "Ticker":     t_key,
+                    "Price":      str(round(h_entry.current_price, 4)) if h_entry.current_price else "—",
+                    "Day Change": "—",
+                    "Source":     "⚠️ Manual price — update required",
+                    "Fetched (UTC)": getattr(h_entry, "price_date", "") or "—",
+                    "Stored":     str(round(h_entry.current_price, 4)),
+                    "Beta":       "—",
+                    "Currency":   getattr(h_entry, "currency", "—"),
+                })
+                continue
             md     = live_cache.get(t_key)
             stored = holdings[t_key].current_price
 
@@ -1785,54 +1813,144 @@ def render_holdings_tab() -> None:
 
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
-    with st.expander("➕ Add Holding (manual)", expanded=not holdings):
+    with st.expander("➕ Add / Update Holding", expanded=not holdings):
+        st.caption(
+            "Holdings are independent from SEC search. Add any asset — stocks, ETFs, "
+            "gold, cash, commodities — with or without a market ticker."
+        )
         with st.form("add_holding_manual", clear_on_submit=True):
-            ah1, ah2 = st.columns(2)
-            with ah1:
-                # Suggest watchlist tickers but allow free text
-                wl_options = sorted(watchlist.keys())
-                if wl_options:
-                    new_ticker_src = st.radio(
-                        "Source",
-                        options=["From Watchlist", "New Ticker"],
-                        horizontal=True,
-                        key="add_h_src",
+
+            # ── Identifier row ────────────────────────────────────────────────
+            id_c1, id_c2, id_c3 = st.columns([1, 2, 2])
+            with id_c1:
+                ah_has_ticker = st.checkbox("Has market ticker", value=True, key="ah_has_tk")
+            with id_c2:
+                if ah_has_ticker:
+                    ah_ticker_raw = st.text_input(
+                        "Ticker symbol",
+                        key="ah_tk",
+                        placeholder="AAPL · 1120.SR · GLD · GC=F · 7010.SR",
+                        help=(
+                            "US: AAPL, MSFT | Saudi: 1120.SR, 2222.SR | "
+                            "Gold ETF: GLD, IAU | Futures: GC=F"
+                        ),
                     )
-                    if new_ticker_src == "From Watchlist":
-                        new_ticker = st.selectbox("Ticker", options=wl_options, key="add_h_wl")
-                        new_company = watchlist[new_ticker].company_name if new_ticker else ""
-                    else:
-                        new_ticker = st.text_input("Ticker", key="add_h_tk").strip().upper()
-                        new_company = st.text_input("Company name", key="add_h_co")
                 else:
-                    new_ticker = st.text_input("Ticker", key="add_h_tk").strip().upper()
-                    new_company = st.text_input("Company name", key="add_h_co")
-                new_qty = st.number_input("Quantity", min_value=0.0, step=1.0, key="add_h_qty")
-                new_cost = st.number_input(
-                    "Avg cost ($/share)", min_value=0.0, step=0.01, format="%.2f", key="add_h_cost",
+                    ah_ticker_raw = st.text_input(
+                        "Asset ID (unique slug, no spaces)",
+                        key="ah_tk",
+                        placeholder="PHYS_GOLD · CASH_SAR · GOLD_COINS",
+                        help=(
+                            "Short identifier used as the storage key. "
+                            "Use underscores, no spaces. E.g. PHYS_GOLD, CASH_SAR."
+                        ),
+                    )
+            with id_c3:
+                # Optional: pre-fill from watchlist
+                wl_options = sorted(watchlist.keys())
+                ah_wl_pick = st.selectbox(
+                    "Or pick from Research Watchlist",
+                    options=["— enter manually —"] + wl_options,
+                    key="ah_wl",
+                    help="Selecting a watchlist ticker pre-fills the ticker field.",
                 )
-                new_price = st.number_input(
-                    "Current price ($/share)", min_value=0.0, step=0.01, format="%.2f", key="add_h_price",
+
+            # ── Core fields ───────────────────────────────────────────────────
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                _wl_name = (
+                    watchlist[ah_wl_pick].company_name
+                    if ah_wl_pick != "— enter manually —" and ah_wl_pick in watchlist
+                    else ""
                 )
-            with ah2:
-                new_market = st.selectbox("Market", MARKETS, key="add_h_mkt")
-                new_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="add_h_sec")
-            if st.form_submit_button("➕ Add holding", type="primary"):
-                if not new_ticker:
-                    st.error("Ticker is required.")
-                elif new_qty <= 0:
+                ah_name = st.text_input(
+                    "Asset name / company",
+                    value=_wl_name,
+                    key="ah_co",
+                    placeholder="Apple Inc. · Physical Gold · Cash - Saudi Riyal",
+                )
+                ah_asset_type = st.selectbox("Asset type", ASSET_TYPES, key="ah_type")
+                ah_market = st.selectbox("Market", MARKETS, key="ah_mkt")
+                ah_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="ah_sec")
+            with fc2:
+                ah_currency = st.selectbox("Currency", CURRENCIES, key="ah_cur")
+                ah_qty = st.number_input(
+                    "Quantity", min_value=0.0, step=1.0, format="%.4f", key="ah_qty",
+                )
+                ah_cost = st.number_input(
+                    "Avg cost per unit",
+                    min_value=0.0, step=0.01, format="%.4f", key="ah_cost",
+                    help="Weighted-average cost you paid per share / unit / gram.",
+                )
+                ah_price = st.number_input(
+                    "Current price per unit",
+                    min_value=0.0, step=0.01, format="%.4f", key="ah_price",
+                    help=(
+                        "For manual assets (no ticker) this is your best estimate. "
+                        "For ticker assets, yfinance will override this on next refresh."
+                    ),
+                )
+
+            # ── Optional fields ───────────────────────────────────────────────
+            opt1, opt2 = st.columns(2)
+            with opt1:
+                ah_pdate = st.date_input(
+                    "Purchase date (optional)", value=None, key="ah_pdate",
+                )
+            with opt2:
+                ah_notes = st.text_input(
+                    "Notes (optional)", key="ah_notes", max_chars=200,
+                    placeholder="e.g. bought via Tadawul, held in safe deposit box…",
+                )
+
+            # ── SEC-link indicator ────────────────────────────────────────────
+            _sec_linked = (
+                ah_has_ticker
+                and ah_market == "US"
+                and ah_asset_type in ("Stock", "ETF")
+            )
+            if _sec_linked:
+                st.info(
+                    "🏛️ US equity / ETF — filing intelligence may be available via "
+                    "SEC EDGAR. Run a **🔍 Filing Search** to link this ticker.",
+                    icon="ℹ️",
+                )
+            else:
+                st.caption(
+                    "ℹ️ No SEC link — manual / market-data mode. "
+                    "Filing intelligence unavailable for this asset."
+                )
+
+            if st.form_submit_button("💼 Add / Update Holding", type="primary"):
+                # Resolve ticker: prefer watchlist pick if "enter manually" not chosen
+                if ah_wl_pick != "— enter manually —" and ah_wl_pick:
+                    ticker_key = ah_wl_pick.strip().upper()
+                else:
+                    ticker_key = ah_ticker_raw.strip().replace(" ", "_").upper()
+
+                if not ticker_key:
+                    st.error("Ticker / Asset ID is required.")
+                elif ah_qty <= 0:
                     st.error("Quantity must be greater than 0.")
                 else:
                     upsert_holding(
-                        ticker=new_ticker,
-                        company_name=new_company or new_ticker,
-                        market=new_market,
-                        sector=new_sector,
-                        quantity=new_qty,
-                        avg_cost=new_cost,
-                        current_price=new_price,
+                        ticker=ticker_key,
+                        company_name=ah_name.strip() or ticker_key,
+                        market=ah_market,
+                        sector=ah_sector,
+                        quantity=ah_qty,
+                        avg_cost=ah_cost,
+                        current_price=ah_price,
+                        asset_type=ah_asset_type,
+                        currency=ah_currency,
+                        has_ticker=ah_has_ticker,
+                        sec_linked=_sec_linked,
+                        purchase_date=str(ah_pdate) if ah_pdate else "",
+                        notes=ah_notes,
+                        price_source="manual",
+                        price_date=date.today().isoformat(),
                     )
-                    st.toast(f"{new_ticker} added to Holdings", icon="💼")
+                    st.toast(f"{ticker_key} added / updated in Holdings", icon="💼")
                     st.rerun()
 
     # ── Record Transaction form ───────────────────────────────────────────────
@@ -1863,9 +1981,11 @@ def render_holdings_tab() -> None:
             with t2:
                 txn_date = st.date_input("Date", value=date.today(), key="txn_date")
                 txn_notes = st.text_area("Notes (optional)", key="txn_notes", height=80)
-                # Market / sector only used if BUY creates a new holding
-                new_h_market = st.selectbox("Market (new holdings only)", MARKETS, key="txn_mkt")
-                new_h_sector = st.selectbox("Sector (new holdings only)", DEFAULT_SECTORS, key="txn_sec")
+                # Fields below only used if BUY creates a brand-new holding
+                new_h_market   = st.selectbox("Market (new only)", MARKETS, key="txn_mkt")
+                new_h_sector   = st.selectbox("Sector (new only)", DEFAULT_SECTORS, key="txn_sec")
+                new_h_type     = st.selectbox("Asset type (new only)", ASSET_TYPES, key="txn_type")
+                new_h_currency = st.selectbox("Currency (new only)", CURRENCIES, key="txn_cur")
             if st.form_submit_button("🔁 Record transaction", type="primary"):
                 if not txn_ticker:
                     st.error("Ticker is required.")
@@ -1889,6 +2009,8 @@ def render_holdings_tab() -> None:
                         company_name=company_name,
                         market=new_h_market,
                         sector=new_h_sector,
+                        asset_type=new_h_type,
+                        currency=new_h_currency,
                     )
                     if err:
                         st.error(err)

@@ -6,7 +6,7 @@
     "sector": "Healthcare",
     "quantity": 618.0,
     "avg_cost": 32.82,
-    "current_price": 47.27,
+    "current_price": 47.72999954223633,
     "added_at": "2026-05-28"
   },
   "DOCS": {
@@ -16,7 +16,7 @@
     "sector": "Healthcare",
     "quantity": 376.0,
     "avg_cost": 28.43,
-    "current_price": 21.12,
+    "current_price": 20.954999923706055,
     "added_at": "2026-05-28"
   },
   "CSAI": {
@@ -26,7 +26,7 @@
     "sector": "Technology",
     "quantity": 800.0,
     "avg_cost": 0.54,
-    "current_price": 0.51,
+    "current_price": 0.5343000292778015,
     "added_at": "2026-05-28"
   },
   "EXEL": {
@@ -36,7 +36,7 @@
     "sector": "Healthcare",
     "quantity": 129.0,
     "avg_cost": 43.91,
-    "current_price": 52.74,
+    "current_price": 52.5098991394043,
     "added_at": "2026-05-28"
   },
   "CPRX": {
@@ -46,7 +46,7 @@
     "sector": "Healthcare",
     "quantity": 216.0,
     "avg_cost": 23.03,
-    "current_price": 31.32,
+    "current_price": 31.315000534057617,
     "added_at": "2026-05-28"
   }
 }

@@ -38,7 +38,7 @@ _MARKET_INTEL_FILE = os.path.join(_DIR, "market_intel_state.json")
 
 # ── Taxonomy ──────────────────────────────────────────────────────────────────
 
-MARKETS: list[str] = ["US", "Saudi", "Other"]
+MARKETS: list[str] = ["US", "Saudi", "UK", "Europe", "Asia", "Other"]
 
 DEFAULT_SECTORS: list[str] = [
     "Technology",
@@ -70,6 +70,10 @@ RISK_CATEGORIES: dict[str, str] = {
     "thesis_deterioration": "Thesis Deterioration",
     "market_disagreement":  "External Market Disagreement",
     "uncertainty_exposure": "High-Uncertainty Exposure",
+    # Asset-class specific
+    "commodity_risk":         "Commodity Risk",
+    "currency_risk":          "Currency Risk",
+    "manual_valuation_risk":  "Manual Valuation Risk",
 }
 
 _CATEGORY_WEIGHTS: dict[str, float] = {
@@ -80,6 +84,9 @@ _CATEGORY_WEIGHTS: dict[str, float] = {
     "thesis_deterioration": 1.5,
     "market_disagreement":  0.7,
     "uncertainty_exposure": 1.0,
+    "commodity_risk":        0.8,
+    "currency_risk":         0.7,
+    "manual_valuation_risk": 1.0,
 }
 
 
@@ -95,6 +102,10 @@ class PortfolioPosition:
     sector:                 str
     weight_pct:             float           # derived from market value
     market_value:           float
+    asset_type:             str = "Stock"   # from Holding.asset_type
+    currency:               str = "USD"     # from Holding.currency
+    has_ticker:             bool = True     # from Holding.has_ticker
+    is_manual_price:        bool = False    # True when price_source == "manual" and no ticker
     # From PortfolioEntry (research watchlist) — Unknown if no analysis yet
     thesis_status:          str = "Unknown"
     conviction_score:       int = 0
@@ -187,6 +198,10 @@ def build_positions(
         priority  = int(getattr(entry, "priority_score", 0) or 0) if entry else 0
         unc_level = getattr(entry, "uncertainty_level", "Unknown") if entry else "Unknown"
 
+        is_manual = (
+            not getattr(h, "has_ticker", True)
+            or getattr(h, "price_source", "manual") == "manual"
+        )
         positions.append(PortfolioPosition(
             ticker=ticker,
             company_name=h.company_name,
@@ -194,6 +209,10 @@ def build_positions(
             sector=h.sector,
             weight_pct=weights.get(ticker, 0.0),
             market_value=h.market_value,
+            asset_type=getattr(h, "asset_type", "Stock"),
+            currency=getattr(h, "currency", "USD"),
+            has_ticker=getattr(h, "has_ticker", True),
+            is_manual_price=is_manual,
             thesis_status=thesis,
             conviction_score=convict,
             recommended_action=action,
@@ -365,6 +384,44 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
         uncertainty_detail = "Unknown — no explainability uncertainty data for any held position."
         uncertainty_contribs = []
 
+    # ── 8. Commodity risk ─────────────────────────────────────────────────────
+    commodity_types = ("Commodity", "Gold", "Silver")
+    commodity_pos = [p for p in positions if p.asset_type in commodity_types]
+    commodity_weight = sum(p.weight_pct for p in commodity_pos)
+    commodity_score = min(100, int(commodity_weight * 1.5))
+    commodity_detail = (
+        f"{commodity_weight:.1f}% of portfolio value in commodity assets "
+        f"({len(commodity_pos)} position(s))."
+        if commodity_pos else
+        "No commodity positions held."
+    )
+    commodity_contribs = [f"{p.ticker} ({p.asset_type}): {p.weight_pct:.1f}%" for p in commodity_pos[:3]]
+
+    # ── 9. Currency risk ──────────────────────────────────────────────────────
+    non_usd = [p for p in positions if p.currency not in ("USD", "")]
+    non_usd_weight = sum(p.weight_pct for p in non_usd)
+    currency_score = min(100, int(non_usd_weight * 1.2))
+    currency_currencies = sorted({p.currency for p in non_usd})
+    currency_detail = (
+        f"{non_usd_weight:.1f}% of portfolio value in non-USD currencies "
+        f"({', '.join(currency_currencies)})."
+        if non_usd else
+        "All holdings denominated in USD."
+    )
+    currency_contribs = [f"{p.ticker}: {p.currency} ({p.weight_pct:.1f}%)" for p in non_usd[:3]]
+
+    # ── 10. Manual valuation risk ─────────────────────────────────────────────
+    manual_pos = [p for p in positions if p.is_manual_price]
+    manual_weight = sum(p.weight_pct for p in manual_pos)
+    manual_score = min(100, int(manual_weight * 1.5))
+    manual_detail = (
+        f"{manual_weight:.1f}% of portfolio value relies on manually-entered prices "
+        f"({len(manual_pos)} position(s)) — not verified by live market feed."
+        if manual_pos else
+        "All holdings have live or yfinance-sourced prices."
+    )
+    manual_contribs = [f"{p.ticker}: manual price" for p in manual_pos[:3]]
+
     categories = [
         RiskCategoryScore("concentration",        RISK_CATEGORIES["concentration"],
                           concentration_score, concentration_detail, concentration_contribs),
@@ -380,6 +437,12 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
                           disagreement_score, disagreement_detail, disagreement_contribs),
         RiskCategoryScore("uncertainty_exposure", RISK_CATEGORIES["uncertainty_exposure"],
                           uncertainty_score, uncertainty_detail, uncertainty_contribs),
+        RiskCategoryScore("commodity_risk",        RISK_CATEGORIES["commodity_risk"],
+                          commodity_score, commodity_detail, commodity_contribs),
+        RiskCategoryScore("currency_risk",         RISK_CATEGORIES["currency_risk"],
+                          currency_score, currency_detail, currency_contribs),
+        RiskCategoryScore("manual_valuation_risk", RISK_CATEGORIES["manual_valuation_risk"],
+                          manual_score, manual_detail, manual_contribs),
     ]
 
     total_w = sum(_CATEGORY_WEIGHTS[c.key] for c in categories)
@@ -438,6 +501,17 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
         required_actions.append(
             f"Re-test valuation for **{weakest.ticker}** "
             f"(Damodaran priority {weakest.priority_score}/100)."
+        )
+    if manual_score >= 50 and manual_pos:
+        tickers_m = ", ".join(f"**{p.ticker}**" for p in manual_pos[:3])
+        required_actions.append(
+            f"Update manual prices for {tickers_m} — these affect {manual_weight:.1f}% "
+            "of portfolio value and are not verified by a live market feed."
+        )
+    if commodity_score >= 60 and commodity_pos:
+        required_actions.append(
+            f"Review commodity exposure ({commodity_weight:.1f}% of portfolio) — "
+            "consider target allocation limits for Gold/Silver/Commodity positions."
         )
     if not required_actions:
         required_actions = ["No critical actions required — portfolio risk is balanced."]

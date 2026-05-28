@@ -61,6 +61,9 @@ from .state import (
     update_portfolio,
 )
 from .holdings import (
+    ASSET_RISK_CLASS,
+    ASSET_TYPES,
+    CURRENCIES,
     Holding,
     Transaction,
     delete_holding,
@@ -174,6 +177,9 @@ __all__ = [
     "load_comparison_history",
     "save_comparison",
     # Actual Holdings + Transactions
+    "ASSET_TYPES",
+    "ASSET_RISK_CLASS",
+    "CURRENCIES",
     "Holding",
     "Transaction",
     "load_holdings",

@@ -19,6 +19,9 @@ weighted-average cost. A SELL transaction reduces `quantity` (avg_cost stays
 the same — that's how cost basis works). When quantity drops to zero, the
 holding is kept with `quantity=0` so its metadata (market, sector) and
 current_price survive in case the user re-buys; users can manually delete.
+
+Holdings are fully independent from SEC / CIK. SEC linkage is optional and
+only available for US-listed equities that have been analysed via Filing Search.
 """
 
 import json
@@ -34,6 +37,45 @@ _HOLDINGS_FILE    = os.path.join(_DIR, "holdings.json")
 _TRANSACTIONS_FILE = os.path.join(_DIR, "transactions.json")
 
 
+# ── Taxonomy constants ────────────────────────────────────────────────────────
+
+ASSET_TYPES: list[str] = [
+    "Stock",
+    "ETF",
+    "Fund",
+    "Commodity",
+    "Gold",
+    "Silver",
+    "Cash",
+    "Other",
+]
+
+CURRENCIES: list[str] = [
+    "USD",
+    "SAR",
+    "EUR",
+    "GBP",
+    "AED",
+    "KWD",
+    "QAR",
+    "CNY",
+    "JPY",
+    "Other",
+]
+
+# Asset type → broad risk class used by the Risk Engine
+ASSET_RISK_CLASS: dict[str, str] = {
+    "Stock":     "equity",
+    "ETF":       "equity",
+    "Fund":      "equity",
+    "Commodity": "commodity",
+    "Gold":      "commodity",
+    "Silver":    "commodity",
+    "Cash":      "currency",
+    "Other":     "equity",
+}
+
+
 # ── Dataclasses ───────────────────────────────────────────────────────────────
 
 @dataclass
@@ -41,14 +83,25 @@ class Holding:
     """One actual position the user owns."""
     ticker:        str
     company_name:  str
-    market:        str   = "US"        # "US" | "Saudi" | "Other"
+    market:        str   = "US"        # "US" | "Saudi" | "UK" | "Europe" | "Asia" | "Other"
     sector:        str   = "Other"
     quantity:      float = 0.0
-    avg_cost:      float = 0.0         # weighted-average cost per share
-    current_price: float = 0.0         # last manually-entered price
+    avg_cost:      float = 0.0         # weighted-average cost per share / unit
+    current_price: float = 0.0         # last known price
     added_at:      str   = ""          # ISO date
 
-    # ── Derived metrics ──────────────────────────────────────────────────────
+    # ── Extended fields (v2 — backward-compatible defaults) ───────────────────
+    asset_type:    str   = "Stock"     # from ASSET_TYPES
+    currency:      str   = "USD"       # ISO currency code
+    has_ticker:    bool  = True        # False for physical / unlisted assets (no yfinance)
+    sec_linked:    bool  = False       # True if SEC CIK available / verified
+    cik:           str   = ""          # SEC CIK when sec_linked
+    purchase_date: str   = ""          # ISO date, optional
+    notes:         str   = ""          # free-text notes
+    price_source:  str   = "manual"    # "manual" | "yfinance" | "live"
+    price_date:    str   = ""          # ISO date of last price update
+
+    # ── Derived metrics ───────────────────────────────────────────────────────
     @property
     def cost_basis(self) -> float:
         return self.quantity * self.avg_cost
@@ -82,7 +135,7 @@ class Transaction:
 
 # ── Holdings persistence ──────────────────────────────────────────────────────
 
-def load_holdings() -> dict[str, Holding]:
+def load_holdings() -> dict[str, "Holding"]:
     """Load holdings from disk; return empty dict on missing or corrupt file."""
     if not os.path.exists(_HOLDINGS_FILE):
         return {}
@@ -105,11 +158,10 @@ def load_holdings() -> dict[str, Holding]:
     return out
 
 
-def save_holdings(holdings: dict[str, Holding]) -> None:
+def save_holdings(holdings: dict[str, "Holding"]) -> None:
     os.makedirs(_DIR, exist_ok=True)
     payload = {}
     for ticker, h in holdings.items():
-        # Only serialize stored fields (not derived properties)
         payload[ticker] = asdict(h)
     with open(_HOLDINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -123,26 +175,45 @@ def upsert_holding(
     quantity:      float | None = None,
     avg_cost:      float | None = None,
     current_price: float | None = None,
-) -> Holding:
+    # Extended fields
+    asset_type:    str | None = None,
+    currency:      str | None = None,
+    has_ticker:    bool | None = None,
+    sec_linked:    bool | None = None,
+    cik:           str | None = None,
+    purchase_date: str | None = None,
+    notes:         str | None = None,
+    price_source:  str | None = None,
+    price_date:    str | None = None,
+) -> "Holding":
     """Insert or update one holding's fields. None means 'don't change'."""
     holdings = load_holdings()
     existing = holdings.get(ticker)
+
+    def _pick(new, old_attr: str, default):
+        if new is not None:
+            return new
+        return getattr(existing, old_attr) if existing else default
+
     new_holding = Holding(
         ticker=ticker,
-        company_name=company_name if company_name is not None
-                     else (existing.company_name if existing else ticker),
-        market=market if market is not None
-               else (existing.market if existing else "US"),
-        sector=sector if sector is not None
-               else (existing.sector if existing else "Other"),
-        quantity=quantity if quantity is not None
-                 else (existing.quantity if existing else 0.0),
-        avg_cost=avg_cost if avg_cost is not None
-                 else (existing.avg_cost if existing else 0.0),
-        current_price=current_price if current_price is not None
-                      else (existing.current_price if existing else 0.0),
+        company_name=_pick(company_name, "company_name", ticker),
+        market=_pick(market, "market", "US"),
+        sector=_pick(sector, "sector", "Other"),
+        quantity=_pick(quantity, "quantity", 0.0),
+        avg_cost=_pick(avg_cost, "avg_cost", 0.0),
+        current_price=_pick(current_price, "current_price", 0.0),
         added_at=(existing.added_at if existing and existing.added_at
                   else date.today().isoformat()),
+        asset_type=_pick(asset_type, "asset_type", "Stock"),
+        currency=_pick(currency, "currency", "USD"),
+        has_ticker=_pick(has_ticker, "has_ticker", True),
+        sec_linked=_pick(sec_linked, "sec_linked", False),
+        cik=_pick(cik, "cik", ""),
+        purchase_date=_pick(purchase_date, "purchase_date", ""),
+        notes=_pick(notes, "notes", ""),
+        price_source=_pick(price_source, "price_source", "manual"),
+        price_date=_pick(price_date, "price_date", ""),
     )
     holdings[ticker] = new_holding
     save_holdings(holdings)
@@ -158,12 +229,14 @@ def delete_holding(ticker: str) -> bool:
     return False
 
 
-def update_current_price(ticker: str, price: float) -> bool:
-    """Set the manually-entered current price for one holding."""
+def update_current_price(ticker: str, price: float, source: str = "manual") -> bool:
+    """Set the current price for one holding, with optional source label."""
     holdings = load_holdings()
     if ticker not in holdings:
         return False
     holdings[ticker].current_price = float(price)
+    holdings[ticker].price_source  = source
+    holdings[ticker].price_date    = date.today().isoformat()
     save_holdings(holdings)
     return True
 
@@ -210,7 +283,12 @@ def record_transaction(
     company_name: str = "",
     market:       str = "US",
     sector:       str = "Other",
-) -> tuple[Transaction, Holding | None, str | None]:
+    # Extended fields — used when a BUY creates a new holding
+    asset_type:   str = "Stock",
+    currency:     str = "USD",
+    has_ticker:   bool = True,
+    sec_linked:   bool = False,
+) -> tuple["Transaction", "Holding | None", "str | None"]:
     """
     Record a buy/sell transaction AND update the corresponding holding.
 
@@ -236,9 +314,7 @@ def record_transaction(
                 f"Cannot SELL {quantity} of {ticker} — only {existing.quantity} held."
             )
         new_qty = max(0.0, existing.quantity - quantity)
-        # avg_cost unchanged on sell
         existing.quantity = new_qty
-        # Keep current_price as-is (the sell price might be stale info)
         holdings[ticker] = existing
         updated = existing
     else:  # BUY
@@ -250,16 +326,22 @@ def record_transaction(
                 sector=sector,
                 quantity=quantity,
                 avg_cost=price,
-                current_price=price,   # default current price to buy price
+                current_price=price,
                 added_at=date.today().isoformat(),
+                asset_type=asset_type,
+                currency=currency,
+                has_ticker=has_ticker,
+                sec_linked=sec_linked,
+                price_source="manual",
+                price_date=date.today().isoformat(),
             )
         else:
             old_basis = existing.cost_basis
             buy_value = quantity * price
-            new_qty = existing.quantity + quantity
-            new_avg = (old_basis + buy_value) / new_qty if new_qty > 0 else 0.0
-            existing.quantity = new_qty
-            existing.avg_cost = new_avg
+            new_qty   = existing.quantity + quantity
+            new_avg   = (old_basis + buy_value) / new_qty if new_qty > 0 else 0.0
+            existing.quantity  = new_qty
+            existing.avg_cost  = new_avg
             if existing.current_price <= 0:
                 existing.current_price = price
             updated = existing
@@ -267,7 +349,6 @@ def record_transaction(
 
     save_holdings(holdings)
 
-    # Append transaction
     txn = Transaction(
         ticker=ticker,
         side=side,
