@@ -106,6 +106,18 @@ from .valuation import (
     PortfolioValuation,
     calculate_portfolio_valuation,
 )
+from .closed_holdings import (
+    ClosedLot,
+    ClosedHolding,
+    RealizedSummary,
+    load_closed_lots,
+    save_closed_lots,
+    append_closed_lots,
+    load_closed_holdings,
+    void_lots_for_ticker,
+    compute_realized_summary,
+    execute_sell_fifo,
+)
 from .risk import (
     DEFAULT_SECTORS,
     MARKETS,
@@ -292,6 +304,17 @@ __all__ = [
     "PerHoldingValuation",
     "PortfolioValuation",
     "calculate_portfolio_valuation",
+    # Closed Holdings / FIFO Realized P&L
+    "ClosedLot",
+    "ClosedHolding",
+    "RealizedSummary",
+    "load_closed_lots",
+    "save_closed_lots",
+    "append_closed_lots",
+    "load_closed_holdings",
+    "void_lots_for_ticker",
+    "compute_realized_summary",
+    "execute_sell_fifo",
     # Investment Accounts
     "ACCOUNT_TYPES",
     "Account",

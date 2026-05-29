@@ -204,6 +204,16 @@ def _render_kpi_cards(holdings, weights, risk_result, dq_result, valuation,
         if dq_result else None
     )
 
+    # Load realized P&L summary
+    try:
+        from portfolio.closed_holdings import compute_realized_summary
+        _realized = compute_realized_summary()
+        _rpnl_str = f"{_realized.total_realized_pnl:+,.0f} {base_ccy}" if _realized.n_closed else "—"
+        _rpnl_delta = f"{_realized.n_closed} closed position(s)" if _realized.n_closed else None
+    except Exception:
+        _rpnl_str = "—"
+        _rpnl_delta = None
+
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric(f"Holdings ({base_ccy})",     f"{total_mv:,.0f}")
     k2.metric(f"Total Portfolio ({base_ccy})", f"{total_port:,.0f}",
@@ -212,10 +222,9 @@ def _render_kpi_cards(holdings, weights, risk_result, dq_result, valuation,
     k3.metric("Unrealized P&L",
               f"{'+' if pnl_pct >= 0 else ''}{pnl_pct:.1f}%",
               delta=f"{pnl_abs:+,.0f} {base_ccy}")
-    k4.metric("Risk Regime",             regime_str)
-    k5.metric("Highest Attention",       top_str)
-    k6.metric("Requiring Review",
-              str(review_count) if review_count is not None else "Missing data")
+    k4.metric("Realized P&L", _rpnl_str, delta=_rpnl_delta)
+    k5.metric("Risk Regime",             regime_str)
+    k6.metric("Highest Attention",       top_str)
 
     if valuation.warnings:
         for _w in valuation.warnings:

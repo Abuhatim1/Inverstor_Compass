@@ -334,12 +334,15 @@ def record_transaction(
     currency:     str = "USD",
     has_ticker:   bool = True,
     sec_linked:   bool = False,
+    account_id:   str = "",
+    fees:         float = 0.0,
 ) -> tuple["Transaction", "Holding | None", "str | None"]:
     """
     Record a buy/sell transaction AND update the corresponding holding.
 
     Returns (transaction, updated_holding, error_message).
     If error_message is not None, no state was changed.
+    On SELL, also creates FIFO closed lots via closed_holdings.execute_sell_fifo.
     """
     side = side.upper()
     if side not in ("BUY", "SELL"):
@@ -351,6 +354,7 @@ def record_transaction(
 
     holdings = load_holdings()
     existing = holdings.get(ticker)
+    sell_date = txn_date or date.today().isoformat()
 
     if side == "SELL":
         if existing is None or existing.quantity <= 0:
@@ -359,6 +363,20 @@ def record_transaction(
             return None, None, (
                 f"Cannot SELL {quantity} of {ticker} — only {existing.quantity} held."
             )
+        # Run FIFO engine first (validation step — does not write)
+        from .closed_holdings import execute_sell_fifo, append_closed_lots
+        _cn   = getattr(existing, "company_name", ticker) or company_name or ticker
+        _cur  = getattr(existing, "currency", currency) or currency
+        _aid  = account_id or getattr(existing, "default_account_id", "")
+        closed_lots, fifo_err = execute_sell_fifo(
+            ticker=ticker, company_name=_cn, currency=_cur,
+            quantity=float(quantity), sell_price=float(price),
+            sell_date=sell_date, account_id=_aid,
+            fees=float(fees), notes=notes,
+        )
+        if fifo_err:
+            return None, None, fifo_err
+
         new_qty = max(0.0, existing.quantity - quantity)
         existing.quantity = new_qty
         holdings[ticker] = existing
@@ -380,6 +398,7 @@ def record_transaction(
                 sec_linked=sec_linked,
                 price_source="manual",
                 price_date=date.today().isoformat(),
+                default_account_id=account_id,
             )
         else:
             old_basis = existing.cost_basis
@@ -400,13 +419,22 @@ def record_transaction(
         side=side,
         quantity=float(quantity),
         price=float(price),
-        date=txn_date or date.today().isoformat(),
+        date=sell_date,
         notes=notes,
         recorded_at=datetime.now().isoformat(),
+        account_id=account_id,
+        fees=float(fees),
     )
     txns = load_transactions()
     txns.append(txn)
     save_transactions(txns)
+
+    # Persist FIFO closed lots (only for SELL; variable defined above)
+    if side == "SELL" and closed_lots:
+        for lot in closed_lots:
+            lot.sell_txn_id = txn.recorded_at
+        append_closed_lots(closed_lots)
+
     return txn, updated, None
 
 

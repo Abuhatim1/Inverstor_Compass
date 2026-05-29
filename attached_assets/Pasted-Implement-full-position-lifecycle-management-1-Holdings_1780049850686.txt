@@ -1,0 +1,238 @@
+Implement full position lifecycle management.
+
+1. Holdings table improvements
+
+Add columns:
+
+- Ticker
+- Company Name
+- Quantity
+- Avg Cost
+- Current Price
+- Market Value
+- Unrealized P&L $
+- Unrealized P&L %
+- Currency
+- Investment Account
+- Actions
+
+Company Name must always be shown.
+
+For Yahoo-linked assets:
+- auto populated
+- read only
+
+For manual assets:
+- editable
+
+--------------------------------------------------
+
+2. Buy More
+
+Each holding must have:
+
+➕ Buy More
+
+When clicked:
+
+Open transaction dialog:
+
+- Date
+- Account
+- Quantity
+- Price
+- Fees
+
+Create BUY transaction.
+
+System recalculates:
+
+- Quantity
+- Weighted average cost
+- Market value
+- Unrealized P&L
+
+--------------------------------------------------
+
+3. Sell / Close Position
+
+Each holding must have:
+
+➖ Sell
+
+When clicked:
+
+Open dialog:
+
+- Date
+- Account (default = original holding account)
+- Quantity to sell
+- Price
+- Fees
+
+Allow partial or full sell.
+
+--------------------------------------------------
+
+4. Partial Sell Logic
+
+Example:
+
+Buy:
+100 shares @ $10
+
+Sell:
+40 shares @ $15
+
+Result:
+
+Open Holdings:
+60 shares remain
+
+Closed Holdings:
+40 shares
+
+Store:
+
+- Buy price used
+- Sell price
+- Realized profit $
+- Realized profit %
+- Holding period
+
+Use FIFO accounting.
+
+--------------------------------------------------
+
+5. Full Close Logic
+
+Example:
+
+100 shares
+Sell 100 shares
+
+Result:
+
+Remove position from Holdings table.
+
+Move position completely to:
+
+Closed Holdings
+
+Store:
+
+- Open date
+- Close date
+- Buy value
+- Sell value
+- Realized profit $
+- Realized profit %
+- Holding period
+
+--------------------------------------------------
+
+6. Closed Holdings Tab
+
+Create dedicated tab:
+
+📁 Closed Holdings
+
+Columns:
+
+- Ticker
+- Company Name
+- Quantity Sold
+- Buy Price
+- Sell Price
+- Buy Value
+- Sell Value
+- Realized P&L $
+- Realized P&L %
+- Open Date
+- Close Date
+- Holding Period
+
+Summary cards:
+
+- Total Realized Gain/Loss
+- Win Rate %
+- Average Return %
+- Number Closed
+
+--------------------------------------------------
+
+7. Undo Close
+
+For every closed position:
+
+↩ Reopen Position
+
+Confirmation required.
+
+If reopened:
+
+- move back to Holdings
+- remove from Closed Holdings
+- restore original cost basis
+
+--------------------------------------------------
+
+8. Record Update Only
+
+In Buy/Sell dialogs add option:
+
+☑ Record Update Only
+
+If checked:
+
+Do not create transaction.
+
+Only update holding fields.
+
+Used for migration/corrections.
+
+--------------------------------------------------
+
+9. Account Integration
+
+Every transaction must be linked to an account.
+
+BUY:
+cash decreases.
+
+SELL:
+cash increases.
+
+Use account currency.
+
+--------------------------------------------------
+
+10. Audit Trail
+
+Create immutable transaction history.
+
+Store:
+
+- Buy
+- Sell
+- Transfer
+- Cash Deposit
+- Cash Withdrawal
+
+Nothing should ever be deleted.
+
+Corrections are new transactions.
+
+--------------------------------------------------
+
+11. Portfolio Metrics
+
+Separate:
+
+Unrealized Gain/Loss
+
+from
+
+Realized Gain/Loss
+
+Portfolio dashboard must show both.

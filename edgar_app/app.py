@@ -1922,6 +1922,178 @@ def render_holdings_tab() -> None:
                                 st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
 
+    # ── Buy More / Sell actions ───────────────────────────────────────────────
+    if holdings:
+        active_holdings = {t: h for t, h in holdings.items() if h.quantity > 1e-9}
+        if active_holdings:
+            st.divider()
+            st.markdown("#### 📊 Position Actions")
+            _action_ticker = st.selectbox(
+                "Select holding to act on",
+                options=sorted(active_holdings.keys()),
+                format_func=lambda t: f"{t}  ·  {active_holdings[t].company_name}  "
+                                      f"·  {active_holdings[t].quantity:.4f} shares",
+                key="action_ticker_select",
+            )
+            if _action_ticker:
+                _ah = active_holdings[_action_ticker]
+                _act_c1, _act_c2 = st.columns(2)
+
+                # ── BUY MORE ────────────────────────────────────────────────
+                with _act_c1:
+                    with st.expander(f"➕ Buy More  {_action_ticker}", expanded=False):
+                        from portfolio import load_accounts, account_display_name
+                        _accts = load_accounts()
+                        _acct_opts = ["— none —"] + [account_display_name(a) for a in _accts if not a.deleted]
+                        _acct_ids  = [""] + [a.account_id for a in _accts if not a.deleted]
+                        with st.form(f"buy_more_{_action_ticker}", clear_on_submit=True):
+                            _bm_qty = st.number_input(
+                                "Quantity to buy",
+                                min_value=0.001, step=1.0, format="%.4f",
+                                key=f"bm_qty_{_action_ticker}",
+                            )
+                            _bm_price = st.number_input(
+                                "Price per share",
+                                value=float(_ah.current_price or _ah.avg_cost or 0.0),
+                                min_value=0.0, step=0.01, format="%.4f",
+                                key=f"bm_price_{_action_ticker}",
+                            )
+                            _bm_fees = st.number_input(
+                                "Fees / commission",
+                                min_value=0.0, value=0.0, step=0.01, format="%.4f",
+                                key=f"bm_fees_{_action_ticker}",
+                            )
+                            _bm_date = st.date_input(
+                                "Trade date",
+                                value=None,
+                                key=f"bm_date_{_action_ticker}",
+                            )
+                            _bm_acct_idx = st.selectbox(
+                                "Account (optional)",
+                                options=range(len(_acct_opts)),
+                                format_func=lambda i: _acct_opts[i],
+                                key=f"bm_acct_{_action_ticker}",
+                            )
+                            _bm_notes = st.text_input(
+                                "Notes (optional)",
+                                key=f"bm_notes_{_action_ticker}",
+                                max_chars=200,
+                            )
+                            _bm_submitted = st.form_submit_button(
+                                "✅ Confirm Buy",
+                                use_container_width=True,
+                                type="primary",
+                            )
+                        if _bm_submitted:
+                            _bm_date_str = _bm_date.isoformat() if _bm_date else None
+                            _bm_aid = _acct_ids[_bm_acct_idx]
+                            _bm_txn, _bm_h, _bm_err = record_transaction(
+                                ticker       = _action_ticker,
+                                side         = "BUY",
+                                quantity     = float(_bm_qty),
+                                price        = float(_bm_price),
+                                txn_date     = _bm_date_str,
+                                notes        = _bm_notes,
+                                company_name = _ah.company_name,
+                                market       = _ah.market,
+                                sector       = _ah.sector,
+                                asset_type   = getattr(_ah, "asset_type", "Stock"),
+                                currency     = getattr(_ah, "currency", "USD"),
+                                has_ticker   = getattr(_ah, "has_ticker", True),
+                                account_id   = _bm_aid,
+                                fees         = float(_bm_fees),
+                            )
+                            if _bm_err:
+                                st.error(_bm_err)
+                            else:
+                                st.success(
+                                    f"Bought {_bm_qty:.4f} × {_action_ticker} "
+                                    f"@ {_bm_price:.4f}. "
+                                    f"New avg cost: {_bm_h.avg_cost:.4f}"
+                                )
+                                st.rerun()
+
+                # ── SELL ─────────────────────────────────────────────────────
+                with _act_c2:
+                    with st.expander(f"📤 Sell  {_action_ticker}", expanded=False):
+                        from portfolio import load_accounts, account_display_name
+                        _accts2 = load_accounts()
+                        _acct_opts2 = ["— none —"] + [account_display_name(a) for a in _accts2 if not a.deleted]
+                        _acct_ids2  = [""] + [a.account_id for a in _accts2 if not a.deleted]
+                        with st.form(f"sell_{_action_ticker}", clear_on_submit=True):
+                            _sl_max = float(_ah.quantity)
+                            _sl_qty = st.number_input(
+                                f"Quantity to sell  (max {_sl_max:.4f})",
+                                min_value=0.001,
+                                max_value=float(_ah.quantity) + 0.001,
+                                step=1.0, format="%.4f",
+                                key=f"sl_qty_{_action_ticker}",
+                            )
+                            _sl_price = st.number_input(
+                                "Sale price per share",
+                                value=float(_ah.current_price or _ah.avg_cost or 0.0),
+                                min_value=0.0, step=0.01, format="%.4f",
+                                key=f"sl_price_{_action_ticker}",
+                            )
+                            _sl_fees = st.number_input(
+                                "Fees / commission",
+                                min_value=0.0, value=0.0, step=0.01, format="%.4f",
+                                key=f"sl_fees_{_action_ticker}",
+                            )
+                            _sl_date = st.date_input(
+                                "Trade date",
+                                value=None,
+                                key=f"sl_date_{_action_ticker}",
+                            )
+                            _sl_acct_idx = st.selectbox(
+                                "Account (optional)",
+                                options=range(len(_acct_opts2)),
+                                format_func=lambda i: _acct_opts2[i],
+                                key=f"sl_acct_{_action_ticker}",
+                            )
+                            _sl_notes = st.text_input(
+                                "Notes (optional)",
+                                key=f"sl_notes_{_action_ticker}",
+                                max_chars=200,
+                            )
+                            # Show P&L preview
+                            _preview_rpnl = (float(_sl_price) - float(_ah.avg_cost)) * float(_sl_qty) if _sl_price and _sl_qty else 0.0
+                            _preview_pct  = (_preview_rpnl / (float(_ah.avg_cost) * float(_sl_qty)) * 100.0) if _ah.avg_cost and _sl_qty else 0.0
+                            st.caption(
+                                f"Est. realized P&L: "
+                                f"**{_preview_rpnl:+,.2f}** {getattr(_ah, 'currency', '')}  "
+                                f"({_preview_pct:+.2f}%)"
+                            )
+                            _sl_submitted = st.form_submit_button(
+                                "✅ Confirm Sell",
+                                use_container_width=True,
+                                type="primary",
+                            )
+                        if _sl_submitted:
+                            _sl_date_str = _sl_date.isoformat() if _sl_date else None
+                            _sl_aid = _acct_ids2[_sl_acct_idx]
+                            _sl_txn, _sl_h, _sl_err = record_transaction(
+                                ticker       = _action_ticker,
+                                side         = "SELL",
+                                quantity     = float(_sl_qty),
+                                price        = float(_sl_price),
+                                txn_date     = _sl_date_str,
+                                notes        = _sl_notes,
+                                account_id   = _sl_aid,
+                                fees         = float(_sl_fees),
+                            )
+                            if _sl_err:
+                                st.error(_sl_err)
+                            else:
+                                _rpnl = (_sl_price - _ah.avg_cost) * _sl_qty
+                                st.success(
+                                    f"Sold {_sl_qty:.4f} × {_action_ticker} "
+                                    f"@ {_sl_price:.4f}. "
+                                    f"Realized P&L: {_rpnl:+,.2f} "
+                                    f"{getattr(_ah, 'currency', '')}"
+                                )
+                                st.rerun()
+
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
     with st.expander("➕ Add / Update Holding", expanded=not holdings):
@@ -4305,6 +4477,130 @@ def render_decision_queue_tab() -> None:
     st.caption(f"Computed at {result.computed_at}")
 
 
+def render_closed_holdings_tab() -> None:
+    """📁 Closed Holdings — fully-sold positions with FIFO realized P&L."""
+    from portfolio import (
+        load_closed_holdings,
+        compute_realized_summary,
+        void_lots_for_ticker,
+        upsert_holding,
+        load_holdings,
+    )
+    from portfolio.accounts import load_accounts
+    from portfolio.accounts import account_display_name
+    import pandas as pd
+
+    st.header("📁 Closed Holdings")
+    st.caption(
+        "Positions you have fully or partially sold. "
+        "Realized P&L is calculated using **FIFO** cost basis. "
+        "Use **↩️ Reopen** to restore a position if you re-enter a ticker."
+    )
+
+    closed = load_closed_holdings()
+    summary = compute_realized_summary(closed)
+
+    # ── Summary metrics ────────────────────────────────────────────────────────
+    sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+    _sign = "+" if summary.total_realized_pnl >= 0 else ""
+    sm1.metric("Closed Positions",   summary.n_closed)
+    sm2.metric("Total Realized P&L", f"{_sign}{summary.total_realized_pnl:,.2f}")
+    sm3.metric("Win Rate",           f"{summary.win_rate_pct:.1f}%" if summary.n_closed else "—")
+    sm4.metric("Winners / Losers",   f"{summary.n_winners} / {summary.n_losers}" if summary.n_closed else "—")
+    sm5.metric("Avg Return",         f"{summary.avg_return_pct:+.2f}%" if summary.n_closed else "—")
+
+    if not closed:
+        st.info(
+            "No closed positions yet. When you record a **SELL** transaction in the "
+            "**💼 Holdings** tab, the realized P&L will appear here automatically.",
+            icon="💡",
+        )
+        return
+
+    st.divider()
+
+    # ── Per-ticker closed holding cards ────────────────────────────────────────
+    for ticker, ch in sorted(closed.items()):
+        pnl_color = "🟢" if ch.realized_pnl > 0 else ("🔴" if ch.realized_pnl < 0 else "⚪")
+        _sign2 = "+" if ch.realized_pnl >= 0 else ""
+        with st.expander(
+            f"{pnl_color}  **{ticker}**  ·  {ch.company_name}  ·  "
+            f"P&L: **{_sign2}{ch.realized_pnl:,.2f} {ch.currency}** "
+            f"({ch.realized_pnl_pct:+.2f}%)  ·  "
+            f"{ch.total_quantity:.4f} shares  ·  held {ch.holding_period_label}",
+            expanded=False,
+        ):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Avg Buy Price",  f"{ch.avg_buy_price:.4f}")
+            c2.metric("Avg Sell Price", f"{ch.avg_sell_price:.4f}")
+            c3.metric("Total Buy",      f"{ch.total_buy_value:,.2f}")
+            c4.metric("Total Sell",     f"{ch.total_sell_value:,.2f}")
+            c5, c6, c7, c8 = st.columns(4)
+            c5.metric("Fees",           f"{ch.total_fees:,.4f}")
+            c6.metric("Realized P&L",   f"{_sign2}{ch.realized_pnl:,.2f}")
+            c7.metric("Return %",       f"{ch.realized_pnl_pct:+.2f}%")
+            c8.metric("Holding Period", ch.holding_period_label)
+            st.caption(
+                f"First opened: {ch.first_open_date or '—'}  ·  "
+                f"Last closed: {ch.last_close_date or '—'}  ·  "
+                f"Currency: {ch.currency}  ·  FIFO lots: {len(ch.lots)}"
+            )
+
+            # Lot detail table
+            lot_rows = []
+            for lot in ch.lots:
+                lot_rows.append({
+                    "Buy Date":   lot.open_date,
+                    "Sell Date":  lot.close_date,
+                    "Qty":        round(lot.quantity, 4),
+                    "Buy Price":  round(lot.buy_price, 4),
+                    "Sell Price": round(lot.sell_price, 4),
+                    "Buy Value":  round(lot.buy_value, 4),
+                    "Sell Value": round(lot.sell_value, 4),
+                    "Fees":       round(lot.sell_fees, 4),
+                    "P&L":        round(lot.realized_pnl, 4),
+                    "P&L %":      round(lot.realized_pnl_pct, 2),
+                    "Held":       lot.holding_period_label,
+                })
+            if lot_rows:
+                st.dataframe(pd.DataFrame(lot_rows), hide_index=True, use_container_width=True)
+
+            # ── Reopen button ──────────────────────────────────────────────────
+            st.write("")
+            _reopen_key = f"reopen_{ticker}"
+            _confirm_key = f"reopen_confirm_{ticker}"
+            if not st.session_state.get(_confirm_key):
+                if st.button(
+                    f"↩️ Reopen / Undo  {ticker}",
+                    key=_reopen_key,
+                    help="Void all closed lots for this ticker (soft-delete). "
+                         "The position will disappear from Closed Holdings. "
+                         "If you still hold shares, they remain in Active Holdings.",
+                ):
+                    st.session_state[_confirm_key] = True
+                    st.rerun()
+            else:
+                st.warning(
+                    f"This will **void** all {len(ch.lots)} closed lot(s) for **{ticker}**. "
+                    "The realized P&L records will be hidden (not permanently deleted). "
+                    "Confirm?",
+                    icon="⚠️",
+                )
+                _ok_c, _cancel_c = st.columns(2)
+                with _ok_c:
+                    if st.button(f"✅ Yes, reopen {ticker}", key=f"reopen_ok_{ticker}",
+                                 use_container_width=True, type="primary"):
+                        voided = void_lots_for_ticker(ticker, void_reason="Reopened via UI")
+                        st.toast(f"Voided {voided} lot(s) for {ticker}", icon="↩️")
+                        st.session_state.pop(_confirm_key, None)
+                        st.rerun()
+                with _cancel_c:
+                    if st.button("Cancel", key=f"reopen_cancel_{ticker}",
+                                 use_container_width=True):
+                        st.session_state.pop(_confirm_key, None)
+                        st.rerun()
+
+
 def render_upload_tab() -> None:
     """Render the Upload Filing tab."""
     st.subheader("📂 Upload a Document for AI Analysis")
@@ -4482,10 +4778,11 @@ st.caption(
     "SEC filings · AI analysis · Portfolio state · Delta intelligence · Market prices"
 )
 
-(tab_holdings, tab_accounts, tab_transactions, tab_cash,
+(tab_holdings, tab_closed, tab_accounts, tab_transactions, tab_cash,
  tab_decisions, tab_risk, tab_command,
  tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload) = st.tabs([
     "💼 Holdings",
+    "📁 Closed Holdings",
     "💳 Accounts",
     "🔁 Transactions",
     "💵 Cash Ledger",
@@ -4501,6 +4798,9 @@ st.caption(
 
 with tab_holdings:
     render_holdings_tab()
+
+with tab_closed:
+    render_closed_holdings_tab()
 
 with tab_accounts:
     render_accounts_tab()
