@@ -2646,155 +2646,110 @@ def render_holdings_tab() -> None:
                          help="Open a single new position with a BUY transaction."):
                 _dlg_add_new()
 
-        # ── Holdings table ────────────────────────────────────────────────────
-        st.markdown(
-            """
-<style>
-/* Compact Holdings table rows */
-div[data-testid="stHorizontalBlock"]:has(div.hld-row-marker) {
-    align-items: center;
-    border-bottom: 1px solid rgba(128,128,128,0.15);
-    padding: 2px 0;
-    gap: 4px !important;
-}
-div[data-testid="stHorizontalBlock"]:has(div.hld-hdr-marker) {
-    border-bottom: 2px solid rgba(128,128,128,0.3);
-    padding-bottom: 2px;
-    gap: 4px !important;
-}
-/* Shrink action buttons to icon size */
-div.hld-row-marker ~ * button,
-div[data-testid="stHorizontalBlock"]:has(div.hld-row-marker) button {
-    padding: 0 6px !important;
-    min-height: 1.6rem !important;
-    height: 1.6rem !important;
-    font-size: 0.78rem !important;
-    line-height: 1 !important;
-}
-</style>
-""",
-            unsafe_allow_html=True,
+        # ── Holdings dataframe ────────────────────────────────────────────────
+        _mv_col = f"MV ({_base_ccy})"
+        _df_rows = []
+        for _tk, _h in sorted(holdings.items(), key=lambda x: -_wt_map.get(x[0], 0.0)):
+            _ccy  = getattr(_h, "currency", "USD")
+            _fxr  = _fx.get(_ccy)
+            _mv   = round(_h.market_value * (_fxr.rate if _fxr else 1.0), 2)
+            _df_rows.append({
+                "Ticker":    _tk,
+                "Company":   _h.company_name or "",
+                "Qty":       round(_h.quantity, 4),
+                "Avg Cost":  round(_h.avg_cost, 4),
+                "Price":     round(_h.current_price, 4),
+                _mv_col:     _mv,
+                "Weight %":  round(_wt_map.get(_tk, 0.0), 2),
+                "P&L %":     round(_h.unrealized_pnl_pct, 2),
+                "Currency":  _ccy,
+            })
+
+        st.dataframe(
+            pd.DataFrame(_df_rows),
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Ticker":   st.column_config.TextColumn("Ticker",   width="small"),
+                "Company":  st.column_config.TextColumn("Company"),
+                "Qty":      st.column_config.NumberColumn("Qty",      format="%.4f"),
+                "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%.4f"),
+                "Price":    st.column_config.NumberColumn("Price",    format="%.4f"),
+                _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.0f"),
+                "Weight %": st.column_config.NumberColumn("Weight %", format="%.2f%%"),
+                "P&L %":    st.column_config.NumberColumn("P&L %",    format="%+.2f%%"),
+                "Currency": st.column_config.TextColumn("Currency",  width="small"),
+            },
         )
 
-        # column proportions: [Ticker+Co, Qty, Price, MV, Wt%, P&L%, Actions]
-        _TCOLS = [2.4, 0.85, 0.95, 1.25, 0.72, 0.9, 1.85]
+        # ── Action selector ───────────────────────────────────────────────────
+        _ea_state  = st.session_state.get("expanded_action")
+        _tk_sorted = [r["Ticker"] for r in _df_rows]
+        _ACTION_LABELS = {
+            "buy":    "➕ Buy",
+            "sell":   "➖ Sell",
+            "edit":   "✏️ Edit",
+            "delete": "🗑️ Delete",
+        }
+        _ACTION_KEYS = list(_ACTION_LABELS.keys())
 
-        # Header row
-        _hh = st.columns(_TCOLS, gap="small")
-        _hh[0].markdown("<div class='hld-hdr-marker'></div>**Ticker / Company**",
-                        unsafe_allow_html=True)
-        _hh[1].markdown("**Qty**")
-        _hh[2].markdown("**Price**")
-        _hh[3].markdown(f"**MV ({_base_ccy})**")
-        _hh[4].markdown("**Wt %**")
-        _hh[5].markdown("**P&L %**")
-        _hh[6].markdown("**Actions**")
+        _sel_default_tk  = _ea_state.get("ticker",  _tk_sorted[0])  if _ea_state else _tk_sorted[0]
+        _sel_default_act = _ea_state.get("action",  "buy")           if _ea_state else "buy"
+        _sel_default_tk  = _sel_default_tk  if _sel_default_tk  in _tk_sorted else _tk_sorted[0]
+        _sel_default_act = _sel_default_act if _sel_default_act in _ACTION_KEYS else "buy"
 
-        # Pre-load accounts once for display
-        try:
-            _acct_map = _iaf_ldr()
-        except Exception:
-            _acct_map = {}
+        _sc1, _sc2, _sc3 = st.columns([2, 1, 1])
+        with _sc1:
+            _sel_ticker = st.selectbox(
+                "Select holding",
+                options=_tk_sorted,
+                index=_tk_sorted.index(_sel_default_tk),
+                key="hld_sel_ticker",
+                label_visibility="collapsed",
+            )
+        with _sc2:
+            _sel_action = st.selectbox(
+                "Action",
+                options=_ACTION_KEYS,
+                index=_ACTION_KEYS.index(_sel_default_act),
+                format_func=lambda k: _ACTION_LABELS[k],
+                key="hld_sel_action",
+                label_visibility="collapsed",
+            )
+        with _sc3:
+            _go_clicked = st.button(
+                "▶ Go",
+                key="hld_go_btn",
+                type="primary",
+                use_container_width=True,
+            )
+            if _go_clicked:
+                _cur = st.session_state.get("expanded_action")
+                if _cur and _cur.get("ticker") == _sel_ticker and _cur.get("action") == _sel_action:
+                    st.session_state.pop("expanded_action", None)
+                else:
+                    st.session_state["expanded_action"] = {
+                        "ticker": _sel_ticker,
+                        "action": _sel_action,
+                    }
+                st.rerun()
 
+        # ── Inline action form ────────────────────────────────────────────────
         _ea_state = st.session_state.get("expanded_action")
-
-        def _toggle_action(ticker: str, action: str) -> None:
-            _cur = st.session_state.get("expanded_action")
-            if _cur and _cur.get("ticker") == ticker and _cur.get("action") == action:
-                st.session_state.pop("expanded_action", None)
-            else:
-                st.session_state["expanded_action"] = {"ticker": ticker, "action": action}
-            st.rerun()
-
-        for _row_tk, _row_h in sorted(
-            holdings.items(),
-            key=lambda x: -_wt_map.get(x[0], 0.0),
-        ):
-            _row_ccy  = getattr(_row_h, "currency", "USD")
-            _row_fxr  = _fx.get(_row_ccy)
-            _row_mv   = round(_row_h.market_value * (_row_fxr.rate if _row_fxr else 1.0), 2)
-            _row_pnl  = _row_h.unrealized_pnl_pct
-            _row_wt   = _wt_map.get(_row_tk, 0.0)
-            _row_open = bool(_ea_state and _ea_state.get("ticker") == _row_tk)
-            _row_act  = (_ea_state.get("action", "") if _row_open else "")
-            _pnl_col  = "#2e7d32" if _row_pnl > 0.01 else ("#c62828" if _row_pnl < -0.01 else "#888")
-            _pnl_ico  = "▲" if _row_pnl > 0.01 else ("▼" if _row_pnl < -0.01 else "–")
-
-            # Account display name (hidden details line)
-            _row_aid  = getattr(_row_h, "account_id", None)
-            _row_acct = ""
-            if _row_aid and _row_aid in _acct_map:
-                try:
-                    _row_acct = _iaf_dn(_acct_map[_row_aid])
-                except Exception:
-                    pass
-
-            # ── Data row ──────────────────────────────────────────────────────
-            _rc = st.columns(_TCOLS, gap="small")
-
-            with _rc[0]:
-                st.markdown(
-                    "<div class='hld-row-marker'></div>"
-                    f"**{_row_tk}**  \n"
-                    f"<small style='color:grey;line-height:1.2'>"
-                    f"{(_row_h.company_name or '—')[:30]}</small>",
-                    unsafe_allow_html=True,
-                )
-                _detail = f"Avg {_row_h.avg_cost:.4f} · {_row_ccy}"
-                if _row_acct:
-                    _detail += f" · {_row_acct}"
-                st.caption(_detail)
-
-            with _rc[1]:
-                st.markdown(f"{_row_h.quantity:,.4f}")
-
-            with _rc[2]:
-                st.markdown(f"{_row_h.current_price:,.4f}")
-
-            with _rc[3]:
-                st.markdown(f"**{_row_mv:,.0f}**")
-
-            with _rc[4]:
-                st.markdown(f"{_row_wt:.1f}%")
-
-            with _rc[5]:
-                st.markdown(
-                    f"<span style='color:{_pnl_col};font-weight:600'>"
-                    f"{_pnl_ico} {abs(_row_pnl):.1f}%</span>",
-                    unsafe_allow_html=True,
-                )
-
-            with _rc[6]:
-                _ba1, _ba2, _ba3, _ba4 = st.columns(4, gap="small")
-                with _ba1:
-                    if st.button("➕", key=f"hld_buy_{_row_tk}", help="Buy more",
-                                 type="primary" if _row_act == "buy" else "secondary"):
-                        _toggle_action(_row_tk, "buy")
-                with _ba2:
-                    if st.button("➖", key=f"hld_sell_{_row_tk}", help="Sell",
-                                 disabled=(_row_h.quantity <= 1e-9),
-                                 type="primary" if _row_act == "sell" else "secondary"):
-                        _toggle_action(_row_tk, "sell")
-                with _ba3:
-                    if st.button("✏️", key=f"hld_edit_{_row_tk}", help="Edit",
-                                 type="primary" if _row_act == "edit" else "secondary"):
-                        _toggle_action(_row_tk, "edit")
-                with _ba4:
-                    if st.button("🗑️", key=f"hld_del_{_row_tk}", help="Delete",
-                                 type="primary" if _row_act == "delete" else "secondary"):
-                        _toggle_action(_row_tk, "delete")
-
-            # ── Inline form (below this row only) ─────────────────────────────
-            if _row_open:
+        if _ea_state:
+            _f_tk = _ea_state.get("ticker", "")
+            _f_act = _ea_state.get("action", "")
+            _f_h  = holdings.get(_f_tk)
+            if _f_tk and _f_h and _f_act:
                 with st.container(border=True):
-                    if _row_act == "buy":
-                        _render_inline_buy(_row_tk, _row_h)
-                    elif _row_act == "sell":
-                        _render_inline_sell(_row_tk, _row_h)
-                    elif _row_act == "edit":
-                        _render_inline_edit(_row_tk, _row_h)
-                    elif _row_act == "delete":
-                        _render_inline_delete(_row_tk, _row_h)
+                    if _f_act == "buy":
+                        _render_inline_buy(_f_tk, _f_h)
+                    elif _f_act == "sell":
+                        _render_inline_sell(_f_tk, _f_h)
+                    elif _f_act == "edit":
+                        _render_inline_edit(_f_tk, _f_h)
+                    elif _f_act == "delete":
+                        _render_inline_delete(_f_tk, _f_h)
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
