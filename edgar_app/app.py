@@ -2256,66 +2256,330 @@ def render_holdings_tab() -> None:
         )
         live_cache = get_all_from_session()
 
-        # ── Build the holdings table ───────────────────────────────────────────
-        _mv_col       = f"MV ({_base_ccy})"
-        rows          = []
-        _ticker_order: list[str] = []
-        manual_tickers: list[str] = []
+        # ── Account helpers (local for inline forms — cheap re-import) ──────────
+        from portfolio.accounts import (
+            active_accounts as _iaf_fn, account_display_name as _iaf_dn
+        )
+        from portfolio.accounts import (
+            load_accounts as _iaf_ldr, update_account_cash as _iaf_upd
+        )
 
-        for ticker, h in sorted(holdings.items()):
-            has_tk  = getattr(h, "has_ticker", True)
-            ccy     = getattr(h, "currency", "USD")
-            fx_r    = _fx.get(ccy)
-            fx_rate = fx_r.rate if fx_r else 1.0
-            mv_base = round(h.market_value * fx_rate, 2)
-            pnl_pct = h.unrealized_pnl_pct
-            status  = "🟢" if pnl_pct > 0.01 else ("🔴" if pnl_pct < -0.01 else "⚪")
+        def _acct_pairs(currency=None):
+            try:
+                return list(_iaf_fn(currency).items())
+            except Exception:
+                return []
 
-            norm_tk = _normalize_ticker(ticker)
-            md = live_cache.get(norm_tk) or live_cache.get(ticker)
+        # ── CSV data (used by download button below) ───────────────────────────
+        _mv_col        = f"MV ({_base_ccy})"
+        rows           = []
+        manual_tickers : list[str] = []
 
-            if not has_tk:
-                manual_tickers.append(ticker)
-
-            _ticker_order.append(ticker)
+        for _t0, _h0 in sorted(holdings.items()):
+            _has_tk0 = getattr(_h0, "has_ticker", True)
+            _ccy0    = getattr(_h0, "currency", "USD")
+            _fxr0    = _fx.get(_ccy0)
+            _mv0     = round(_h0.market_value * (_fxr0.rate if _fxr0 else 1.0), 2)
+            _pnl0    = _h0.unrealized_pnl_pct
+            if not _has_tk0:
+                manual_tickers.append(_t0)
             rows.append({
-                " ":        status,
-                "Company":  h.company_name or ticker,
-                "Ticker":   ticker,
-                "Qty":      round(h.quantity, 4),
-                "Avg Cost": round(h.avg_cost, 4),
-                "Price":    round(h.current_price, 4),
-                _mv_col:    mv_base,
-                "P&L %":    round(pnl_pct, 2),
-                "Wt %":     round(_wt_map.get(ticker, 0.0), 1),
-                "CCY":      ccy,
+                "Ticker":   _t0,
+                "Company":  _h0.company_name or _t0,
+                "Qty":      round(_h0.quantity, 4),
+                "Avg Cost": round(_h0.avg_cost, 4),
+                "Price":    round(_h0.current_price, 4),
+                _mv_col:    _mv0,
+                "P&L %":    round(_pnl0, 2),
+                "Wt %":     round(_wt_map.get(_t0, 0.0), 1),
+                "CCY":      _ccy0,
             })
 
-        _tbl_sel = st.dataframe(
-            pd.DataFrame(rows),
-            hide_index=True,
-            use_container_width=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            column_config={
-                " ":        st.column_config.TextColumn(" ", width="small"),
-                "Company":  st.column_config.TextColumn("Company"),
-                "Ticker":   st.column_config.TextColumn("Ticker", width="small"),
-                "Qty":      st.column_config.NumberColumn("Qty",      format="%.4f"),
-                "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%.4f"),
-                "Price":    st.column_config.NumberColumn("Price",    format="%.4f"),
-                _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.0f"),
-                "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
-                "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
-                "CCY":      st.column_config.TextColumn("CCY",        width="small"),
-            },
-        )
-        st.caption("👆 Tap a row to select it, then use the action bar below  ·  🟢 profit  🔴 loss  ⚪ flat")
+        # ── Inline form: Buy More ─────────────────────────────────────────────
+        def _render_inline_buy(f_ticker: str, f_h) -> None:
+            _d_ccy    = getattr(f_h, "currency", "USD")
+            _d_pairs  = _acct_pairs()
+            _d_labels = ["— no account —"] + [_iaf_dn(a) for _, a in _d_pairs]
+            _d_ids    = [""] + [aid for aid, _ in _d_pairs]
+            st.markdown(f"##### ➕ &nbsp; **{f_ticker}** — {f_h.company_name or f_ticker}",
+                        unsafe_allow_html=True)
+            st.caption(f"{f_h.quantity:,.4f} shares held · avg cost {f_h.avg_cost:.4f} {_d_ccy}")
+            if not _d_pairs:
+                st.info("No active accounts — transaction recorded without account link.", icon="ℹ️")
+            _f1, _f2 = st.columns(2)
+            with _f1:
+                _d_qty = st.number_input(
+                    "Qty to buy", min_value=0.0001, step=1.0, format="%.4f", value=1.0,
+                    key=f"buy_{f_ticker}_qty",
+                )
+                _d_fees = st.number_input(
+                    "Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f",
+                    key=f"buy_{f_ticker}_fees",
+                )
+                _d_corr = st.checkbox(
+                    "Record correction only (skip cash debit)",
+                    key=f"buy_{f_ticker}_corr",
+                    help="Adjust holding without moving account cash.",
+                )
+            with _f2:
+                _d_price = st.number_input(
+                    "Price / share",
+                    value=float(f_h.current_price or f_h.avg_cost or 0.0),
+                    min_value=0.0, step=0.01, format="%.4f",
+                    key=f"buy_{f_ticker}_price",
+                )
+                _d_acct = st.selectbox(
+                    "Account", options=range(len(_d_labels)),
+                    format_func=lambda i: _d_labels[i],
+                    key=f"buy_{f_ticker}_acct",
+                )
+                _d_date = st.date_input("Trade date", value=None, key=f"buy_{f_ticker}_date")
+            _d_notes = st.text_input("Notes (optional)", max_chars=200, key=f"buy_{f_ticker}_notes")
+            _d_aid   = _d_ids[_d_acct]
+            _d_total = float(_d_qty) * float(_d_price) + float(_d_fees)
+            _cash_ok = True
+            if not _d_corr and _d_aid:
+                try:
+                    _ck = _iaf_ldr()
+                    _ck_bal = _ck[_d_aid].cash_balance if _d_aid in _ck else None
+                    if _ck_bal is not None:
+                        _ck_ok = _ck_bal >= _d_total
+                        st.caption(
+                            f"{'🟢' if _ck_ok else '🔴'} Account cash: "
+                            f"**{_ck_bal:,.2f} {_d_ccy}** · Cost: **{_d_total:,.2f} {_d_ccy}**"
+                        )
+                        if not _ck_ok:
+                            st.warning(
+                                f"Insufficient cash — available {_ck_bal:,.2f}, "
+                                f"needed {_d_total:,.2f} {_d_ccy}. "
+                                "Tick 'Record correction only' to bypass.", icon="⚠️",
+                            )
+                            _cash_ok = False
+                except Exception:
+                    pass
+            if (f_h.quantity + _d_qty) > 0:
+                _new_avg = (
+                    (f_h.avg_cost * f_h.quantity) + (_d_price * _d_qty)
+                ) / (f_h.quantity + _d_qty)
+                st.caption(f"Est. new avg cost: **{_new_avg:.4f} {_d_ccy}**")
+            _bs1, _bs2 = st.columns(2)
+            with _bs1:
+                if st.button("✅ Confirm Buy", type="primary", use_container_width=True,
+                             disabled=not _cash_ok, key=f"buy_{f_ticker}_save"):
+                    try:
+                        _t, _h2, _e = record_transaction(
+                            ticker=f_ticker, side="BUY",
+                            quantity=float(_d_qty), price=float(_d_price),
+                            txn_date=_d_date.isoformat() if _d_date else None,
+                            notes=_d_notes,
+                            company_name=f_h.company_name,
+                            market=getattr(f_h, "market", "US"),
+                            sector=getattr(f_h, "sector", "Other"),
+                            asset_type=getattr(f_h, "asset_type", "Stock"),
+                            currency=_d_ccy,
+                            has_ticker=getattr(f_h, "has_ticker", True),
+                            account_id=_d_aid, fees=float(_d_fees),
+                        )
+                        if _e:
+                            st.error(_e)
+                        else:
+                            if not _d_corr and _d_aid:
+                                try:
+                                    _iaf_upd(_d_aid, -_d_total)
+                                except Exception:
+                                    pass
+                            st.toast(
+                                f"Bought {_d_qty:.4f} × {f_ticker} @ {_d_price:.4f}"
+                                f"  · New avg: {_h2.avg_cost:.4f}", icon="✅",
+                            )
+                            st.session_state.pop("expanded_action", None)
+                            st.rerun()
+                    except Exception as _ex:
+                        st.error(f"Buy failed — {_ex}")
+            with _bs2:
+                if st.button("✗ Cancel", use_container_width=True, key=f"buy_{f_ticker}_cancel"):
+                    st.session_state.pop("expanded_action", None)
+                    st.rerun()
 
-        # ── Table action buttons ───────────────────────────────────────────────
+        # ── Inline form: Sell / Close ─────────────────────────────────────────
+        def _render_inline_sell(f_ticker: str, f_h) -> None:
+            _d_ccy    = getattr(f_h, "currency", "USD")
+            _d_avail  = float(f_h.quantity)
+            _d_pairs  = _acct_pairs()
+            _d_labels = ["— no account —"] + [_iaf_dn(a) for _, a in _d_pairs]
+            _d_ids    = [""] + [aid for aid, _ in _d_pairs]
+            st.markdown(f"##### ➖ &nbsp; **{f_ticker}** — {f_h.company_name or f_ticker}",
+                        unsafe_allow_html=True)
+            st.caption(
+                f"**{_d_avail:,.4f}** shares available · avg cost {f_h.avg_cost:.4f} {_d_ccy}"
+            )
+            _f1, _f2 = st.columns(2)
+            with _f1:
+                _d_full = st.checkbox("Close full position", value=True, key=f"sell_{f_ticker}_full")
+                if _d_full:
+                    _d_qty = _d_avail
+                    st.info(f"Selling all {_d_avail:,.4f} shares.", icon="ℹ️")
+                else:
+                    _d_qty = st.number_input(
+                        "Qty to sell",
+                        min_value=0.0001, max_value=float(_d_avail) + 0.0001,
+                        value=min(1.0, _d_avail), step=1.0, format="%.4f",
+                        key=f"sell_{f_ticker}_qty",
+                    )
+                _d_fees = st.number_input(
+                    "Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f",
+                    key=f"sell_{f_ticker}_fees",
+                )
+                _d_corr = st.checkbox(
+                    "Record correction only (skip cash credit)",
+                    key=f"sell_{f_ticker}_corr",
+                    help="Reduce holding without crediting account cash.",
+                )
+            with _f2:
+                _d_price = st.number_input(
+                    "Sale price / share",
+                    value=float(f_h.current_price or f_h.avg_cost or 0.0),
+                    min_value=0.0, step=0.01, format="%.4f",
+                    key=f"sell_{f_ticker}_price",
+                )
+                _d_acct = st.selectbox(
+                    "Account", options=range(len(_d_labels)),
+                    format_func=lambda i: _d_labels[i],
+                    key=f"sell_{f_ticker}_acct",
+                )
+                _d_date = st.date_input("Trade date", value=None, key=f"sell_{f_ticker}_date")
+            _d_notes = st.text_input("Notes (optional)", max_chars=200, key=f"sell_{f_ticker}_notes")
+            _preview_qty = _d_avail if _d_full else float(_d_qty)
+            _d_pnl  = (_d_price - f_h.avg_cost) * _preview_qty if f_h.avg_cost else 0.0
+            _d_pct  = (
+                _d_pnl / (f_h.avg_cost * _preview_qty) * 100.0
+            ) if f_h.avg_cost and _preview_qty else 0.0
+            _d_proc = _preview_qty * float(_d_price) - float(_d_fees)
+            st.info(
+                f"{'🟢' if _d_pnl >= 0 else '🔴'} Est. P&L: **{_d_pnl:+,.2f} {_d_ccy}** "
+                f"({_d_pct:+.2f}%)  · Net proceeds: **{_d_proc:,.2f} {_d_ccy}**"
+            )
+            _ss1, _ss2 = st.columns(2)
+            with _ss1:
+                if st.button("✅ Confirm Sell", type="primary", use_container_width=True,
+                             key=f"sell_{f_ticker}_save"):
+                    try:
+                        _final_qty = _d_avail if _d_full else float(_d_qty)
+                        _d_aid = _d_ids[_d_acct]
+                        _t, _h2, _e = record_transaction(
+                            ticker=f_ticker, side="SELL",
+                            quantity=_final_qty, price=float(_d_price),
+                            txn_date=_d_date.isoformat() if _d_date else None,
+                            notes=_d_notes, account_id=_d_aid, fees=float(_d_fees),
+                        )
+                        if _e:
+                            st.error(_e)
+                        else:
+                            if not _d_corr and _d_aid:
+                                try:
+                                    _iaf_upd(_d_aid, _final_qty * float(_d_price) - float(_d_fees))
+                                except Exception:
+                                    pass
+                            _rpnl  = (_d_price - f_h.avg_cost) * _final_qty
+                            _fully = _h2.quantity <= 1e-9
+                            st.toast(
+                                f"{'Closed' if _fully else 'Sold'} {_final_qty:,.4f} × "
+                                f"{f_ticker} @ {_d_price:.4f}  · P&L: {_rpnl:+,.2f} {_d_ccy}",
+                                icon="✅",
+                            )
+                            st.session_state.pop("expanded_action", None)
+                            st.rerun()
+                    except Exception as _ex:
+                        st.error(f"Sell failed — {_ex}")
+            with _ss2:
+                if st.button("✗ Cancel", use_container_width=True, key=f"sell_{f_ticker}_cancel"):
+                    st.session_state.pop("expanded_action", None)
+                    st.rerun()
+
+        # ── Inline form: Edit ─────────────────────────────────────────────────
+        def _render_inline_edit(f_ticker: str, f_h) -> None:
+            st.markdown(f"##### ✏️ &nbsp; **{f_ticker}** — {f_h.company_name or f_ticker}",
+                        unsafe_allow_html=True)
+            st.caption("Direct field correction — transaction history is not affected.")
+            _f1, _f2 = st.columns(2)
+            with _f1:
+                _e_name  = st.text_input("Company name", value=f_h.company_name or "",
+                                          key=f"edit_{f_ticker}_name")
+                _e_qty   = st.number_input(
+                    "Quantity (correction)", value=float(f_h.quantity),
+                    min_value=0.0, step=1.0, format="%.4f", key=f"edit_{f_ticker}_qty",
+                )
+                _e_notes = st.text_input(
+                    "Notes", value=getattr(f_h, "notes", None) or "", max_chars=200,
+                    key=f"edit_{f_ticker}_notes",
+                )
+            with _f2:
+                _e_avg   = st.number_input(
+                    "Avg cost (correction)", value=float(f_h.avg_cost),
+                    min_value=0.0, step=0.01, format="%.4f", key=f"edit_{f_ticker}_avg",
+                )
+                _e_price = st.number_input(
+                    "Current price", value=float(f_h.current_price),
+                    min_value=0.0, step=0.01, format="%.4f", key=f"edit_{f_ticker}_price",
+                )
+            _es1, _es2 = st.columns(2)
+            with _es1:
+                if st.button("💾 Save Changes", type="primary", use_container_width=True,
+                             key=f"edit_{f_ticker}_save"):
+                    try:
+                        upsert_holding(
+                            ticker=f_ticker,
+                            company_name=_e_name or None,
+                            quantity=float(_e_qty),
+                            avg_cost=float(_e_avg),
+                            current_price=float(_e_price),
+                            notes=_e_notes or None,
+                        )
+                        st.toast(f"{f_ticker} updated", icon="💾")
+                        st.session_state.pop("expanded_action", None)
+                        st.rerun()
+                    except Exception as _ex:
+                        st.error(f"Edit failed — {_ex}")
+            with _es2:
+                if st.button("✗ Cancel", use_container_width=True, key=f"edit_{f_ticker}_cancel"):
+                    st.session_state.pop("expanded_action", None)
+                    st.rerun()
+
+        # ── Inline form: Delete ───────────────────────────────────────────────
+        def _render_inline_delete(f_ticker: str, f_h) -> None:
+            st.markdown(f"##### 🗑️ &nbsp; **{f_ticker}** — {f_h.company_name or f_ticker}",
+                        unsafe_allow_html=True)
+            st.warning(
+                "This removes the active position only. Transaction history is preserved.",
+                icon="⚠️",
+            )
+            _dc1, _dc2 = st.columns(2)
+            with _dc1:
+                _conf_check = st.checkbox("I understand — this cannot be undone",
+                                           key=f"del_{f_ticker}_check")
+            with _dc2:
+                _conf_text = st.text_input(f"Type **{f_ticker}** to confirm",
+                                            key=f"del_{f_ticker}_text")
+            _ready = _conf_check and _conf_text.strip().upper() == f_ticker.upper()
+            _ds1, _ds2 = st.columns(2)
+            with _ds1:
+                if st.button("🗑️ Delete", type="primary", use_container_width=True,
+                             disabled=not _ready, key=f"del_{f_ticker}_save"):
+                    try:
+                        soft_delete_holding(f_ticker)
+                        st.toast(f"{f_ticker} removed from holdings", icon="🗑️")
+                        st.session_state.pop("expanded_action", None)
+                        st.rerun()
+                    except Exception as _ex:
+                        st.error(f"Delete failed — {_ex}")
+            with _ds2:
+                if st.button("✗ Cancel", use_container_width=True, key=f"del_{f_ticker}_cancel"):
+                    st.session_state.pop("expanded_action", None)
+                    st.rerun()
+
+        # ── Toolbar ───────────────────────────────────────────────────────────
         _tab1, _tab2, _tab3, _tab4 = st.columns(4)
         with _tab1:
-            # Refresh prices
             if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
                          use_container_width=True,
                          help="Fetch live prices from Yahoo Finance."):
@@ -2340,7 +2604,6 @@ def render_holdings_tab() -> None:
                 )
                 st.rerun()
         with _tab2:
-            # Download CSV
             import io as _io
             _csv_buf = _io.StringIO()
             _csv_buf.write(
@@ -2382,6 +2645,81 @@ def render_holdings_tab() -> None:
                          type="primary", use_container_width=True,
                          help="Open a single new position with a BUY transaction."):
                 _dlg_add_new()
+
+        # ── Holdings rows (sorted by weight descending) ───────────────────────
+        _ea_state = st.session_state.get("expanded_action")
+
+        def _toggle_action(ticker: str, action: str) -> None:
+            _cur = st.session_state.get("expanded_action")
+            if _cur and _cur.get("ticker") == ticker and _cur.get("action") == action:
+                st.session_state.pop("expanded_action", None)
+            else:
+                st.session_state["expanded_action"] = {"ticker": ticker, "action": action}
+            st.rerun()
+
+        for _row_tk, _row_h in sorted(
+            holdings.items(),
+            key=lambda x: -_wt_map.get(x[0], 0.0),
+        ):
+            _row_ccy  = getattr(_row_h, "currency", "USD")
+            _row_fxr  = _fx.get(_row_ccy)
+            _row_mv   = round(_row_h.market_value * (_row_fxr.rate if _row_fxr else 1.0), 2)
+            _row_pnl  = _row_h.unrealized_pnl_pct
+            _row_wt   = _wt_map.get(_row_tk, 0.0)
+            _row_stat = "🟢" if _row_pnl > 0.01 else ("🔴" if _row_pnl < -0.01 else "⚪")
+            _row_open = bool(_ea_state and _ea_state.get("ticker") == _row_tk)
+            _row_act  = (_ea_state.get("action", "") if _row_open else "")
+
+            # ── Row: info left, action icons right ────────────────────────────
+            _lc, _rc = st.columns([5, 1])
+            with _lc:
+                st.markdown(
+                    f"{_row_stat} **{_row_tk}** &nbsp; {_row_h.company_name or '—'}",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    f"Qty {_row_h.quantity:,.4f} · "
+                    f"Avg {_row_h.avg_cost:.4f} · "
+                    f"Price {_row_h.current_price:.4f} · "
+                    f"MV {_row_mv:,.0f} {_base_ccy} · "
+                    f"P&L {_row_pnl:+.1f}% · "
+                    f"Wt {_row_wt:.1f}% · {_row_ccy}"
+                )
+            with _rc:
+                _ab1, _ab2 = st.columns(2)
+                with _ab1:
+                    if st.button("➕", key=f"hld_buy_{_row_tk}", help="Buy more",
+                                 use_container_width=True,
+                                 type="primary" if _row_act == "buy" else "secondary"):
+                        _toggle_action(_row_tk, "buy")
+                    if st.button("✏️", key=f"hld_edit_{_row_tk}", help="Edit",
+                                 use_container_width=True,
+                                 type="primary" if _row_act == "edit" else "secondary"):
+                        _toggle_action(_row_tk, "edit")
+                with _ab2:
+                    if st.button("➖", key=f"hld_sell_{_row_tk}", help="Sell",
+                                 use_container_width=True,
+                                 disabled=(_row_h.quantity <= 1e-9),
+                                 type="primary" if _row_act == "sell" else "secondary"):
+                        _toggle_action(_row_tk, "sell")
+                    if st.button("🗑️", key=f"hld_del_{_row_tk}", help="Delete",
+                                 use_container_width=True,
+                                 type="primary" if _row_act == "delete" else "secondary"):
+                        _toggle_action(_row_tk, "delete")
+
+            # ── Inline form (opens directly below this row) ───────────────────
+            if _row_open:
+                with st.container(border=True):
+                    if _row_act == "buy":
+                        _render_inline_buy(_row_tk, _row_h)
+                    elif _row_act == "sell":
+                        _render_inline_sell(_row_tk, _row_h)
+                    elif _row_act == "edit":
+                        _render_inline_edit(_row_tk, _row_h)
+                    elif _row_act == "delete":
+                        _render_inline_delete(_row_tk, _row_h)
+
+            st.divider()
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
@@ -2773,261 +3111,6 @@ def render_holdings_tab() -> None:
     # ── Dialogs + action bar ─────────────────────────────────────────────────
     if holdings:
 
-        # ── Dialog: Buy More ─────────────────────────────────────────────────
-        @st.dialog("➕ Buy More")
-        def _dlg_buy(dlg_ticker: str, dlg_h):
-            _d_ccy   = getattr(dlg_h, "currency", "USD")
-            _d_pairs = _acct_pairs_for()
-            _d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _d_pairs]
-            _d_ids    = [""] + [aid for aid, _ in _d_pairs]
-            st.caption(
-                f"**{dlg_ticker}** · {dlg_h.company_name}  "
-                f"| {dlg_h.quantity:,.4f} shares @ avg {dlg_h.avg_cost:.4f} {_d_ccy}"
-            )
-            if not _d_pairs:
-                st.info("No active accounts — transaction recorded without account link.")
-            _d_qty   = st.number_input("Qty to buy", min_value=0.0001, step=1.0, format="%.4f", value=1.0)
-            _d_price = st.number_input(
-                "Price / share",
-                value=float(dlg_h.current_price or dlg_h.avg_cost or 0.0),
-                min_value=0.0, step=0.01, format="%.4f",
-            )
-            _d_acct  = st.selectbox(
-                "Account", options=range(len(_d_labels)),
-                format_func=lambda i: _d_labels[i],
-            )
-            _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-            _d_date  = st.date_input("Trade date", value=None)
-            _d_notes = st.text_input("Notes", max_chars=200)
-            _d_corr  = st.checkbox(
-                "Record correction only — skip cash debit",
-                help="Use this to adjust the holding without moving any account cash.",
-            )
-            _d_aid = _d_ids[_d_acct]
-            _d_total_cost = float(_d_qty) * float(_d_price) + float(_d_fees)
-            # Cash check (actual buy only)
-            if not _d_corr and _d_aid:
-                try:
-                    _ck_accts = _load_accts_raw()
-                    _ck_bal   = _ck_accts[_d_aid].cash_balance if _d_aid in _ck_accts else None
-                    if _ck_bal is not None:
-                        _ck_icon = "🟢" if _ck_bal >= _d_total_cost else "🔴"
-                        st.caption(
-                            f"{_ck_icon} Account cash: **{_ck_bal:,.2f} {_d_ccy}**  "
-                            f"· Cost: **{_d_total_cost:,.2f} {_d_ccy}**"
-                        )
-                        if _ck_bal < _d_total_cost:
-                            st.warning(
-                                f"Insufficient cash — available {_ck_bal:,.2f}, "
-                                f"needed {_d_total_cost:,.2f} {_d_ccy}. "
-                                "Tick 'Record correction only' to bypass.",
-                                icon="⚠️",
-                            )
-                except Exception:
-                    pass
-            # New avg cost preview
-            if (dlg_h.quantity + _d_qty) > 0:
-                _new_avg = ((dlg_h.avg_cost * dlg_h.quantity) + (_d_price * _d_qty)) / (dlg_h.quantity + _d_qty)
-                st.caption(f"Est. new avg cost: **{_new_avg:.4f} {_d_ccy}**")
-            _db1, _db2 = st.columns(2)
-            with _db1:
-                # Block actual buy if cash is insufficient
-                _cash_ok = True
-                if not _d_corr and _d_aid:
-                    try:
-                        _ck_accts2 = _load_accts_raw()
-                        _ck_bal2   = _ck_accts2[_d_aid].cash_balance if _d_aid in _ck_accts2 else None
-                        if _ck_bal2 is not None and _ck_bal2 < _d_total_cost:
-                            _cash_ok = False
-                    except Exception:
-                        pass
-                if st.button("✅ Confirm Buy", type="primary", use_container_width=True,
-                             disabled=not _cash_ok):
-                    try:
-                        _t, _h2, _e = record_transaction(
-                            ticker=dlg_ticker, side="BUY",
-                            quantity=float(_d_qty), price=float(_d_price),
-                            txn_date=_d_date.isoformat() if _d_date else None,
-                            notes=_d_notes,
-                            company_name=dlg_h.company_name, market=dlg_h.market,
-                            sector=dlg_h.sector,
-                            asset_type=getattr(dlg_h, "asset_type", "Stock"),
-                            currency=_d_ccy,
-                            has_ticker=getattr(dlg_h, "has_ticker", True),
-                            account_id=_d_aid, fees=float(_d_fees),
-                        )
-                        if _e:
-                            st.error(_e)
-                        else:
-                            if not _d_corr and _d_aid:
-                                try:
-                                    _upd_cash(_d_aid, -_d_total_cost)
-                                except Exception:
-                                    pass
-                            st.toast(
-                                f"Bought {_d_qty:.4f} × {dlg_ticker} @ {_d_price:.4f}  "
-                                f"· New avg cost: {_h2.avg_cost:.4f}",
-                                icon="✅",
-                            )
-                            st.rerun()
-                    except Exception as _ex:
-                        st.error(f"Buy failed — {_ex}")
-            with _db2:
-                if st.button("Cancel", use_container_width=True):
-                    st.rerun()
-
-        # ── Dialog: Sell / Close ─────────────────────────────────────────────
-        @st.dialog("📤 Sell / Close Position")
-        def _dlg_sell(dlg_ticker: str, dlg_h):
-            _d_ccy   = getattr(dlg_h, "currency", "USD")
-            _d_avail = float(dlg_h.quantity)
-            _d_pairs = _acct_pairs_for()
-            _d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _d_pairs]
-            _d_ids    = [""] + [aid for aid, _ in _d_pairs]
-            st.caption(
-                f"**{dlg_ticker}** · {dlg_h.company_name}  "
-                f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
-            )
-            _d_full = st.checkbox("Close full position", value=True)
-            if _d_full:
-                _d_qty = _d_avail
-                st.info(f"Will sell all {_d_avail:,.4f} shares.")
-            else:
-                _d_qty = st.number_input(
-                    "Qty to sell",
-                    min_value=0.0001, max_value=_d_avail + 0.0001,
-                    value=min(1.0, _d_avail), step=1.0, format="%.4f",
-                )
-            _d_price = st.number_input(
-                "Sale price / share",
-                value=float(dlg_h.current_price or dlg_h.avg_cost or 0.0),
-                min_value=0.0, step=0.01, format="%.4f",
-            )
-            _d_acct  = st.selectbox(
-                "Account", options=range(len(_d_labels)),
-                format_func=lambda i: _d_labels[i],
-            )
-            _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-            _d_date  = st.date_input("Trade date", value=None)
-            _d_notes = st.text_input("Notes", max_chars=200)
-            _d_corr  = st.checkbox(
-                "Record correction only — skip cash credit",
-                help="Use this to reduce the holding without crediting any account cash.",
-            )
-            # P&L preview
-            _sell_qty_preview = _d_avail if _d_full else float(_d_qty)
-            _d_pnl = (_d_price - dlg_h.avg_cost) * _sell_qty_preview if dlg_h.avg_cost else 0.0
-            _d_pct = (_d_pnl / (dlg_h.avg_cost * _sell_qty_preview) * 100.0) if dlg_h.avg_cost and _sell_qty_preview else 0.0
-            _d_sign = "🟢" if _d_pnl >= 0 else "🔴"
-            _d_proceeds = _sell_qty_preview * float(_d_price) - float(_d_fees)
-            st.info(
-                f"{_d_sign} Est. realized P&L: **{_d_pnl:+,.2f} {_d_ccy}** ({_d_pct:+.2f}%)  "
-                f"· Net proceeds: **{_d_proceeds:,.2f} {_d_ccy}**"
-            )
-            _sb1, _sb2 = st.columns(2)
-            with _sb1:
-                if st.button("✅ Confirm Sell", type="primary", use_container_width=True):
-                    try:
-                        _final_qty = _d_avail if _d_full else float(_d_qty)
-                        _d_aid = _d_ids[_d_acct]
-                        _t, _h2, _e = record_transaction(
-                            ticker=dlg_ticker, side="SELL",
-                            quantity=_final_qty, price=float(_d_price),
-                            txn_date=_d_date.isoformat() if _d_date else None,
-                            notes=_d_notes,
-                            account_id=_d_aid, fees=float(_d_fees),
-                        )
-                        if _e:
-                            st.error(_e)
-                        else:
-                            if not _d_corr and _d_aid:
-                                try:
-                                    _proceeds = _final_qty * float(_d_price) - float(_d_fees)
-                                    _upd_cash(_d_aid, _proceeds)
-                                except Exception:
-                                    pass
-                            _rpnl = (_d_price - dlg_h.avg_cost) * _final_qty
-                            _fully = _h2.quantity <= 1e-9
-                            st.toast(
-                                f"{'Closed' if _fully else 'Sold'} {_final_qty:,.4f} × {dlg_ticker} "
-                                f"@ {_d_price:.4f}  · P&L: {_rpnl:+,.2f} {_d_ccy}",
-                                icon="✅",
-                            )
-                            st.rerun()
-                    except Exception as _ex:
-                        st.error(f"Sell failed — {_ex}")
-            with _sb2:
-                if st.button("Cancel", use_container_width=True):
-                    st.rerun()
-
-        # ── Dialog: Edit ─────────────────────────────────────────────────────
-        @st.dialog("✏️ Edit Holding")
-        def _dlg_edit(dlg_ticker: str, dlg_h):
-            st.caption(
-                f"**{dlg_ticker}** — direct field correction.  "
-                "Transaction history is not affected."
-            )
-            _e_name  = st.text_input("Company name", value=dlg_h.company_name or "")
-            _e_qty   = st.number_input(
-                "Quantity (correction)", value=float(dlg_h.quantity),
-                min_value=0.0, step=1.0, format="%.4f",
-            )
-            _e_avg   = st.number_input(
-                "Avg cost (correction)", value=float(dlg_h.avg_cost),
-                min_value=0.0, step=0.01, format="%.4f",
-            )
-            _e_price = st.number_input(
-                "Current price", value=float(dlg_h.current_price),
-                min_value=0.0, step=0.01, format="%.4f",
-            )
-            _e_notes = st.text_input("Notes", value=dlg_h.notes or "", max_chars=200)
-            _eb1, _eb2 = st.columns(2)
-            with _eb1:
-                if st.button("💾 Save Changes", type="primary", use_container_width=True):
-                    try:
-                        upsert_holding(
-                            ticker=dlg_ticker,
-                            company_name=_e_name or None,
-                            quantity=float(_e_qty),
-                            avg_cost=float(_e_avg),
-                            current_price=float(_e_price),
-                            notes=_e_notes or None,
-                        )
-                        st.toast(f"{dlg_ticker} updated", icon="💾")
-                        st.rerun()
-                    except Exception as _ex:
-                        st.error(f"Edit failed — {_ex}")
-            with _eb2:
-                if st.button("Cancel", use_container_width=True):
-                    st.rerun()
-
-        # ── Dialog: Delete ───────────────────────────────────────────────────
-        @st.dialog("🗑️ Delete Holding")
-        def _dlg_delete(dlg_ticker: str, dlg_h):
-            st.warning(
-                f"Remove **{dlg_ticker}** ({dlg_h.company_name}) from your holdings?  "
-                "Transaction history is preserved. This only removes the active position.",
-                icon="⚠️",
-            )
-            _conf_check = st.checkbox("I understand — this cannot be undone")
-            _conf_text  = st.text_input(f"Type  {dlg_ticker}  to confirm")
-            _ready = _conf_check and _conf_text.strip().upper() == dlg_ticker.upper()
-            _xb1, _xb2 = st.columns(2)
-            with _xb1:
-                if st.button(
-                    "🗑️ Delete", type="primary",
-                    use_container_width=True, disabled=not _ready,
-                ):
-                    try:
-                        soft_delete_holding(dlg_ticker)
-                        st.toast(f"{dlg_ticker} removed from holdings", icon="🗑️")
-                        st.rerun()
-                    except Exception as _ex:
-                        st.error(f"Delete failed — {_ex}")
-            with _xb2:
-                if st.button("Cancel", use_container_width=True):
-                    st.rerun()
-
         # ── Dialog: Bulk Upload New Holdings ─────────────────────────────────
         @st.dialog("⬆️ Bulk Upload New Holdings", width="large")
         def _dlg_bulk_upload():
@@ -3372,40 +3455,6 @@ def render_holdings_tab() -> None:
             with _cb2:
                 if st.button("Cancel", use_container_width=True, key="bulk_cancel_btn"):
                     st.rerun()
-
-        # ── Action bar — shown when a table row is selected ───────────────────
-        _sel_rows = getattr(getattr(_tbl_sel, "selection", None), "rows", [])
-        if _sel_rows:
-            _si = _sel_rows[0]
-            _st = _ticker_order[_si] if _si < len(_ticker_order) else None
-            _sh = holdings.get(_st) if _st else None
-            if _st and _sh:
-                with st.container(border=True):
-                    _abar_info, _ab1, _ab2, _ab3, _ab4 = st.columns([3, 1, 1, 1, 1])
-                    with _abar_info:
-                        _ab_ccy = getattr(_sh, "currency", "USD")
-                        st.markdown(
-                            f"**{_st}** · {_sh.company_name}  "
-                            f"| {_sh.quantity:,.4f} shares · "
-                            f"{_sh.unrealized_pnl_pct:+.1f}%"
-                        )
-                    with _ab1:
-                        if st.button("➕ Buy", key="tbl_buy_btn",
-                                     use_container_width=True, type="primary"):
-                            _dlg_buy(_st, _sh)
-                    with _ab2:
-                        if st.button("📤 Sell", key="tbl_sell_btn",
-                                     use_container_width=True, type="primary",
-                                     disabled=(_sh.quantity <= 1e-9)):
-                            _dlg_sell(_st, _sh)
-                    with _ab3:
-                        if st.button("✏️ Edit", key="tbl_edit_btn",
-                                     use_container_width=True):
-                            _dlg_edit(_st, _sh)
-                    with _ab4:
-                        if st.button("🗑️ Del", key="tbl_del_btn",
-                                     use_container_width=True):
-                            _dlg_delete(_st, _sh)
 
     # ── Bulk Upload button when portfolio is empty ────────────────────────────
     if not holdings:
