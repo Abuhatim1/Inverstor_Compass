@@ -1,0 +1,61 @@
+Fix base currency propagation and watchlist-to-holdings workflow.
+
+Issue 1: Base currency only updates header
+Problem:
+When base currency is changed, the header updates but individual tabs/layers still show old currency values.
+
+Requirements:
+1. Base currency must be global app state.
+2. Store selected base currency in one source:
+   st.session_state["base_currency"]
+   and persisted settings if available.
+3. All tabs must use the same centralized portfolio valuation engine with the selected base currency:
+   - Holdings
+   - Accounts
+   - Command Center
+   - Portfolio Risk
+   - Decision Queue
+   - Allocation charts
+   - Watchlist where market values are shown
+4. No tab should calculate or display portfolio values using hardcoded SAR/USD.
+5. When base currency changes:
+   - recalculate all holdings market value in base currency
+   - recalculate portfolio weights
+   - recalculate unrealized P&L in base currency
+   - recalculate allocation charts
+   - recalculate account cash values
+6. Show local currency values separately from base currency values:
+   - Local Price
+   - Local Market Value
+   - Base Market Value
+7. Add a simple reconciliation check:
+   Header Portfolio Value = Holdings Total = Allocation Total = Risk Total
+8. If any mismatch exists, show warning in Developer Mode only.
+
+Issue 2: Watchlist Add to Holdings may create mismatch
+Problem:
+Research Watchlist still allows Add to Holdings directly, which may bypass the proper Holdings / Accounts / Transactions workflow.
+
+Required behavior:
+1. Watchlist should remain research-only.
+2. Remove direct Add to Holdings form from Watchlist.
+3. Replace it with button:
+   "Promote to Holding"
+4. When clicked:
+   - open the same Add New Position workflow used in Holdings tab
+   - prefill ticker, company name, market, currency, current price from Asset Master/Yahoo
+   - require account selection
+   - require quantity and average cost or buy transaction details
+5. Holding creation must always go through one centralized function:
+   create_or_update_holding_from_transaction()
+6. Do not allow Watchlist to create holdings independently.
+7. Prevent duplicates:
+   if ticker already exists in Holdings, show:
+   "Already held — use Buy More from Holdings."
+8. Keep Watchlist as research layer only:
+   - thesis
+   - catalysts
+   - risks
+   - market intel
+   - filings
+   - research status

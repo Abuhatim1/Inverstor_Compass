@@ -1113,6 +1113,170 @@ def render_section(
         render_filing_card(filing, company_name, ticker, idx + 1, previous_filing=prev)
 
 
+# ── Promote-to-Holding dialog (module-level so any tab can call it) ───────────
+@st.dialog("🚀 Promote to Holding", width="large")
+def _dlg_promote_holding() -> None:
+    """
+    Full "Open New Position" dialog pre-filled from watchlist data.
+    Caller must store a dict under st.session_state["_promo_prefill"] before calling:
+        ticker, name, price, currency, market, sector
+    Records a BUY transaction, updates holdings, and debits account cash —
+    identical to the Holdings tab "Add New Position" workflow.
+    """
+    from datetime import date as _dt_cls
+    from portfolio import (
+        CURRENCIES, MARKETS, DEFAULT_SECTORS,
+        record_transaction, upsert_holding, load_holdings, update_current_price,
+    )
+    from portfolio.accounts import (
+        active_accounts      as _promo_active_accts,
+        account_display_name as _promo_acct_dn,
+        update_account_cash  as _promo_upd_cash,
+        load_accounts        as _promo_load_accts,
+    )
+
+    # ── Pre-fill on first open (pop so it doesn't override user edits on reruns) ─
+    _pf = st.session_state.pop("_promo_prefill", None)
+    if _pf:
+        st.session_state["promo_tk"]    = _pf.get("ticker",   "")
+        st.session_state["promo_name"]  = _pf.get("name",     "")
+        st.session_state["promo_price"] = float(_pf.get("price",    0.0))
+        st.session_state["promo_cost"]  = float(_pf.get("price",    0.0))
+        st.session_state["promo_ccy"]   = _pf.get("currency", "USD")
+        st.session_state["promo_mkt"]   = _pf.get("market",   "Other")
+        st.session_state["promo_sec"]   = _pf.get("sector",   "Other")
+        st.session_state["promo_qty"]   = 1.0
+
+    _ptk = st.session_state.get("promo_tk", "")
+
+    # ── Duplicate guard ───────────────────────────────────────────────────────
+    _existing = load_holdings().get(_ptk)
+    if _existing:
+        st.info(
+            f"**{_ptk}** is already in your Holdings "
+            f"({_existing.quantity:g} shares @ {_existing.avg_cost:.4f}). "
+            "Use **Buy More** from the Holdings tab instead.",
+            icon="✅",
+        )
+        return
+
+    st.caption(
+        f"Pre-filled from watchlist research on **{_ptk}**. "
+        "An opening BUY transaction is recorded — "
+        "this position gets full cost-basis history from day one."
+    )
+
+    # ── Form fields ───────────────────────────────────────────────────────────
+    _pf1, _pf2 = st.columns(2)
+    with _pf1:
+        st.text_input("Ticker (from watchlist)", key="promo_tk", disabled=True)
+        _pname = st.text_input("Company / Asset name", key="promo_name")
+        _pmkt  = st.selectbox("Market",  MARKETS,          key="promo_mkt")
+        _psec  = st.selectbox("Sector",  DEFAULT_SECTORS,  key="promo_sec")
+    with _pf2:
+        _pccy   = st.selectbox("Currency", CURRENCIES, key="promo_ccy")
+        _pqty   = st.number_input("Opening quantity",       min_value=0.0001, step=1.0,  format="%.4f", key="promo_qty",   value=1.0)
+        _pcost  = st.number_input("Opening price per unit", min_value=0.0,    step=0.01, format="%.4f", key="promo_cost",  value=0.0)
+        _pprice = st.number_input("Current market price",   min_value=0.0,    step=0.01, format="%.4f", key="promo_price", value=0.0)
+
+    # ── Account (filtered by currency) ────────────────────────────────────────
+    _all_accts  = _promo_active_accts()
+    _ccy_accts  = [a for a in _all_accts if a.base_currency == _pccy]
+    _use_accts  = _ccy_accts or _all_accts
+    if not _use_accts:
+        st.warning("No active accounts. Add one in the Accounts tab first.", icon="⚠️")
+        return
+    if not _ccy_accts and _all_accts:
+        st.caption(f"ℹ️ No {_pccy} accounts — showing all currencies.")
+    _acct_opts = {"": "— no account —"}
+    for _a in _use_accts:
+        _acct_opts[_a.account_id] = _promo_acct_dn(_a)
+
+    _pa1, _pa2 = st.columns(2)
+    with _pa1:
+        _paid   = st.selectbox(
+            f"Link to account ({_pccy})",
+            options=list(_acct_opts.keys()),
+            format_func=lambda k: _acct_opts[k],
+            key="promo_acct",
+        )
+        _pfees  = st.number_input("Transaction fees", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="promo_fees")
+    with _pa2:
+        _pdate  = st.date_input("Trade date",        value=_dt_cls.today(), key="promo_date")
+        _pnotes = st.text_input("Notes (optional)",  max_chars=200,         key="promo_notes")
+
+    # ── Cash balance preview ──────────────────────────────────────────────────
+    _ptotal   = float(_pqty) * float(_pcost) + float(_pfees)
+    _cash_ok  = True
+    if _paid:
+        try:
+            _bal = _promo_load_accts()[_paid].cash_balance
+            _rem = _bal - _ptotal
+            _cash_ok = _rem >= 0
+            _ck1, _ck2, _ck3 = st.columns(3)
+            _ck1.metric("Opening Cost",   f"{_ptotal:,.2f} {_pccy}")
+            _ck2.metric("Account Cash",   f"{_bal:,.2f} {_pccy}")
+            _ck3.metric("Remaining Cash", f"{_rem:,.2f} {_pccy}",
+                        delta=f"{_rem:+,.2f}", delta_color="normal" if _cash_ok else "inverse")
+            if not _cash_ok:
+                st.error("Insufficient cash balance.", icon="🚫")
+        except Exception:
+            st.caption(f"Opening cost: **{_ptotal:,.4f} {_pccy}**")
+    else:
+        st.caption(f"Opening cost: **{_ptotal:,.4f} {_pccy}**")
+
+    # ── Submit / Cancel ───────────────────────────────────────────────────────
+    _sb1, _sb2 = st.columns(2)
+    _PROMO_KEYS = ("promo_tk","promo_name","promo_price","promo_cost","promo_ccy",
+                   "promo_mkt","promo_sec","promo_qty","promo_acct","promo_fees",
+                   "promo_date","promo_notes")
+    with _sb1:
+        if st.button(
+            "🚀 Promote to Holding", type="primary", use_container_width=True,
+            key="promo_submit",
+            disabled=(not _ptk or not _cash_ok),
+        ):
+            try:
+                _ptk_clean = _ptk.strip().upper()
+                _t, _h, _err = record_transaction(
+                    ticker=_ptk_clean, side="BUY",
+                    quantity=float(_pqty),
+                    price=float(_pcost),
+                    txn_date=str(_pdate) if _pdate else None,
+                    notes=_pnotes or "Promoted from Watchlist",
+                    company_name=_pname.strip() or _ptk_clean,
+                    market=_pmkt, sector=_psec,
+                    asset_type="Stock", currency=_pccy,
+                    has_ticker=True,
+                    account_id=_paid, fees=float(_pfees),
+                )
+                if _err:
+                    st.error(_err)
+                else:
+                    if float(_pprice) > 0 and abs(float(_pprice) - float(_pcost)) > 1e-9:
+                        update_current_price(_ptk_clean, float(_pprice), source="yfinance")
+                    if _paid:
+                        try:
+                            _promo_upd_cash(_paid, -_ptotal)
+                        except Exception:
+                            pass
+                    for _dk in _PROMO_KEYS:
+                        st.session_state.pop(_dk, None)
+                    st.toast(
+                        f"**{_ptk_clean}** promoted to Holdings! "
+                        f"{float(_pqty):.4f} shares @ {_pccy} {float(_pcost):.4f}",
+                        icon="🚀",
+                    )
+                    st.rerun()
+            except Exception as _ex:
+                st.error(f"Failed to promote — {_ex}")
+    with _sb2:
+        if st.button("Cancel", key="promo_cancel", use_container_width=True):
+            for _dk in _PROMO_KEYS:
+                st.session_state.pop(_dk, None)
+            st.rerun()
+
+
 # ── Portfolio Dashboard ───────────────────────────────────────────────────────
 def render_portfolio_dashboard() -> None:
     from portfolio import (
@@ -1180,8 +1344,8 @@ def render_portfolio_dashboard() -> None:
                     st.caption(entry.company_name)
                     if md and md.is_ok:
                         st.caption(
-                            f"{md.day_indicator} **${md.current_price:.2f}** "
-                            f"{md.currency}  ·  {md.change_str}"
+                            f"{md.day_indicator} **{md.current_price:.2f} {md.currency}**"
+                            f"  ·  {md.change_str}"
                         )
                     elif md and not md.is_ok:
                         st.caption("⚪ Market data unavailable")
@@ -1212,55 +1376,45 @@ def render_portfolio_dashboard() -> None:
                             st.markdown(f"- {r}")
                     st.caption(f"Analyses run: {entry.analyses_count}")
 
-                # ── Add to Holdings ────────────────────────────────────────
-                existing_h = holdings.get(ticker)
-                badge = (f"  ·  ✅ Held ({existing_h.quantity:g} sh @ "
-                         f"${existing_h.avg_cost:.2f})") if existing_h else ""
-                with st.expander(f"💼 Add to Holdings{badge}", expanded=False):
-                    with st.form(f"add_holding_{ticker}", clear_on_submit=False):
-                        f1, f2 = st.columns(2)
-                        with f1:
-                            qty = st.number_input(
-                                "Quantity (shares)", min_value=0.0, step=1.0,
-                                value=float(existing_h.quantity) if existing_h else 0.0,
-                                key=f"qty_{ticker}",
-                            )
-                            avg_cost = st.number_input(
-                                "Average cost ($/share)", min_value=0.0, step=0.01,
-                                value=float(existing_h.avg_cost) if existing_h else 0.0,
-                                format="%.2f", key=f"cost_{ticker}",
-                            )
-                            cur_price = st.number_input(
-                                "Current price ($/share, optional)", min_value=0.0, step=0.01,
-                                value=float(existing_h.current_price) if existing_h else 0.0,
-                                format="%.2f", key=f"price_{ticker}",
-                            )
-                        with f2:
-                            mkt_default = existing_h.market if existing_h else "US"
-                            sec_default = existing_h.sector if existing_h else "Other"
-                            mkt = st.selectbox(
-                                "Market", MARKETS,
-                                index=MARKETS.index(mkt_default) if mkt_default in MARKETS else 0,
-                                key=f"mkt_{ticker}",
-                            )
-                            sec = st.selectbox(
-                                "Sector", DEFAULT_SECTORS,
-                                index=DEFAULT_SECTORS.index(sec_default) if sec_default in DEFAULT_SECTORS else len(DEFAULT_SECTORS)-1,
-                                key=f"sec_{ticker}",
-                            )
-                        verb = "Update Holding" if existing_h else "Add to Holdings"
-                        if st.form_submit_button(f"💼 {verb}", type="primary"):
-                            upsert_holding(
-                                ticker=ticker,
-                                company_name=entry.company_name,
-                                market=mkt,
-                                sector=sec,
-                                quantity=qty,
-                                avg_cost=avg_cost,
-                                current_price=cur_price,
-                            )
-                            st.toast(f"{ticker} saved to Holdings", icon="💼")
-                            st.rerun()
+                # ── Promote to Holding (research-only watchlist; full workflow) ──
+                _wl_existing = holdings.get(ticker)
+                if _wl_existing:
+                    st.caption(
+                        f"✅ Already held · {_wl_existing.quantity:g} shares @ "
+                        f"{_wl_existing.avg_cost:.4f} · "
+                        "Use **Buy More** in the Holdings tab to add more."
+                    )
+                else:
+                    if st.button(
+                        "🚀 Promote to Holding",
+                        key=f"promo_btn_{ticker}",
+                        help=(
+                            "Opens a full position with BUY transaction record, "
+                            "account linkage, and cost-basis tracking."
+                        ),
+                    ):
+                        _wl_md = wl_live.get(ticker)
+                        _wl_pccy = (
+                            _wl_md.currency
+                            if (_wl_md and _wl_md.is_ok and _wl_md.currency)
+                            else "USD"
+                        )
+                        st.session_state["_promo_prefill"] = {
+                            "ticker":   ticker,
+                            "name":     entry.company_name or ticker,
+                            "price":    float(_wl_md.current_price) if (_wl_md and _wl_md.is_ok) else 0.0,
+                            "currency": _wl_pccy,
+                            "market": (
+                                "US"     if _wl_pccy == "USD" else
+                                "Saudi"  if _wl_pccy == "SAR" else
+                                "UK"     if _wl_pccy == "GBP" else
+                                "Europe" if _wl_pccy in {"EUR","CHF","DKK","SEK","NOK"} else
+                                "Asia"   if _wl_pccy in {"JPY","HKD","SGD","CNY","KRW","AUD","NZD"} else
+                                "Other"
+                            ),
+                            "sector": "Other",
+                        }
+                        _dlg_promote_holding()
 
     # ── 2. Historical Delta Analysis ──────────────────────────────────────────
     st.divider()
@@ -2232,12 +2386,12 @@ def render_holdings_tab() -> None:
     _wt_map    = {r.ticker: r.invested_weight_pct for r in _val.per_holding}
 
     def _mv_base(h) -> float:
-        ccy  = getattr(h, "currency", "USD")
+        ccy  = getattr(h, "currency", _base_ccy)
         rate = _fx[ccy].rate if ccy in _fx else 1.0
         return h.market_value * rate
 
     def _cb_base(h) -> float:
-        ccy  = getattr(h, "currency", "USD")
+        ccy  = getattr(h, "currency", _base_ccy)
         rate = _fx[ccy].rate if ccy in _fx else 1.0
         return h.cost_basis * rate
 

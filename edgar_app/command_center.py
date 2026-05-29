@@ -83,7 +83,7 @@ def render_command_center_tab() -> None:
         return
 
     # ── Centralized valuation (single source of truth for all KPIs) ───────────
-    _base_ccy_cc = st.session_state.get("holdings_base_ccy", "SAR")
+    _base_ccy_cc = st.session_state.get("global_base_ccy", "SAR")
     _ccys_cc = list({getattr(h, "currency", "USD") for h in holdings.values()})
     _fx_cc   = get_rates_for_holdings(_ccys_cc, _base_ccy_cc) if _ccys_cc else {}
     valuation = calculate_portfolio_valuation(
