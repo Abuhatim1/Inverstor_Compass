@@ -2646,56 +2646,7 @@ def render_holdings_tab() -> None:
                          help="Open a single new position with a BUY transaction."):
                 _dlg_add_new()
 
-        # ── Holdings table ────────────────────────────────────────────────────
-        st.markdown(
-            """
-<style>
-/* Compact Holdings table rows */
-div[data-testid="stHorizontalBlock"]:has(div.hld-row-marker) {
-    align-items: center;
-    border-bottom: 1px solid rgba(128,128,128,0.15);
-    padding: 2px 0;
-    gap: 4px !important;
-}
-div[data-testid="stHorizontalBlock"]:has(div.hld-hdr-marker) {
-    border-bottom: 2px solid rgba(128,128,128,0.3);
-    padding-bottom: 2px;
-    gap: 4px !important;
-}
-/* Shrink action buttons to icon size */
-div.hld-row-marker ~ * button,
-div[data-testid="stHorizontalBlock"]:has(div.hld-row-marker) button {
-    padding: 0 6px !important;
-    min-height: 1.6rem !important;
-    height: 1.6rem !important;
-    font-size: 0.78rem !important;
-    line-height: 1 !important;
-}
-</style>
-""",
-            unsafe_allow_html=True,
-        )
-
-        # column proportions: [Ticker+Co, Qty, Price, MV, Wt%, P&L%, Actions]
-        _TCOLS = [2.4, 0.85, 0.95, 1.25, 0.72, 0.9, 1.85]
-
-        # Header row
-        _hh = st.columns(_TCOLS, gap="small")
-        _hh[0].markdown("<div class='hld-hdr-marker'></div>**Ticker / Company**",
-                        unsafe_allow_html=True)
-        _hh[1].markdown("**Qty**")
-        _hh[2].markdown("**Price**")
-        _hh[3].markdown(f"**MV ({_base_ccy})**")
-        _hh[4].markdown("**Wt %**")
-        _hh[5].markdown("**P&L %**")
-        _hh[6].markdown("**Actions**")
-
-        # Pre-load accounts once for display
-        try:
-            _acct_map = _iaf_ldr()
-        except Exception:
-            _acct_map = {}
-
+        # ── Holdings rows (sorted by weight descending) ───────────────────────
         _ea_state = st.session_state.get("expanded_action")
 
         def _toggle_action(ticker: str, action: str) -> None:
@@ -2715,76 +2666,48 @@ div[data-testid="stHorizontalBlock"]:has(div.hld-row-marker) button {
             _row_mv   = round(_row_h.market_value * (_row_fxr.rate if _row_fxr else 1.0), 2)
             _row_pnl  = _row_h.unrealized_pnl_pct
             _row_wt   = _wt_map.get(_row_tk, 0.0)
+            _row_stat = "🟢" if _row_pnl > 0.01 else ("🔴" if _row_pnl < -0.01 else "⚪")
             _row_open = bool(_ea_state and _ea_state.get("ticker") == _row_tk)
             _row_act  = (_ea_state.get("action", "") if _row_open else "")
-            _pnl_col  = "#2e7d32" if _row_pnl > 0.01 else ("#c62828" if _row_pnl < -0.01 else "#888")
-            _pnl_ico  = "▲" if _row_pnl > 0.01 else ("▼" if _row_pnl < -0.01 else "–")
 
-            # Account display name (hidden details line)
-            _row_aid  = getattr(_row_h, "account_id", None)
-            _row_acct = ""
-            if _row_aid and _row_aid in _acct_map:
-                try:
-                    _row_acct = _iaf_dn(_acct_map[_row_aid])
-                except Exception:
-                    pass
-
-            # ── Data row ──────────────────────────────────────────────────────
-            _rc = st.columns(_TCOLS, gap="small")
-
-            with _rc[0]:
+            # ── Row: info left, action icons right ────────────────────────────
+            _lc, _rc = st.columns([5, 1])
+            with _lc:
                 st.markdown(
-                    "<div class='hld-row-marker'></div>"
-                    f"**{_row_tk}**  \n"
-                    f"<small style='color:grey;line-height:1.2'>"
-                    f"{(_row_h.company_name or '—')[:30]}</small>",
+                    f"{_row_stat} **{_row_tk}** &nbsp; {_row_h.company_name or '—'}",
                     unsafe_allow_html=True,
                 )
-                _detail = f"Avg {_row_h.avg_cost:.4f} · {_row_ccy}"
-                if _row_acct:
-                    _detail += f" · {_row_acct}"
-                st.caption(_detail)
-
-            with _rc[1]:
-                st.markdown(f"{_row_h.quantity:,.4f}")
-
-            with _rc[2]:
-                st.markdown(f"{_row_h.current_price:,.4f}")
-
-            with _rc[3]:
-                st.markdown(f"**{_row_mv:,.0f}**")
-
-            with _rc[4]:
-                st.markdown(f"{_row_wt:.1f}%")
-
-            with _rc[5]:
-                st.markdown(
-                    f"<span style='color:{_pnl_col};font-weight:600'>"
-                    f"{_pnl_ico} {abs(_row_pnl):.1f}%</span>",
-                    unsafe_allow_html=True,
+                st.caption(
+                    f"Qty {_row_h.quantity:,.4f} · "
+                    f"Avg {_row_h.avg_cost:.4f} · "
+                    f"Price {_row_h.current_price:.4f} · "
+                    f"MV {_row_mv:,.0f} {_base_ccy} · "
+                    f"P&L {_row_pnl:+.1f}% · "
+                    f"Wt {_row_wt:.1f}% · {_row_ccy}"
                 )
-
-            with _rc[6]:
-                _ba1, _ba2, _ba3, _ba4 = st.columns(4, gap="small")
-                with _ba1:
+            with _rc:
+                _ab1, _ab2 = st.columns(2)
+                with _ab1:
                     if st.button("➕", key=f"hld_buy_{_row_tk}", help="Buy more",
+                                 use_container_width=True,
                                  type="primary" if _row_act == "buy" else "secondary"):
                         _toggle_action(_row_tk, "buy")
-                with _ba2:
+                    if st.button("✏️", key=f"hld_edit_{_row_tk}", help="Edit",
+                                 use_container_width=True,
+                                 type="primary" if _row_act == "edit" else "secondary"):
+                        _toggle_action(_row_tk, "edit")
+                with _ab2:
                     if st.button("➖", key=f"hld_sell_{_row_tk}", help="Sell",
+                                 use_container_width=True,
                                  disabled=(_row_h.quantity <= 1e-9),
                                  type="primary" if _row_act == "sell" else "secondary"):
                         _toggle_action(_row_tk, "sell")
-                with _ba3:
-                    if st.button("✏️", key=f"hld_edit_{_row_tk}", help="Edit",
-                                 type="primary" if _row_act == "edit" else "secondary"):
-                        _toggle_action(_row_tk, "edit")
-                with _ba4:
                     if st.button("🗑️", key=f"hld_del_{_row_tk}", help="Delete",
+                                 use_container_width=True,
                                  type="primary" if _row_act == "delete" else "secondary"):
                         _toggle_action(_row_tk, "delete")
 
-            # ── Inline form (below this row only) ─────────────────────────────
+            # ── Inline form (opens directly below this row) ───────────────────
             if _row_open:
                 with st.container(border=True):
                     if _row_act == "buy":
@@ -2795,6 +2718,8 @@ div[data-testid="stHorizontalBlock"]:has(div.hld-row-marker) button {
                         _render_inline_edit(_row_tk, _row_h)
                     elif _row_act == "delete":
                         _render_inline_delete(_row_tk, _row_h)
+
+            st.divider()
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
