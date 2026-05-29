@@ -274,6 +274,18 @@ def _collect_all_tickers() -> list[str]:
         return []
 
 
+def _normalize_ticker(ticker: str) -> str:
+    """
+    Normalize exchange suffix for yfinance compatibility.
+    Saudi Exchange: .SE is invalid — replace with .SR.
+    e.g. 2222.SE → 2222.SR, 1120.SE → 1120.SR
+    """
+    t = ticker.strip()
+    if t.upper().endswith(".SE"):
+        return t[:-3] + ".SR"
+    return t
+
+
 def _apply_prices_to_holdings(
     fetched: dict,
     holdings: dict | None = None,
@@ -306,16 +318,21 @@ def _run_price_refresh(*, force: bool = True) -> int:
     Refresh market prices for every known ticker.
     Safe to call on every rerun — never triggers AI analysis.
     Applies successful prices to holdings immediately (no second step needed).
+    Saudi Exchange tickers with .SE suffix are normalized to .SR before fetching.
     Returns the count of tickers fetched successfully.
     """
     from market_prices import refresh_all_prices, save_to_session
     try:
-        tickers = _collect_all_tickers()
-        if not tickers:
+        raw_tickers = _collect_all_tickers()
+        if not raw_tickers:
             return 0
-        results = refresh_all_prices(tickers, force=force)
+        # Build normalized-ticker → original-ticker map for .SE → .SR fix
+        ticker_map = {_normalize_ticker(t): t for t in raw_tickers}
+        results = refresh_all_prices(list(ticker_map.keys()), force=force)
         save_to_session(results)
-        _apply_prices_to_holdings(results)   # persist to holdings.json automatically
+        # Remap normalized keys back to original for holdings storage
+        results_orig = {ticker_map.get(k, k): v for k, v in results.items()}
+        _apply_prices_to_holdings(results_orig)
         return sum(1 for d in results.values() if d.is_ok)
     except Exception:
         return 0
@@ -1767,228 +1784,143 @@ def render_holdings_tab() -> None:
             icon="💡",
         )
 
-    # ── Holdings table with current-price editing ─────────────────────────────
+    # ── Holdings table ────────────────────────────────────────────────────────
     if holdings:
-        st.subheader("📋 Holdings")
-        st.caption(
-            "Edit **Price** inline and click **💾 Save prices**. "
-            "All other fields are edited in the **🖊️ Edit / Delete Holding** section below."
+        from market_prices import (
+            get_all_from_session, market_session_label,
+            refresh_all_prices, save_to_session,
         )
+        live_cache = get_all_from_session()
 
-        # Base-currency total for weight calculation — from valuation engine
-        _bw_total = _val.holdings_value_base or 1.0
+        # Controls: single refresh button + session info
+        h_c1, h_c2, h_c3 = st.columns([1, 2, 2])
+        with h_c1:
+            if st.button(
+                "🔄 Refresh prices now",
+                key="refresh_mp_holdings",
+                use_container_width=True,
+                help="Fetch live prices from Yahoo Finance and update holdings immediately.",
+            ):
+                # Build normalized ticker → original ticker map
+                ticker_map = {
+                    _normalize_ticker(t): t
+                    for t, h in holdings.items()
+                    if getattr(h, "has_ticker", True)
+                }
+                with st.spinner(f"Fetching {len(ticker_map)} price(s)…"):
+                    fetched_norm = refresh_all_prices(list(ticker_map.keys()), force=True)
+                save_to_session(fetched_norm)
+                # Remap normalized keys back to original holding keys for storage
+                fetched_orig = {
+                    ticker_map[k]: v
+                    for k, v in fetched_norm.items()
+                    if k in ticker_map
+                }
+                ok_list, fail_list = _apply_prices_to_holdings(fetched_orig, holdings)
+                st.toast(
+                    f"Updated: {len(ok_list)} · Failed: {len(fail_list)}",
+                    icon="✅" if ok_list else "⚠️",
+                )
+                st.rerun()
+        with h_c2:
+            sess_icon, sess_label = market_session_label()
+            st.caption(f"{sess_icon} {sess_label}")
+        with h_c3:
+            last_ref = st.session_state.get("mp_last_refresh")
+            if last_ref:
+                st.caption(f"Last updated: {last_ref}")
 
-        _mv_col  = f"MV ({_base_ccy})"
-        _pnl_col = f"P&L ({_base_ccy})"
-        _wt_col  = f"Wt% ({_base_ccy})"
-
+        # ── Build the display table ────────────────────────────────────────────
+        _mv_col = f"MV ({_base_ccy})"
         rows = []
+        manual_tickers: list[str] = []
+
         for ticker, h in sorted(holdings.items()):
             has_tk  = getattr(h, "has_ticker", True)
             p_src   = getattr(h, "price_source", "manual")
-            sec_lnk = getattr(h, "sec_linked", False)
             ccy     = getattr(h, "currency", "USD")
             fx_r    = _fx.get(ccy)
-            fx_rate = fx_r.rate   if fx_r else 1.0
-            fx_src  = fx_r.source if fx_r else "default"
-            mv_b    = round(h.market_value * fx_rate, 2)
-            pnl_b   = round(h.unrealized_pnl * fx_rate, 2)
-            wt_b    = round(h.market_value * fx_rate / _bw_total * 100.0, 2)
+            fx_rate = fx_r.rate if fx_r else 1.0
+            mv_base = round(h.market_value * fx_rate, 2)
 
-            price_src_label = (
-                "📡 yfinance" if p_src == "yfinance"
-                else ("⚠️ Manual (no ticker)" if not has_tk else "📝 Manual")
-            )
-            fx_src_label = "✅ live" if fx_src == "live" else ("➖ same" if fx_src == "same" else "🔴 default")
+            # Check session cache for price freshness (use normalized key)
+            norm_tk = _normalize_ticker(ticker)
+            md = live_cache.get(norm_tk) or live_cache.get(ticker)
+
+            # Inline note — small, non-blocking
+            if ticker.upper().endswith(".SE"):
+                note = f"⚠️ Try {ticker[:-3]}.SR"
+            elif not has_tk:
+                note = "📝 manual"
+            elif md and not md.is_ok:
+                note = "⚠️ unavailable — using stored"
+            else:
+                note = ""
+
+            src_label = "Yahoo Finance" if has_tk else "Manual"
+
+            if not has_tk:
+                manual_tickers.append(ticker)
 
             rows.append({
-                "Ticker":        ticker,
-                "Company":       h.company_name,
-                "Type":          getattr(h, "asset_type", "Stock"),
-                "Ccy":           ccy,
-                "Quantity":      round(h.quantity, 4),
-                "Avg Cost":      round(h.avg_cost, 4),
-                "Price":         round(h.current_price, 4),
-                "MV (Local)":    round(h.market_value, 2),
-                "FX":            round(fx_rate, 6),
-                "FX Src":        fx_src_label,
-                _mv_col:         mv_b,
-                _pnl_col:        pnl_b,
-                "P&L %":         round(h.unrealized_pnl_pct, 2),
-                _wt_col:         wt_b,
-                "Price Src":     price_src_label,
-                "SEC":           "🏛️" if sec_lnk else "—",
+                "Ticker":   ticker,
+                "Qty":      round(h.quantity, 4),
+                "Avg Cost": round(h.avg_cost, 4),
+                "Price":    round(h.current_price, 4),
+                _mv_col:    mv_base,
+                "P&L %":    round(h.unrealized_pnl_pct, 2),
+                "Currency": ccy,
+                "Source":   src_label,
+                "Note":     note,
             })
-        df = pd.DataFrame(rows)
-        _disabled_cols = [
-            "Ticker", "Company", "Type", "Ccy", "Quantity", "Avg Cost",
-            "MV (Local)", "FX", "FX Src", _mv_col, _pnl_col, "P&L %", _wt_col,
-            "Price Src", "SEC",
-        ]
-        edited = st.data_editor(
-            df,
+
+        st.dataframe(
+            pd.DataFrame(rows),
             hide_index=True,
             use_container_width=True,
-            disabled=_disabled_cols,
-            column_config={
-                "Price": st.column_config.NumberColumn(
-                    "Price", min_value=0.0, step=0.01, format="%.4f",
-                ),
-            },
-            key="holdings_price_editor",
         )
 
-        # ── Live market prices panel ────────────────────────────────────────
-        from market_prices import (
-            get_all_from_session, market_session_label,
-            refresh_all_prices, save_to_session, PRICE_SOURCES,
-        )
-        sess_icon, sess_label = market_session_label()
-        mp1, mp2, mp3 = st.columns([1, 2, 2])
-        with mp1:
-            if st.button(
-                "🔄 Refresh Market Prices",
-                use_container_width=True,
-                key="refresh_mp_holdings",
-                help="Fetches live prices and immediately updates holdings — no second step needed.",
+        # Warn about any .SE tickers needing normalization
+        se_tickers = [t for t in holdings if t.upper().endswith(".SE")]
+        if se_tickers:
+            st.warning(
+                f"**Saudi ticker suffix issue**: {', '.join(se_tickers)} use `.SE` "
+                f"which Yahoo Finance does not recognise. "
+                f"Edit these holdings and change the suffix to `.SR` "
+                f"(e.g. `{se_tickers[0][:-3]}.SR`) to enable live price fetching.",
+                icon="⚠️",
+            )
+
+        # ── Manual price update (untickered assets only) ───────────────────────
+        if manual_tickers:
+            with st.expander(
+                f"📝 Update manual prices ({len(manual_tickers)} asset(s))",
+                expanded=False,
             ):
-                ticker_keys = [t for t, h in holdings.items()
-                               if getattr(h, "has_ticker", True)]
-                with st.spinner(f"Fetching prices for {len(ticker_keys)} ticker(s)…"):
-                    fetched = refresh_all_prices(ticker_keys, force=True)
-                save_to_session(fetched)
-                # Immediately write prices — no confirmation button needed
-                ok_list, fail_list = _apply_prices_to_holdings(fetched, holdings)
-                if ok_list:
-                    st.toast(
-                        f"Updated successfully: {len(ok_list)} · "
-                        f"Failed: {len(fail_list)}",
-                        icon="✅",
-                    )
-                for t in fail_list:
-                    st.toast(f"{t}: price unavailable — keeping stored value", icon="⚠️")
-                st.rerun()
-        with mp2:
-            st.caption(f"{sess_icon} {sess_label}")
-        with mp3:
-            last_ref = st.session_state.get("mp_last_refresh")
-            if last_ref:
-                st.caption(f"Last refreshed at {last_ref}")
-
-        live_cache   = get_all_from_session()
-        live_rows    = []
-        debug_rows   = []
-        live_ok_map: dict[str, float] = {}
-        for t_key in sorted(holdings.keys()):
-            h_entry = holdings[t_key]
-            if not getattr(h_entry, "has_ticker", True):
-                # No-ticker asset — show manual-price row, skip yfinance
-                live_rows.append({
-                    "":           "📝",
-                    "Ticker":     t_key,
-                    "Price":      str(round(h_entry.current_price, 4)) if h_entry.current_price else "—",
-                    "Day Change": "—",
-                    "Source":     "⚠️ Manual price — update required",
-                    "Fetched (UTC)": getattr(h_entry, "price_date", "") or "—",
-                    "Stored":     str(round(h_entry.current_price, 4)),
-                    "Beta":       "—",
-                    "Currency":   getattr(h_entry, "currency", "—"),
-                })
-                continue
-            md     = live_cache.get(t_key)
-            stored = holdings[t_key].current_price
-
-            if md:
-                # Debug row — always populated when we have any fetch attempt
-                debug_rows.append({
-                    "Ticker":          t_key,
-                    "last_price":      f"{md.raw_last_price:.4f}"     if md.raw_last_price    is not None else "—",
-                    "regularMktPrice": f"{md.raw_regular_market:.4f}" if md.raw_regular_market is not None else "—",
-                    "previousClose":   f"{md.raw_previous_close:.4f}" if md.raw_previous_close is not None else "—",
-                    "intraday1m":      f"{md.raw_intraday_close:.4f}" if md.raw_intraday_close  is not None else "—",
-                    "storedPrice":     f"{stored:.4f}",
-                    "selectedPrice":   f"{md.current_price:.4f}"      if md.current_price     is not None else "—",
-                    "source":          md.source_label,
-                    "fetchedAt (UTC)": md.price_timestamp[:19].replace("T", " ") if md.price_timestamp else "—",
-                })
-
-            if md and md.is_ok:
-                live_ok_map[t_key] = md.current_price
-                ts_short = md.price_timestamp[:19].replace("T", " ") if md.price_timestamp else "—"
-                live_rows.append({
-                    "":           md.day_indicator,
-                    "Ticker":     t_key,
-                    "Price":      round(md.current_price, 2),
-                    "Day Change": md.change_str,
-                    "Source":     md.source_label,
-                    "Fetched (UTC)": ts_short,
-                    "Stored":     round(stored, 2),
-                    "Beta":       (f"{md.beta:.2f}" if md.beta else "—"),
-                    "Currency":   md.currency,
-                })
-            elif md and not md.is_ok:
-                live_rows.append({
-                    "":           "⚠️",
-                    "Ticker":     t_key,
-                    "Price":      "—",
-                    "Day Change": "—",
-                    "Source":     f"Fetch failed: {md.error or 'unknown'}",
-                    "Fetched (UTC)": "—",
-                    "Stored":     round(stored, 2),
-                    "Beta":       "—",
-                    "Currency":   "—",
-                })
-
-        if live_rows:
-            ok_count = len(live_ok_map)
-            fail_count = len(live_rows) - ok_count
-            has_fallback = any(
-                live_cache.get(t) and live_cache[t].is_ok
-                and live_cache[t].price_source == "previous_close_fallback"
-                for t in holdings
-            )
-            _exp_title = (
-                f"📡 Market Prices — Updated: {ok_count}"
-                + (f" · Failed: {fail_count}" if fail_count else "")
-            )
-            with st.expander(_exp_title, expanded=True):
-                if fail_count:
-                    st.warning(
-                        f"**{fail_count} ticker(s) could not be fetched** — their stored "
-                        "prices are unchanged. Failures shown with ⚠️ below.",
-                        icon="⚠️",
-                    )
-                if has_fallback:
-                    st.info(
-                        "One or more prices are using **previousClose** as a fallback "
-                        "— no live or intraday price was available.",
-                        icon="ℹ️",
-                    )
-
-                live_df = pd.DataFrame(live_rows).astype(str)
-                st.dataframe(live_df, hide_index=True, use_container_width=True)
-
-                if debug_rows:
-                    with st.expander("🔬 Debug: raw yfinance probe values", expanded=False):
-                        st.caption(
-                            "All four price probes attempted for each ticker. "
-                            "The selected price follows the priority: "
-                            "last_price → regularMarketPrice → intraday1m → previousClose."
+                st.caption(
+                    "These assets have no Yahoo Finance ticker. "
+                    "Enter a price and click Save."
+                )
+                for tk in sorted(manual_tickers):
+                    h_m = holdings[tk]
+                    mp_c1, mp_c2 = st.columns([3, 1])
+                    with mp_c1:
+                        new_p = st.number_input(
+                            f"{tk}  ·  {h_m.company_name}",
+                            value=float(h_m.current_price or 0.0),
+                            min_value=0.0,
+                            step=0.01,
+                            format="%.4f",
+                            key=f"mp_manual_{tk}",
                         )
-                        st.dataframe(
-                            pd.DataFrame(debug_rows).astype(str),
-                            hide_index=True, use_container_width=True,
-                        )
-
-        if st.button("💾 Save prices", type="primary"):
-            changed = 0
-            for _, row in edited.iterrows():
-                new_price = float(row["Price"])
-                if abs(new_price - holdings[row["Ticker"]].current_price) > 1e-9:
-                    update_current_price(row["Ticker"], new_price)
-                    changed += 1
-            st.toast(f"Updated {changed} price(s)", icon="💾")
-            st.rerun()
+                    with mp_c2:
+                        st.write("")
+                        if st.button("Save", key=f"mp_save_{tk}",
+                                     use_container_width=True):
+                            if abs(new_p - float(h_m.current_price or 0.0)) > 1e-9:
+                                update_current_price(tk, new_p, source="manual")
+                                st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
+                            st.rerun()
 
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
