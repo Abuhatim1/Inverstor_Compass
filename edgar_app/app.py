@@ -1926,17 +1926,273 @@ def render_holdings_tab() -> None:
                                 st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
 
+    # ── Account helpers (needed by all dialogs, including Add New) ───────────
+    from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
+    from portfolio.accounts import load_accounts as _load_accts_raw, update_account_cash as _upd_cash
+
+    def _acct_pairs_for(currency: str | None = None):
+        """Return [(account_id, Account)] for active accounts. Never raises."""
+        try:
+            return list(_active_accts_fn(currency).items())
+        except Exception:
+            return []
+
+    # ── Dialog: Open New Position ─────────────────────────────────────────────
+    @st.dialog("➕ Open New Position", width="large")
+    def _dlg_add_new():
+        from ticker_validator import validate_yahoo_ticker, suggest_saudi_ticker
+        from portfolio.holdings import normalize_ticker as _ntk
+
+        st.caption(
+            "Opens a brand-new position. An opening BUY transaction is recorded "
+            "automatically — so this holding has a full cost-basis history from day one."
+        )
+
+        # ── Ticker input ──────────────────────────────────────────────────────
+        _has_tk = st.checkbox("Has a market ticker (Yahoo Finance)", value=True, key="ahn_has_tk")
+        if _has_tk:
+            _tc1, _tc2 = st.columns([3, 1])
+            with _tc1:
+                _tk_raw = st.text_input(
+                    "Ticker symbol",
+                    key="ahn_ticker_input",
+                    placeholder="AAPL · 2222.SR · GLD · GC=F",
+                )
+            with _tc2:
+                st.write("")
+                _do_val = st.button("🔍 Validate", key="ahn_val_btn", use_container_width=True,
+                                    help="Check on Yahoo Finance and auto-fill details.")
+
+            # Saudi shorthand suggestion
+            _sa_sug = suggest_saudi_ticker(_tk_raw or "")
+            if _sa_sug:
+                _sas1, _sas2 = st.columns([3, 1])
+                with _sas1:
+                    st.caption(f"💡 Did you mean **{_sa_sug}** (Yahoo Finance format)?")
+                with _sas2:
+                    if st.button(f"Use {_sa_sug}", key="ahn_sa_btn", use_container_width=True):
+                        st.session_state["ahn_ticker_input"] = _sa_sug
+                        _do_val = True
+
+            # Watchlist quick-fill
+            _wl_opts = sorted(watchlist.keys())
+            if _wl_opts:
+                _wlc1, _wlc2 = st.columns([3, 1])
+                with _wlc1:
+                    _wl_pick = st.selectbox(
+                        "Or quick-fill from Watchlist",
+                        options=["— enter manually —"] + _wl_opts,
+                        key="ahn_wl_pick",
+                    )
+                with _wlc2:
+                    st.write("")
+                    if (
+                        st.button("📋 Use", key="ahn_wl_btn", use_container_width=True)
+                        and _wl_pick != "— enter manually —"
+                    ):
+                        st.session_state["ahn_ticker_input"] = _wl_pick
+                        _do_val = True
+
+            # Run validation
+            if _do_val:
+                _to_check = st.session_state.get("ahn_ticker_input", "").strip().upper()
+                if _to_check:
+                    with st.spinner(f"Checking **{_to_check}** on Yahoo Finance…"):
+                        _vr = validate_yahoo_ticker(_to_check)
+                    st.session_state["ahn_validation"] = _vr
+
+            # Show result
+            _val = st.session_state.get("ahn_validation")
+            if _val:
+                if _val.exists:
+                    st.success(f"✅ **{_val.resolved_ticker}** · {_val.company_name or '—'}")
+                    _vca, _vcb, _vcc, _vcd = st.columns(4)
+                    _vca.metric("Price",    f"{_val.current_price:.4f}" if _val.current_price else "—")
+                    _vcb.metric("Currency", _val.currency  or "—")
+                    _vcc.metric("Exchange", _val.exchange  or "—")
+                    _vcd.metric("Type",     _val.asset_type or "—")
+                else:
+                    st.warning(
+                        f"⚠️ **{_val.resolved_ticker}** not found — will be saved as Manual-priced."
+                    )
+        else:
+            _val = None
+            st.info("No ticker — price will be updated manually.", icon="ℹ️")
+
+        st.divider()
+
+        # ── Pre-fill from validation ──────────────────────────────────────────
+        _val     = st.session_state.get("ahn_validation")
+        _pf_tk   = _val.resolved_ticker if (_val and _val.exists) else st.session_state.get("ahn_ticker_input", "").strip().upper()
+        _pf_name = _val.company_name    if (_val and _val.exists) else ""
+        _pf_price = float(_val.current_price or 0.0) if (_val and _val.exists) else 0.0
+        _pf_ccy  = (_val.currency if _val and _val.exists and _val.currency in CURRENCIES else "USD")
+        _pf_type = (_val.asset_type if _val and _val.exists and _val.asset_type in ASSET_TYPES else "Stock")
+        _yahoo_ok = bool(_has_tk and _val and _val.exists)
+
+        # ── Core fields ───────────────────────────────────────────────────────
+        _fc1, _fc2 = st.columns(2)
+        with _fc1:
+            _ad_tk = st.text_input(
+                "Ticker / Asset ID",
+                value=_pf_tk,
+                key="ahn_tk_confirm",
+                help="Unique identifier — uppercase letters, digits and dots only.",
+            )
+            _ad_name   = st.text_input("Company / Asset name", value=_pf_name, key="ahn_name")
+            _ad_type   = st.selectbox(
+                "Asset type", ASSET_TYPES,
+                index=ASSET_TYPES.index(_pf_type) if _pf_type in ASSET_TYPES else 0,
+                key="ahn_type",
+            )
+            _ad_market = st.selectbox("Market", MARKETS, key="ahn_market")
+            _ad_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="ahn_sector")
+        with _fc2:
+            _ad_ccy = st.selectbox(
+                "Currency", CURRENCIES,
+                index=CURRENCIES.index(_pf_ccy) if _pf_ccy in CURRENCIES else 0,
+                key="ahn_ccy",
+            )
+            _ad_qty   = st.number_input("Opening quantity", min_value=0.0001, value=1.0, step=1.0,
+                                        format="%.4f", key="ahn_qty")
+            _ad_cost  = st.number_input("Opening price / avg cost per unit",
+                                        min_value=0.0, step=0.01, format="%.4f", key="ahn_cost",
+                                        help="The price you actually paid per share/unit.")
+            _ad_price = st.number_input("Current market price per unit",
+                                        value=_pf_price, min_value=0.0, step=0.01,
+                                        format="%.4f", key="ahn_price",
+                                        help="Today's market price — auto-filled from Yahoo when validated.")
+
+        # ── Account, fees, date ───────────────────────────────────────────────
+        _pairs  = _acct_pairs_for()
+        _labels = ["— no account —"] + [_acct_dn(a) for _, a in _pairs]
+        _ids    = [""] + [aid for aid, _ in _pairs]
+        _ad_acct_i = st.selectbox("Link to account", options=range(len(_labels)),
+                                  format_func=lambda i: _labels[i], key="ahn_acct")
+        _af1, _af2 = st.columns(2)
+        with _af1:
+            _ad_fees = st.number_input("Transaction fees", min_value=0.0, value=0.0,
+                                       step=0.01, format="%.2f", key="ahn_fees")
+        with _af2:
+            _ad_date = st.date_input("Opening date (optional)", value=None, key="ahn_date")
+        _ad_notes = st.text_input("Notes", max_chars=200, key="ahn_notes",
+                                  placeholder="e.g. bought via Tadawul, rights issue…")
+        _ad_corr  = st.checkbox(
+            "Opening correction — skip cash debit",
+            key="ahn_corr",
+            help=(
+                "Tick this when recording a pre-existing position. "
+                "The opening BUY transaction is still created (for FIFO history) "
+                "but no cash is deducted from the linked account."
+            ),
+        )
+
+        # ── Duplicate guard ───────────────────────────────────────────────────
+        _ad_tk_clean = _ad_tk.strip().replace(" ", "_").upper()
+        _ad_tk_norm  = _ntk(_ad_tk_clean) if _ad_tk_clean else ""
+        _open_norms  = {_ntk(k) for k, h in holdings.items() if h.quantity > 1e-9}
+        _is_dup      = bool(_ad_tk_clean and _ad_tk_norm in _open_norms)
+
+        if _is_dup:
+            st.error(
+                f"**{_ad_tk_clean}** already has an open position. "
+                "Use that row's **Buy / Edit / Sell** actions to modify it.  \n"
+                "You can only open a new position once the existing one is fully closed.",
+                icon="🚫",
+            )
+
+        # ── Cash preview ──────────────────────────────────────────────────────
+        _ad_aid       = _ids[_ad_acct_i]
+        _ad_total_cost = float(_ad_qty) * float(_ad_cost) + float(_ad_fees)
+        if not _ad_corr and _ad_aid:
+            try:
+                _ck_accts = _load_accts_raw()
+                _ck_bal   = _ck_accts[_ad_aid].cash_balance if _ad_aid in _ck_accts else None
+                if _ck_bal is not None:
+                    _ck_icon = "🟢" if _ck_bal >= _ad_total_cost else "🔴"
+                    st.caption(
+                        f"{_ck_icon} Account cash: **{_ck_bal:,.2f} {_ad_ccy}**  "
+                        f"· Opening cost: **{_ad_total_cost:,.2f} {_ad_ccy}**"
+                    )
+            except Exception:
+                pass
+
+        # ── Submit ────────────────────────────────────────────────────────────
+        _xb1, _xb2 = st.columns(2)
+        with _xb1:
+            _cash_ok = True
+            if not _ad_corr and _ad_aid:
+                try:
+                    _ck2 = _load_accts_raw()
+                    _bal2 = _ck2[_ad_aid].cash_balance if _ad_aid in _ck2 else None
+                    if _bal2 is not None and _bal2 < _ad_total_cost:
+                        _cash_ok = False
+                except Exception:
+                    pass
+
+            if st.button(
+                "✅ Open Position", type="primary", use_container_width=True,
+                disabled=(not _ad_tk_clean or _is_dup or not _cash_ok),
+                key="ahn_submit",
+            ):
+                if _cash_ok is False:
+                    st.error("Insufficient account cash. Tick 'Opening correction' to bypass.")
+                elif _ad_qty <= 0:
+                    st.error("Quantity must be > 0.")
+                else:
+                    try:
+                        _t, _h2, _e = record_transaction(
+                            ticker=_ad_tk_clean, side="BUY",
+                            quantity=float(_ad_qty),
+                            price=float(_ad_cost),
+                            txn_date=str(_ad_date) if _ad_date else None,
+                            notes=_ad_notes,
+                            company_name=_ad_name.strip() or _ad_tk_clean,
+                            market=_ad_market, sector=_ad_sector,
+                            asset_type=_ad_type, currency=_ad_ccy,
+                            has_ticker=_has_tk,
+                            account_id=_ad_aid, fees=float(_ad_fees),
+                        )
+                        if _e:
+                            st.error(_e)
+                        else:
+                            # Persist extra metadata not carried by record_transaction
+                            _sec_linked = bool(_yahoo_ok and _ad_market == "US" and _ad_type in ("Stock", "ETF"))
+                            upsert_holding(
+                                ticker=_ad_tk_clean,
+                                sec_linked=_sec_linked,
+                                price_source="yfinance" if _yahoo_ok else "manual",
+                                price_date=date.today().isoformat(),
+                            )
+                            # Apply live price if different from opening cost
+                            if _ad_price > 0 and abs(_ad_price - float(_ad_cost)) > 1e-9:
+                                update_current_price(
+                                    _ad_tk_clean, _ad_price,
+                                    source="yfinance" if _yahoo_ok else "manual",
+                                )
+                            # Debit cash (actual buy only)
+                            if not _ad_corr and _ad_aid:
+                                try:
+                                    _upd_cash(_ad_aid, -_ad_total_cost)
+                                except Exception:
+                                    pass
+                            # Clear validation
+                            for _k in ("ahn_validation", "ahn_ticker_input", "ahn_tk_confirm"):
+                                st.session_state.pop(_k, None)
+                            st.toast(
+                                f"Position opened: **{_ad_tk_clean}** · {_ad_qty:.4f} shares @ {_ad_cost:.4f}",
+                                icon="✅",
+                            )
+                            st.rerun()
+                    except Exception as _ex:
+                        st.error(f"Failed to open position — {_ex}")
+        with _xb2:
+            if st.button("Cancel", key="ahn_cancel", use_container_width=True):
+                st.session_state.pop("ahn_validation", None)
+                st.rerun()
+
     # ── Dialogs + action bar ─────────────────────────────────────────────────
     if holdings:
-        from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
-        from portfolio.accounts import load_accounts as _load_accts_raw, update_account_cash as _upd_cash
-
-        def _acct_pairs_for(currency: str | None = None):
-            """Return [(account_id, Account)] for active accounts. Never raises."""
-            try:
-                return list(_active_accts_fn(currency).items())
-            except Exception:
-                return []
 
         # ── Dialog: Buy More ─────────────────────────────────────────────────
         @st.dialog("➕ Buy More")
@@ -2227,467 +2483,22 @@ def render_holdings_tab() -> None:
                                      use_container_width=True):
                             _dlg_delete(_st, _sh)
 
-    # ── Add Holding form ──────────────────────────────────────────────────────
+    # ── + Add New Holding button ──────────────────────────────────────────────
     st.divider()
-    with st.expander("➕ Add / Update Holding", expanded=not holdings):
-        from ticker_validator import validate_yahoo_ticker, suggest_saudi_ticker
-
+    _btn_col, _hint_col = st.columns([1, 4])
+    with _btn_col:
+        if st.button("➕ Add New Holding", key="open_add_new_btn",
+                     type="primary", use_container_width=True):
+            _dlg_add_new()
+    with _hint_col:
         st.caption(
-            "Holdings are fully independent from SEC search. "
-            "Add any asset — stocks, ETFs, gold, cash, commodities — "
-            "with or without a market ticker."
+            "Opens a brand-new position with a full BUY transaction history.  "
+            "To modify an existing holding, select its row above."
         )
 
-        # ══════════════════════════════════════════════════════════════════
-        # Step 1 — Ticker lookup  (outside form so yfinance call is safe)
-        # ══════════════════════════════════════════════════════════════════
-        st.markdown("#### Step 1 — Ticker / Asset ID")
-        _ah_has_tk = st.checkbox(
-            "Has a market ticker (Yahoo Finance)",
-            value=True,
-            key="ah_has_tk_outer",
-        )
-
-        if _ah_has_tk:
-            tk_c1, tk_c2 = st.columns([3, 1])
-            with tk_c1:
-                _ah_tk_input = st.text_input(
-                    "Ticker symbol",
-                    key="ah_tk_input",
-                    placeholder="AAPL  ·  1120.SR  ·  GLD  ·  GC=F  ·  XAUUSD=X",
-                    help=(
-                        "US equity: AAPL, MSFT  |  Saudi: 1120.SR, 2222.SR  |  "
-                        "Gold ETF: GLD, IAU  |  Gold futures: GC=F  |  "
-                        "Silver futures: SI=F  |  Forex: XAUUSD=X"
-                    ),
-                )
-            with tk_c2:
-                st.write("")
-                _do_validate = st.button(
-                    "🔍 Validate",
-                    key="ah_validate_btn",
-                    use_container_width=True,
-                    help="Check this ticker on Yahoo Finance and auto-fill details.",
-                )
-
-            # ── Watchlist quick-fill ─────────────────────────────────────
-            _wl_opts = sorted(watchlist.keys())
-            if _wl_opts:
-                wl_c1, wl_c2 = st.columns([3, 1])
-                with wl_c1:
-                    _wl_pick = st.selectbox(
-                        "Or quick-fill from Research Watchlist",
-                        options=["— enter manually —"] + _wl_opts,
-                        key="ah_wl_pick_outer",
-                        label_visibility="visible",
-                    )
-                with wl_c2:
-                    st.write("")
-                    if (
-                        st.button("📋 Use", key="ah_wl_use_btn", use_container_width=True)
-                        and _wl_pick != "— enter manually —"
-                    ):
-                        _do_validate = True
-                        st.session_state["ah_tk_input"] = _wl_pick
-                        _ah_tk_input = _wl_pick
-
-            # ── Saudi 4-digit shorthand suggestion ───────────────────────
-            _sa_sug = suggest_saudi_ticker(_ah_tk_input)
-            if _sa_sug:
-                sa_c1, sa_c2 = st.columns([3, 1])
-                with sa_c1:
-                    st.caption(
-                        f"💡 Looks like a Saudi stock code — did you mean **{_sa_sug}** "
-                        "(Yahoo Finance format)?"
-                    )
-                with sa_c2:
-                    if st.button(f"Use {_sa_sug}", key="ah_sa_btn", use_container_width=True):
-                        st.session_state["ah_tk_input"] = _sa_sug
-                        _ah_tk_input = _sa_sug
-                        _do_validate = True
-
-            # ── Run validation ───────────────────────────────────────────
-            if _do_validate:
-                _tk_to_check = _ah_tk_input.strip().upper()
-                if _tk_to_check:
-                    with st.spinner(f"Checking **{_tk_to_check}** on Yahoo Finance…"):
-                        _vr = validate_yahoo_ticker(_tk_to_check)
-                    st.session_state["ah_validation"] = _vr
-
-            # ── Show result badge ────────────────────────────────────────
-            _val = st.session_state.get("ah_validation")
-            if _val:
-                if _val.exists:
-                    st.success(
-                        f"✅ **Yahoo-linked** — {_val.resolved_ticker}  "
-                        f"·  {_val.company_name or '—'}"
-                    )
-                    _vc1, _vc2, _vc3, _vc4 = st.columns(4)
-                    _vc1.metric("Live Price", f"{_val.current_price:.4f}" if _val.current_price else "—")
-                    _vc2.metric("Currency",   _val.currency  or "—")
-                    _vc3.metric("Exchange",   _val.exchange  or "—")
-                    _vc4.metric("Type",       _val.asset_type or "—")
-                else:
-                    st.warning(
-                        f"⚠️ **Yahoo unavailable** — {_val.resolved_ticker} not found on "
-                        "Yahoo Finance. Asset will be saved as **Manual-priced**."
-                    )
-                    if _val.error:
-                        st.caption(f"Reason: {_val.error}")
-        else:
-            _val = None
-            st.info(
-                "ℹ️ No ticker — price and valuation will be entered manually. "
-                "yfinance will not be used for this asset.",
-                icon="ℹ️",
-            )
-
-        st.divider()
-
-        # ══════════════════════════════════════════════════════════════════
-        # Step 2 — Holding details  (inside form)
-        # ══════════════════════════════════════════════════════════════════
-        st.markdown("#### Step 2 — Holding Details")
-
-        _val = st.session_state.get("ah_validation")
-
-        # Pre-fill helpers from validation result
-        _pf_ticker = _val.resolved_ticker if _val and _val.exists else ""
-        _pf_name   = _val.company_name    if _val and _val.exists else ""
-        _pf_price  = float(_val.current_price or 0.0) if _val and _val.exists else 0.0
-        _pf_cur_idx = 0
-        if _val and _val.exists and _val.currency and _val.currency in CURRENCIES:
-            _pf_cur_idx = CURRENCIES.index(_val.currency)
-        _pf_type_idx = 0
-        if _val and _val.exists and _val.asset_type and _val.asset_type in ASSET_TYPES:
-            _pf_type_idx = ASSET_TYPES.index(_val.asset_type)
-
-        with st.form("add_holding_manual", clear_on_submit=True):
-
-            # ── Identifier ────────────────────────────────────────────────
-            if _ah_has_tk:
-                ah_ticker_input = st.text_input(
-                    "Ticker symbol (confirm / edit)",
-                    value=_pf_ticker,
-                    key="ah_tk_form",
-                    help="Pre-filled from validation above. Edit if needed.",
-                )
-            else:
-                ah_ticker_input = st.text_input(
-                    "Asset ID (unique slug, no spaces)",
-                    key="ah_tk_form",
-                    placeholder="PHYS_GOLD · CASH_SAR · GOLD_COINS",
-                    help=(
-                        "Short key used for storage — no spaces, use underscores. "
-                        "Examples: PHYS_GOLD, CASH_SAR, GOLD_COINS."
-                    ),
-                )
-
-            # ── Core fields ────────────────────────────────────────────────
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                ah_name = st.text_input(
-                    "Asset name / company",
-                    value=_pf_name,
-                    key="ah_co_form",
-                    placeholder="Apple Inc. · Physical Gold · Cash - Saudi Riyal",
-                )
-                ah_asset_type = st.selectbox(
-                    "Asset type", ASSET_TYPES,
-                    index=_pf_type_idx,
-                    key="ah_type_form",
-                )
-                ah_market = st.selectbox("Market", MARKETS, key="ah_mkt_form")
-                ah_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="ah_sec_form")
-            with fc2:
-                ah_currency = st.selectbox(
-                    "Currency", CURRENCIES,
-                    index=_pf_cur_idx,
-                    key="ah_cur_form",
-                )
-                ah_qty = st.number_input(
-                    "Quantity",
-                    min_value=0.0, step=1.0, format="%.4f",
-                    key="ah_qty_form",
-                )
-                ah_cost = st.number_input(
-                    "Avg cost per unit",
-                    min_value=0.0, step=0.01, format="%.4f",
-                    key="ah_cost_form",
-                    help="Weighted-average cost you paid per share / unit / gram.",
-                )
-                ah_price = st.number_input(
-                    "Current price per unit",
-                    value=_pf_price,
-                    min_value=0.0, step=0.01, format="%.4f",
-                    key="ah_price_form",
-                    help=(
-                        "Auto-filled from Yahoo Finance when validated. "
-                        "For manual assets enter your best estimate."
-                    ),
-                )
-
-            # ── Optional fields ───────────────────────────────────────────
-            opt1, opt2 = st.columns(2)
-            with opt1:
-                ah_pdate = st.date_input(
-                    "Purchase date (optional)", value=None, key="ah_pdate_form",
-                )
-            with opt2:
-                ah_notes = st.text_input(
-                    "Notes (optional)", key="ah_notes_form", max_chars=200,
-                    placeholder="e.g. bought via Tadawul, held in safe deposit box…",
-                )
-
-            # ── Status badges ─────────────────────────────────────────────
-            _yahoo_linked = bool(_val and _val.exists and _ah_has_tk)
-            _sec_linked   = (
-                _yahoo_linked
-                and ah_market == "US"
-                and ah_asset_type in ("Stock", "ETF")
-            )
-            _badges = []
-            if _yahoo_linked:
-                _badges.append("✅ Yahoo-linked")
-            else:
-                _badges.append("⚠️ Manual-priced")
-            if _sec_linked:
-                _badges.append("🏛️ SEC-linked")
-            else:
-                _badges.append("ℹ️ No SEC link")
-            st.caption("  ·  ".join(_badges))
-
-            if not _sec_linked:
-                st.caption(
-                    "Filing intelligence unavailable for this asset — "
-                    "only US equities/ETFs with a verified ticker have SEC access."
-                )
-
-            # ── Submit ────────────────────────────────────────────────────
-            if st.form_submit_button("💼 Add / Update Holding", type="primary"):
-                ticker_key = ah_ticker_input.strip().replace(" ", "_").upper()
-                if not ticker_key:
-                    st.error("Ticker / Asset ID is required.")
-                elif ah_qty <= 0:
-                    st.error("Quantity must be greater than 0.")
-                else:
-                    upsert_holding(
-                        ticker=ticker_key,
-                        company_name=ah_name.strip() or ticker_key,
-                        market=ah_market,
-                        sector=ah_sector,
-                        quantity=ah_qty,
-                        avg_cost=ah_cost,
-                        current_price=ah_price,
-                        asset_type=ah_asset_type,
-                        currency=ah_currency,
-                        has_ticker=_ah_has_tk,
-                        sec_linked=_sec_linked,
-                        purchase_date=str(ah_pdate) if ah_pdate else "",
-                        notes=ah_notes,
-                        price_source="yfinance" if _yahoo_linked else "manual",
-                        price_date=date.today().isoformat(),
-                    )
-                    # Clear validation so next open starts fresh
-                    st.session_state.pop("ah_validation", None)
-                    st.toast(f"{ticker_key} added / updated in Holdings", icon="💼")
-                    st.rerun()
-
-    # ── Valuation reconciliation debug (collapsible) ─────────────────────────
+    # ── Valuation debug ───────────────────────────────────────────────────────
     if holdings:
-        _render_valuation_debug(_val)
-
-    # ── Edit / Delete Holding ─────────────────────────────────────────────────
-    st.divider()
-    st.subheader("🖊️ Edit / Delete Holding")
-    with st.container():
-        if not holdings:
-            st.info("No holdings yet — add one above.", icon="ℹ️")
-        else:
-            _ed_tickers = sorted(holdings.keys())
-
-            _ed_sel = st.selectbox(
-                "Select holding to edit or delete",
-                options=_ed_tickers,
-                key="ed_sel",
-                format_func=lambda t: f"{t}  —  {holdings[t].company_name}",
-            )
-            # Always read the CURRENT holding from storage (never defaults to first)
-            _ed_h = holdings[_ed_sel]
-
-            def _idx(lst: list, val, default: int = 0) -> int:
-                try:
-                    return lst.index(val)
-                except ValueError:
-                    return default
-
-            # ── Edit form  (ticker-keyed widget keys eliminate stale-state bugs)
-            st.markdown("##### Edit fields")
-            with st.form(f"edit_holding_form_{_ed_sel}", clear_on_submit=False):
-                ef1, ef2 = st.columns(2)
-                with ef1:
-                    ed_ticker = st.text_input(
-                        "Ticker / Asset ID",
-                        value=_ed_sel,
-                        key=f"ed_tk_{_ed_sel}",
-                        help="Rename this holding by changing the ticker.",
-                    )
-                    ed_name = st.text_input(
-                        "Asset name",
-                        value=_ed_h.company_name,
-                        key=f"ed_name_{_ed_sel}",
-                    )
-                    ed_type = st.selectbox(
-                        "Asset type", ASSET_TYPES,
-                        index=_idx(ASSET_TYPES, getattr(_ed_h, "asset_type", "Stock")),
-                        key=f"ed_type_{_ed_sel}",
-                    )
-                    ed_market = st.selectbox(
-                        "Market", MARKETS,
-                        index=_idx(MARKETS, _ed_h.market),
-                        key=f"ed_mkt_{_ed_sel}",
-                    )
-                    ed_sector = st.selectbox(
-                        "Sector", DEFAULT_SECTORS,
-                        index=_idx(DEFAULT_SECTORS, _ed_h.sector),
-                        key=f"ed_sec_{_ed_sel}",
-                    )
-                with ef2:
-                    ed_currency = st.selectbox(
-                        "Currency", CURRENCIES,
-                        index=_idx(CURRENCIES, getattr(_ed_h, "currency", "USD")),
-                        key=f"ed_cur_{_ed_sel}",
-                    )
-                    ed_qty = st.number_input(
-                        "Quantity",
-                        value=float(_ed_h.quantity),
-                        min_value=0.0, step=1.0, format="%.4f",
-                        key=f"ed_qty_{_ed_sel}",
-                    )
-                    ed_cost = st.number_input(
-                        "Avg cost per unit",
-                        value=float(_ed_h.avg_cost),
-                        min_value=0.0, step=0.01, format="%.4f",
-                        key=f"ed_cost_{_ed_sel}",
-                    )
-                    ed_price = st.number_input(
-                        "Current price per unit",
-                        value=float(_ed_h.current_price),
-                        min_value=0.0, step=0.01, format="%.4f",
-                        key=f"ed_price_{_ed_sel}",
-                    )
-                    ed_psrc = st.selectbox(
-                        "Price source",
-                        ["yfinance", "manual"],
-                        index=0 if getattr(_ed_h, "price_source", "manual") == "yfinance" else 1,
-                        key=f"ed_psrc_{_ed_sel}",
-                    )
-                ed_notes = st.text_input(
-                    "Notes (optional)",
-                    value=getattr(_ed_h, "notes", ""),
-                    key=f"ed_notes_{_ed_sel}", max_chars=200,
-                )
-
-                if st.form_submit_button("💾 Save Changes", type="primary"):
-                    _errs = []
-                    ed_tk_clean = ed_ticker.strip().replace(" ", "_").upper()
-                    if not ed_tk_clean:
-                        _errs.append("Ticker / Asset ID cannot be empty.")
-                    if ed_qty < 0:
-                        _errs.append("Quantity must be ≥ 0.")
-                    if ed_cost < 0:
-                        _errs.append("Avg cost must be ≥ 0.")
-                    if ed_price < 0:
-                        _errs.append("Current price must be ≥ 0.")
-                    if _errs:
-                        for _e in _errs:
-                            st.error(_e)
-                    else:
-                        if ed_tk_clean != _ed_sel:
-                            soft_delete_holding(_ed_sel)
-                            # Clear ticker-specific keys for the old ticker
-                            for _sfx in ("tk", "name", "type", "mkt", "sec", "cur",
-                                         "qty", "cost", "price", "psrc", "notes"):
-                                st.session_state.pop(f"ed_{_sfx}_{_ed_sel}", None)
-                            st.session_state.pop("ed_sel", None)
-                        upsert_holding(
-                            ticker=ed_tk_clean,
-                            company_name=ed_name.strip() or ed_tk_clean,
-                            market=ed_market,
-                            sector=ed_sector,
-                            quantity=ed_qty,
-                            avg_cost=ed_cost,
-                            current_price=ed_price,
-                            asset_type=ed_type,
-                            currency=ed_currency,
-                            has_ticker=getattr(_ed_h, "has_ticker", True),
-                            sec_linked=getattr(_ed_h, "sec_linked", False),
-                            purchase_date=getattr(_ed_h, "purchase_date", ""),
-                            notes=ed_notes,
-                            price_source=ed_psrc,
-                            price_date=date.today().isoformat(),
-                        )
-                        st.toast(f"✅ {ed_tk_clean} updated.", icon="💾")
-                        st.rerun()
-
-            # ── Delete section ─────────────────────────────────────────────────
-            st.divider()
-            st.markdown("##### Delete this holding")
-            st.warning(
-                f"Removing **{_ed_sel}** will delete it from your portfolio. "
-                "A backup copy will be saved automatically.",
-                icon="⚠️",
-            )
-
-            _del_cb = st.checkbox(
-                "I understand this will remove this holding from my portfolio",
-                key=f"del_cb_{_ed_sel}",
-            )
-            _del_txt = st.text_input(
-                "Type the ticker exactly to confirm",
-                key=f"del_txt_{_ed_sel}",
-                placeholder=f"Type  {_ed_sel}  here",
-            )
-            _also_thesis = st.checkbox(
-                "Also delete research / thesis data for this ticker",
-                key=f"del_thesis_{_ed_sel}",
-                help=(
-                    "Removes the CoreThesis (investment thesis, risk matrix, "
-                    "scenarios) stored under this ticker. "
-                    "Watchlist analysis is not affected."
-                ),
-            )
-
-            _can_delete = (
-                _del_cb
-                and _del_txt.strip().upper() == _ed_sel.strip().upper()
-            )
-            if st.button(
-                f"🗑️ Confirm Delete — {_ed_sel}",
-                type="primary",
-                disabled=not _can_delete,
-                key=f"del_btn_{_ed_sel}",
-            ):
-                soft_delete_holding(_ed_sel)
-                if _also_thesis:
-                    try:
-                        from portfolio import delete_core_thesis
-                        delete_core_thesis(_ed_sel)
-                    except Exception:
-                        pass
-                st.success(
-                    f"✅ **{_ed_sel}** removed from Holdings. "
-                    "A backup was saved to deleted_holdings.json."
-                )
-                # Clear all ticker-specific keys for the deleted holding
-                for _sfx in ("tk", "name", "type", "mkt", "sec", "cur",
-                             "qty", "cost", "price", "psrc", "notes"):
-                    st.session_state.pop(f"ed_{_sfx}_{_ed_sel}", None)
-                for _sfx in ("cb", "txt", "thesis", "btn"):
-                    st.session_state.pop(f"del_{_sfx}_{_ed_sel}", None)
-                st.session_state.pop("ed_sel", None)
-                st.rerun()
-
+        _render_valuation_debug(None)
 
 def render_accounts_tab() -> None:
     """Investment Accounts — manage accounts and cash balances."""
