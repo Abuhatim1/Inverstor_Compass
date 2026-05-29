@@ -2133,15 +2133,6 @@ def render_holdings_tab() -> None:
             _ad_date = st.date_input("Opening date", value=date.today(), key="ahn_date")
         _ad_notes = st.text_input("Notes (optional)", max_chars=200, key="ahn_notes",
                                   placeholder="e.g. bought via Tadawul, rights issue…")
-        _ad_corr  = st.checkbox(
-            "Opening correction — skip cash debit",
-            key="ahn_corr",
-            help=(
-                "For historical entries and record fixes. "
-                "A BUY transaction is still created for FIFO history "
-                "but no cash is deducted from the account."
-            ),
-        )
 
         # ── Duplicate guard ───────────────────────────────────────────────────
         _ad_tk_clean = _ad_tk.strip().replace(" ", "_").upper()
@@ -2170,12 +2161,12 @@ def render_holdings_tab() -> None:
                 pass
 
         # Always show the cost calc row; add cash columns when account is linked
-        if _acct_bal is not None and not _ad_corr:
+        if _acct_bal is not None:
             _remaining  = _acct_bal - _ad_total_cost
             _cash_ok    = _remaining >= 0
             _rc1, _rc2, _rc3 = st.columns(3)
-            _rc1.metric("Opening Cost",    f"{_ad_total_cost:,.2f} {_ad_ccy}")
-            _rc2.metric("Account Cash",    f"{_acct_bal:,.2f} {_ad_ccy}")
+            _rc1.metric("Opening Cost",  f"{_ad_total_cost:,.2f} {_ad_ccy}")
+            _rc2.metric("Account Cash",  f"{_acct_bal:,.2f} {_ad_ccy}")
             _rc3.metric(
                 "Remaining Cash",
                 f"{_remaining:,.2f} {_ad_ccy}",
@@ -2185,15 +2176,14 @@ def render_holdings_tab() -> None:
             if not _cash_ok:
                 st.error("Insufficient cash balance.", icon="🚫")
         else:
-            st.caption(f"Opening cost: **{_ad_total_cost:,.2f} {_ad_ccy}**"
-                       + ("  ·  correction mode — no cash deducted" if _ad_corr else ""))
+            st.caption(f"Opening cost: **{_ad_total_cost:,.2f} {_ad_ccy}**")
 
         # ── Submit ────────────────────────────────────────────────────────────
         _xb1, _xb2 = st.columns(2)
         with _xb1:
             if st.button(
                 "✅ Open Position", type="primary", use_container_width=True,
-                disabled=(not _ad_tk_clean or _is_dup or (not _ad_corr and not _cash_ok)),
+                disabled=(not _ad_tk_clean or _is_dup or not _cash_ok),
                 key="ahn_submit",
             ):
                 try:
@@ -2229,8 +2219,8 @@ def render_holdings_tab() -> None:
                                 _ad_tk_clean, _ad_price,
                                 source="yfinance" if _yahoo_ok else "manual",
                             )
-                        # Debit cash (actual buy only)
-                        if not _ad_corr and _ad_aid:
+                        # Debit cash
+                        if _ad_aid:
                             try:
                                 _upd_cash(_ad_aid, -_ad_total_cost)
                             except Exception:

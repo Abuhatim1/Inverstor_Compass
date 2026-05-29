@@ -9,5 +9,27 @@
     "recorded_at": "2026-05-29T11:22:27.406434",
     "account_id": "5cc295b7",
     "fees": 0.0
+  },
+  {
+    "ticker": "AAPL",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 312.510009765625,
+    "date": "2026-05-29",
+    "notes": "",
+    "recorded_at": "2026-05-29T12:29:40.604675",
+    "account_id": "c38b4be4",
+    "fees": 0.0
+  },
+  {
+    "ticker": "AAPL",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 312.510009765625,
+    "date": "2026-05-29",
+    "notes": "",
+    "recorded_at": "2026-05-29T12:32:02.480703",
+    "account_id": "c38b4be4",
+    "fees": 0.0
   }
 ]

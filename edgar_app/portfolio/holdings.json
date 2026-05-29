@@ -158,5 +158,25 @@
     "price_source": "yfinance",
     "price_date": "2026-05-29",
     "default_account_id": ""
+  },
+  "AAPL": {
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "market": "US",
+    "sector": "Technology",
+    "quantity": 1.0,
+    "avg_cost": 312.510009765625,
+    "current_price": 312.510009765625,
+    "added_at": "2026-05-29",
+    "asset_type": "Stock",
+    "currency": "USD",
+    "has_ticker": true,
+    "sec_linked": true,
+    "cik": "",
+    "purchase_date": "",
+    "notes": "",
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   }
 }
