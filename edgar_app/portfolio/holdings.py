@@ -37,6 +37,24 @@ _HOLDINGS_FILE    = os.path.join(_DIR, "holdings.json")
 _TRANSACTIONS_FILE = os.path.join(_DIR, "transactions.json")
 
 
+# ── Ticker normalisation ───────────────────────────────────────────────────────
+
+def normalize_ticker(ticker: str) -> str:
+    """
+    Normalise a ticker symbol for consistent storage and lookup.
+
+    Rules applied:
+    · Strip whitespace.
+    · Saudi Exchange: replace the invalid .SE suffix with .SR
+      (Yahoo Finance uses .SR; .SE is the Stockholm exchange).
+      e.g. 2222.SE → 2222.SR, 1120.SE → 1120.SR
+    """
+    t = ticker.strip()
+    if t.upper().endswith(".SE"):
+        return t[:-3] + ".SR"
+    return t
+
+
 # ── Taxonomy constants ────────────────────────────────────────────────────────
 
 ASSET_TYPES: list[str] = [
@@ -344,7 +362,8 @@ def record_transaction(
     If error_message is not None, no state was changed.
     On SELL, also creates FIFO closed lots via closed_holdings.execute_sell_fifo.
     """
-    side = side.upper()
+    ticker    = normalize_ticker(ticker)
+    side      = side.upper()
     if side not in ("BUY", "SELL"):
         return None, None, f"Unknown transaction side: {side!r}"
     if quantity <= 0:
@@ -361,7 +380,8 @@ def record_transaction(
             return None, None, f"Cannot SELL {ticker} — no position held."
         if quantity > existing.quantity + 1e-9:
             return None, None, (
-                f"Cannot SELL {quantity} of {ticker} — only {existing.quantity} held."
+                f"Cannot sell {quantity:,.4f} of {ticker} — "
+                f"only {existing.quantity:,.4f} shares held."
             )
         # Run FIFO engine first (validation step — does not write)
         from .closed_holdings import execute_sell_fifo, append_closed_lots
@@ -373,6 +393,9 @@ def record_transaction(
             quantity=float(quantity), sell_price=float(price),
             sell_date=sell_date, account_id=_aid,
             fees=float(fees), notes=notes,
+            # Fallback for holdings not created via BUY transactions:
+            fallback_avg_cost=float(existing.avg_cost),
+            fallback_open_date=getattr(existing, "added_at", "") or sell_date,
         )
         if fifo_err:
             return None, None, fifo_err

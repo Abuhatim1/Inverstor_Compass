@@ -67,6 +67,7 @@ from .holdings import (
     Holding,
     Transaction,
     delete_holding,
+    normalize_ticker,
     soft_delete_holding,
     load_holdings,
     load_transactions,

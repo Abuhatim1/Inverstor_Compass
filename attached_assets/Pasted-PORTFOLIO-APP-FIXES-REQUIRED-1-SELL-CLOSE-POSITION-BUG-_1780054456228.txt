@@ -1,0 +1,271 @@
+PORTFOLIO APP FIXES REQUIRED
+
+1) SELL / CLOSE POSITION BUG
+
+The Sell form is broken.
+
+Current issue:
+The system shows:
+"Cannot sell xxxx shares... only 0 available"
+
+even when the holding clearly exists in the Holdings table.
+
+Required fix:
+- Holdings and transactions must use the same normalized ticker key.
+- Normalize Saudi tickers internally to .SR.
+- Prevent mismatches such as:
+  2222.SE
+  2222.SR
+
+These must never create separate positions.
+
+- Sell validation must calculate available shares from actual holdings.
+- Close Full Position must use the exact available quantity from holdings.
+
+Test case:
+Holding:
+Ticker = 2222.SR
+Qty = 7106
+Avg Cost = 24.9008
+
+Selling 2 shares must succeed.
+
+Close Full Position must sell all 7106 shares successfully.
+
+--------------------------------------------------
+
+2) SELL TRANSACTION MODES
+
+Support two modes:
+
+A) Actual Sell
+- Create sell transaction
+- Reduce holding quantity
+- Credit cash account
+- Apply fees
+- Update realized P&L
+
+B) Record Correction Only
+- Create correction transaction
+- Reduce holding quantity
+- DO NOT credit cash
+- DO NOT affect account cash balance
+- Update holdings only
+
+--------------------------------------------------
+
+3) BUY CASH VALIDATION
+
+Actual Buy:
+- Must verify available cash balance.
+- Reject purchase if cash is insufficient.
+
+Record Correction Buy:
+- Allow purchase without cash.
+- No cash movement.
+- Holdings update only.
+
+Logic:
+
+If Record Correction = FALSE
+    Check available cash
+Else
+    Skip cash validation
+
+--------------------------------------------------
+
+4) COMPANY NAME IN HOLDINGS TABLE
+
+Add Company Name column.
+
+Example:
+
+Company Name | Ticker | Qty | Avg Cost | Price | MV | P&L %
+
+instead of showing ticker only.
+
+--------------------------------------------------
+
+5) REMOVE INDIVIDUAL ASSET CARDS
+
+Current UI creates excessive scrolling.
+
+Remove asset cards completely.
+
+Main screen should show:
+
+- Holdings Table only
+
+When user clicks a row:
+- Open asset detail modal
+or
+- Open asset detail page
+
+Do not show large cards under the table.
+
+--------------------------------------------------
+
+6) TABLE-FIRST DESIGN
+
+Main Holdings table should contain:
+
+Company
+Ticker
+Quantity
+Average Cost
+Current Price
+Market Value
+P&L SAR
+P&L %
+Account
+Status
+Buy Button
+Sell Button
+Edit Button
+
+Everything should be manageable from the table.
+
+--------------------------------------------------
+
+7) MOBILE OPTIMIZATION
+
+Reduce vertical scrolling.
+
+Use:
+- Compact rows
+- Sticky header
+- Click row for details
+
+Avoid large cards and duplicated information.
+
+--------------------------------------------------
+
+8) LANDSCAPE MODE
+
+Add Landscape View toggle.
+
+Requirements:
+- Full-width table
+- Horizontal scrolling if needed
+- Show all columns clearly
+- Optimized for mobile landscape orientation
+
+--------------------------------------------------
+
+9) P&L STATUS INDICATOR
+
+Add status column.
+
+Green:
+Profit
+
+Red:
+Loss
+
+Gray:
+Break-even
+
+Display both:
+- Status indicator
+- P&L %
+
+--------------------------------------------------
+
+10) DATA INTEGRITY RULES
+
+After every Buy, Sell, Correction, Edit:
+
+Recalculate holdings from transaction history.
+
+Recalculate:
+- Quantity
+- Average cost
+- Market value
+- Realized P&L
+- Unrealized P&L
+
+Cash balance:
+- Update only for actual transactions.
+- Ignore correction transactions.
+
+Prevent negative shares.
+
+Do not allow selling more than available quantity.
+
+--------------------------------------------------
+
+11) REGRESSION TESTS
+
+Test #1
+Holding:
+2222.SR
+Qty = 7106
+
+Sell 2 shares
+
+Expected:
+Success
+
+Remaining:
+7104 shares
+
+--------------------------------------------------
+
+Test #2
+
+Holding:
+2222.SR
+Qty = 7106
+
+Close Full Position
+
+Expected:
+Success
+
+Remaining:
+0 shares
+
+--------------------------------------------------
+
+Test #3
+
+Cash:
+1,000 SAR
+
+Buy:
+2,000 SAR
+
+Record Correction = FALSE
+
+Expected:
+Rejected
+
+--------------------------------------------------
+
+Test #4
+
+Cash:
+1,000 SAR
+
+Buy:
+2,000 SAR
+
+Record Correction = TRUE
+
+Expected:
+Allowed
+No cash movement
+
+--------------------------------------------------
+
+Test #5
+
+Ticker stored as:
+2222.SE
+
+Holding lookup:
+2222.SR
+
+Expected:
+Same asset after normalization
+No duplicate positions

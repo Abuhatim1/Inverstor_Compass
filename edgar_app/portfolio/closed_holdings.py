@@ -254,9 +254,10 @@ class _BuyLot:
 
 def _build_fifo_queue(ticker: str) -> list[_BuyLot]:
     """Reconstruct remaining open buy lots by replaying transaction history (FIFO)."""
-    from .holdings import load_transactions
+    from .holdings import load_transactions, normalize_ticker
+    norm = normalize_ticker(ticker)
     txns = sorted(
-        [t for t in load_transactions() if t.ticker == ticker],
+        [t for t in load_transactions() if normalize_ticker(t.ticker) == norm],
         key=lambda t: (t.date, t.recorded_at),
     )
     queue: list[_BuyLot] = []
@@ -277,27 +278,50 @@ def _build_fifo_queue(ticker: str) -> list[_BuyLot]:
 
 
 def execute_sell_fifo(
-    ticker:       str,
-    company_name: str,
-    currency:     str,
-    quantity:     float,
-    sell_price:   float,
-    sell_date:    str,
-    account_id:   str   = "",
-    fees:         float = 0.0,
-    notes:        str   = "",
-    sell_txn_id:  str   = "",
+    ticker:             str,
+    company_name:       str,
+    currency:           str,
+    quantity:           float,
+    sell_price:         float,
+    sell_date:          str,
+    account_id:         str   = "",
+    fees:               float = 0.0,
+    notes:              str   = "",
+    sell_txn_id:        str   = "",
+    # Fallback for holdings added via upsert (no BUY transaction history)
+    fallback_avg_cost:  float = 0.0,
+    fallback_open_date: str   = "",
 ) -> tuple[list[ClosedLot], str | None]:
     """
     Match *quantity* against the FIFO queue and return (lots, error).
     Does NOT write anything — caller persists after confirming holding update.
+
+    If the FIFO queue (rebuilt from transaction history) has fewer shares than
+    requested — e.g. the holding was added directly via upsert_holding() rather
+    than through a BUY transaction — the gap is filled with a synthetic lot at
+    *fallback_avg_cost* so the sell can always succeed as long as the holding
+    record itself confirms sufficient shares exist.
     """
     if quantity <= 0:
         return [], "Sell quantity must be > 0."
     queue     = _build_fifo_queue(ticker)
     available = sum(l.quantity for l in queue)
+
+    # Fill the gap with a synthetic fallback lot (holding avg cost)
+    gap = quantity - available
+    if gap > 1e-9 and fallback_avg_cost > 0:
+        queue.append(_BuyLot(
+            quantity=gap,
+            price=fallback_avg_cost,
+            open_date=fallback_open_date or sell_date,
+        ))
+        available += gap
+
     if available < quantity - 1e-9:
-        return [], f"Cannot sell {quantity:.4f} of {ticker}: only {available:.4f} available."
+        return [], (
+            f"Cannot sell {quantity:.4f} of {ticker}: "
+            f"only {available:.4f} available in transaction history."
+        )
 
     lots: list[ClosedLot] = []
     remaining = quantity

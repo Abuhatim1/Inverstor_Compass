@@ -1,0 +1,13 @@
+[
+  {
+    "ticker": "2222.SE",
+    "side": "BUY",
+    "quantity": 2.0,
+    "price": 27.899999618530273,
+    "date": "2026-05-29",
+    "notes": "",
+    "recorded_at": "2026-05-29T11:22:27.406434",
+    "account_id": "5cc295b7",
+    "fees": 0.0
+  }
+]

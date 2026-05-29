@@ -1830,55 +1830,59 @@ def render_holdings_tab() -> None:
             if last_ref:
                 st.caption(f"Last updated: {last_ref}")
 
-        # ── Build the display table ────────────────────────────────────────────
-        _mv_col = f"MV ({_base_ccy})"
-        rows = []
+        # ── Build the holdings table ───────────────────────────────────────────
+        _mv_col       = f"MV ({_base_ccy})"
+        rows          = []
+        _ticker_order: list[str] = []
         manual_tickers: list[str] = []
 
         for ticker, h in sorted(holdings.items()):
             has_tk  = getattr(h, "has_ticker", True)
-            p_src   = getattr(h, "price_source", "manual")
             ccy     = getattr(h, "currency", "USD")
             fx_r    = _fx.get(ccy)
             fx_rate = fx_r.rate if fx_r else 1.0
             mv_base = round(h.market_value * fx_rate, 2)
+            pnl_pct = h.unrealized_pnl_pct
+            status  = "🟢" if pnl_pct > 0.01 else ("🔴" if pnl_pct < -0.01 else "⚪")
 
-            # Check session cache for price freshness (use normalized key)
             norm_tk = _normalize_ticker(ticker)
             md = live_cache.get(norm_tk) or live_cache.get(ticker)
-
-            # Inline note — small, non-blocking
-            if ticker.upper().endswith(".SE"):
-                note = f"⚠️ Try {ticker[:-3]}.SR"
-            elif not has_tk:
-                note = "📝 manual"
-            elif md and not md.is_ok:
-                note = "⚠️ unavailable — using stored"
-            else:
-                note = ""
-
-            src_label = "Yahoo Finance" if has_tk else "Manual"
 
             if not has_tk:
                 manual_tickers.append(ticker)
 
+            _ticker_order.append(ticker)
             rows.append({
+                " ":        status,
+                "Company":  h.company_name or ticker,
                 "Ticker":   ticker,
                 "Qty":      round(h.quantity, 4),
                 "Avg Cost": round(h.avg_cost, 4),
                 "Price":    round(h.current_price, 4),
                 _mv_col:    mv_base,
-                "P&L %":    round(h.unrealized_pnl_pct, 2),
-                "Currency": ccy,
-                "Source":   src_label,
-                "Note":     note,
+                "P&L %":    round(pnl_pct, 2),
+                "CCY":      ccy,
             })
 
-        st.dataframe(
+        _tbl_sel = st.dataframe(
             pd.DataFrame(rows),
             hide_index=True,
             use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            column_config={
+                " ":        st.column_config.TextColumn(" ", width="small"),
+                "Company":  st.column_config.TextColumn("Company"),
+                "Ticker":   st.column_config.TextColumn("Ticker", width="small"),
+                "Qty":      st.column_config.NumberColumn("Qty",      format="%.4f"),
+                "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%.4f"),
+                "Price":    st.column_config.NumberColumn("Price",    format="%.4f"),
+                _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.0f"),
+                "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
+                "CCY":      st.column_config.TextColumn("CCY",        width="small"),
+            },
         )
+        st.caption("👆 Tap a row to select it, then use the action bar  ·  🟢 profit  🔴 loss  ⚪ flat")
 
         # Warn about any .SE tickers needing normalization
         se_tickers = [t for t in holdings if t.upper().endswith(".SE")]
@@ -1922,9 +1926,10 @@ def render_holdings_tab() -> None:
                                 st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
 
-    # ── Per-holding cards + modal dialogs ────────────────────────────────────
+    # ── Dialogs + action bar ─────────────────────────────────────────────────
     if holdings:
         from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
+        from portfolio.accounts import load_accounts as _load_accts_raw, update_account_cash as _upd_cash
 
         def _acct_pairs_for(currency: str | None = None):
             """Return [(account_id, Account)] for active accounts. Never raises."""
@@ -1936,13 +1941,13 @@ def render_holdings_tab() -> None:
         # ── Dialog: Buy More ─────────────────────────────────────────────────
         @st.dialog("➕ Buy More")
         def _dlg_buy(dlg_ticker: str, dlg_h):
-            _d_ccy = getattr(dlg_h, "currency", "USD")
+            _d_ccy   = getattr(dlg_h, "currency", "USD")
             _d_pairs = _acct_pairs_for()
             _d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _d_pairs]
             _d_ids    = [""] + [aid for aid, _ in _d_pairs]
             st.caption(
                 f"**{dlg_ticker}** · {dlg_h.company_name}  "
-                f"| {dlg_h.quantity:.4f} shares @ avg {dlg_h.avg_cost:.4f} {_d_ccy}"
+                f"| {dlg_h.quantity:,.4f} shares @ avg {dlg_h.avg_cost:.4f} {_d_ccy}"
             )
             if not _d_pairs:
                 st.info("No active accounts — transaction recorded without account link.")
@@ -1959,15 +1964,50 @@ def render_holdings_tab() -> None:
             _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f")
             _d_date  = st.date_input("Trade date", value=None)
             _d_notes = st.text_input("Notes", max_chars=200)
-            _d_corr  = st.checkbox("Record correction only (no cash debit)")
-            st.caption(
-                f"Est. new avg cost after buy: "
-                f"**{((dlg_h.avg_cost * dlg_h.quantity) + (_d_price * _d_qty)) / (dlg_h.quantity + _d_qty):.4f}**"
-                if (dlg_h.quantity + _d_qty) > 0 else ""
+            _d_corr  = st.checkbox(
+                "Record correction only — skip cash debit",
+                help="Use this to adjust the holding without moving any account cash.",
             )
+            _d_aid = _d_ids[_d_acct]
+            _d_total_cost = float(_d_qty) * float(_d_price) + float(_d_fees)
+            # Cash check (actual buy only)
+            if not _d_corr and _d_aid:
+                try:
+                    _ck_accts = _load_accts_raw()
+                    _ck_bal   = _ck_accts[_d_aid].cash_balance if _d_aid in _ck_accts else None
+                    if _ck_bal is not None:
+                        _ck_icon = "🟢" if _ck_bal >= _d_total_cost else "🔴"
+                        st.caption(
+                            f"{_ck_icon} Account cash: **{_ck_bal:,.2f} {_d_ccy}**  "
+                            f"· Cost: **{_d_total_cost:,.2f} {_d_ccy}**"
+                        )
+                        if _ck_bal < _d_total_cost:
+                            st.warning(
+                                f"Insufficient cash — available {_ck_bal:,.2f}, "
+                                f"needed {_d_total_cost:,.2f} {_d_ccy}. "
+                                "Tick 'Record correction only' to bypass.",
+                                icon="⚠️",
+                            )
+                except Exception:
+                    pass
+            # New avg cost preview
+            if (dlg_h.quantity + _d_qty) > 0:
+                _new_avg = ((dlg_h.avg_cost * dlg_h.quantity) + (_d_price * _d_qty)) / (dlg_h.quantity + _d_qty)
+                st.caption(f"Est. new avg cost: **{_new_avg:.4f} {_d_ccy}**")
             _db1, _db2 = st.columns(2)
             with _db1:
-                if st.button("✅ Confirm Buy", type="primary", use_container_width=True):
+                # Block actual buy if cash is insufficient
+                _cash_ok = True
+                if not _d_corr and _d_aid:
+                    try:
+                        _ck_accts2 = _load_accts_raw()
+                        _ck_bal2   = _ck_accts2[_d_aid].cash_balance if _d_aid in _ck_accts2 else None
+                        if _ck_bal2 is not None and _ck_bal2 < _d_total_cost:
+                            _cash_ok = False
+                    except Exception:
+                        pass
+                if st.button("✅ Confirm Buy", type="primary", use_container_width=True,
+                             disabled=not _cash_ok):
                     try:
                         _t, _h2, _e = record_transaction(
                             ticker=dlg_ticker, side="BUY",
@@ -1979,14 +2019,19 @@ def render_holdings_tab() -> None:
                             asset_type=getattr(dlg_h, "asset_type", "Stock"),
                             currency=_d_ccy,
                             has_ticker=getattr(dlg_h, "has_ticker", True),
-                            account_id=_d_ids[_d_acct], fees=float(_d_fees),
+                            account_id=_d_aid, fees=float(_d_fees),
                         )
                         if _e:
                             st.error(_e)
                         else:
+                            if not _d_corr and _d_aid:
+                                try:
+                                    _upd_cash(_d_aid, -_d_total_cost)
+                                except Exception:
+                                    pass
                             st.toast(
-                                f"Bought {_d_qty:.4f} × {dlg_ticker} @ {_d_price:.4f} · "
-                                f"New avg cost: {_h2.avg_cost:.4f}",
+                                f"Bought {_d_qty:.4f} × {dlg_ticker} @ {_d_price:.4f}  "
+                                f"· New avg cost: {_h2.avg_cost:.4f}",
                                 icon="✅",
                             )
                             st.rerun()
@@ -2006,19 +2051,18 @@ def render_holdings_tab() -> None:
             _d_ids    = [""] + [aid for aid, _ in _d_pairs]
             st.caption(
                 f"**{dlg_ticker}** · {dlg_h.company_name}  "
-                f"| {_d_avail:.4f} available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
+                f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
             )
             _d_full = st.checkbox("Close full position", value=True)
-            _d_qty  = (
-                _d_avail if _d_full
-                else st.number_input(
+            if _d_full:
+                _d_qty = _d_avail
+                st.info(f"Will sell all {_d_avail:,.4f} shares.")
+            else:
+                _d_qty = st.number_input(
                     "Qty to sell",
                     min_value=0.0001, max_value=_d_avail + 0.0001,
-                    value=_d_avail, step=1.0, format="%.4f",
+                    value=min(1.0, _d_avail), step=1.0, format="%.4f",
                 )
-            )
-            if _d_full:
-                st.info(f"Will sell all {_d_avail:.4f} shares.")
             _d_price = st.number_input(
                 "Sale price / share",
                 value=float(dlg_h.current_price or dlg_h.avg_cost or 0.0),
@@ -2031,33 +2075,47 @@ def render_holdings_tab() -> None:
             _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f")
             _d_date  = st.date_input("Trade date", value=None)
             _d_notes = st.text_input("Notes", max_chars=200)
-            _d_corr  = st.checkbox("Record correction only (no cash credit)")
+            _d_corr  = st.checkbox(
+                "Record correction only — skip cash credit",
+                help="Use this to reduce the holding without crediting any account cash.",
+            )
             # P&L preview
-            _d_est_qty = _d_qty if isinstance(_d_qty, float) else float(_d_avail)
-            _d_pnl = (_d_price - dlg_h.avg_cost) * _d_est_qty if dlg_h.avg_cost else 0.0
-            _d_pct = (_d_pnl / (dlg_h.avg_cost * _d_est_qty) * 100.0) if dlg_h.avg_cost and _d_est_qty else 0.0
+            _sell_qty_preview = _d_avail if _d_full else float(_d_qty)
+            _d_pnl = (_d_price - dlg_h.avg_cost) * _sell_qty_preview if dlg_h.avg_cost else 0.0
+            _d_pct = (_d_pnl / (dlg_h.avg_cost * _sell_qty_preview) * 100.0) if dlg_h.avg_cost and _sell_qty_preview else 0.0
             _d_sign = "🟢" if _d_pnl >= 0 else "🔴"
-            st.info(f"{_d_sign} Est. realized P&L: **{_d_pnl:+,.2f} {_d_ccy}** ({_d_pct:+.2f}%)")
+            _d_proceeds = _sell_qty_preview * float(_d_price) - float(_d_fees)
+            st.info(
+                f"{_d_sign} Est. realized P&L: **{_d_pnl:+,.2f} {_d_ccy}** ({_d_pct:+.2f}%)  "
+                f"· Net proceeds: **{_d_proceeds:,.2f} {_d_ccy}**"
+            )
             _sb1, _sb2 = st.columns(2)
             with _sb1:
                 if st.button("✅ Confirm Sell", type="primary", use_container_width=True):
                     try:
-                        _sell_qty = _d_avail if _d_full else float(_d_qty)
+                        _final_qty = _d_avail if _d_full else float(_d_qty)
+                        _d_aid = _d_ids[_d_acct]
                         _t, _h2, _e = record_transaction(
                             ticker=dlg_ticker, side="SELL",
-                            quantity=_sell_qty, price=float(_d_price),
+                            quantity=_final_qty, price=float(_d_price),
                             txn_date=_d_date.isoformat() if _d_date else None,
                             notes=_d_notes,
-                            account_id=_d_ids[_d_acct], fees=float(_d_fees),
+                            account_id=_d_aid, fees=float(_d_fees),
                         )
                         if _e:
                             st.error(_e)
                         else:
-                            _rpnl = (_d_price - dlg_h.avg_cost) * _sell_qty
+                            if not _d_corr and _d_aid:
+                                try:
+                                    _proceeds = _final_qty * float(_d_price) - float(_d_fees)
+                                    _upd_cash(_d_aid, _proceeds)
+                                except Exception:
+                                    pass
+                            _rpnl = (_d_price - dlg_h.avg_cost) * _final_qty
                             _fully = _h2.quantity <= 1e-9
                             st.toast(
-                                f"{'Closed' if _fully else 'Sold'} {_sell_qty:.4f} × {dlg_ticker} "
-                                f"@ {_d_price:.4f} · P&L: {_rpnl:+,.2f} {_d_ccy}",
+                                f"{'Closed' if _fully else 'Sold'} {_final_qty:,.4f} × {dlg_ticker} "
+                                f"@ {_d_price:.4f}  · P&L: {_rpnl:+,.2f} {_d_ccy}",
                                 icon="✅",
                             )
                             st.rerun()
@@ -2071,7 +2129,7 @@ def render_holdings_tab() -> None:
         @st.dialog("✏️ Edit Holding")
         def _dlg_edit(dlg_ticker: str, dlg_h):
             st.caption(
-                f"**{dlg_ticker}** — direct correction. "
+                f"**{dlg_ticker}** — direct field correction.  "
                 "Transaction history is not affected."
             )
             _e_name  = st.text_input("Company name", value=dlg_h.company_name or "")
@@ -2112,12 +2170,12 @@ def render_holdings_tab() -> None:
         @st.dialog("🗑️ Delete Holding")
         def _dlg_delete(dlg_ticker: str, dlg_h):
             st.warning(
-                f"Remove **{dlg_ticker}** ({dlg_h.company_name}) from your holdings? "
+                f"Remove **{dlg_ticker}** ({dlg_h.company_name}) from your holdings?  "
                 "Transaction history is preserved. This only removes the active position.",
                 icon="⚠️",
             )
-            _conf_check = st.checkbox("I understand this action cannot be undone")
-            _conf_text  = st.text_input(f'Type **{dlg_ticker}** to confirm')
+            _conf_check = st.checkbox("I understand — this cannot be undone")
+            _conf_text  = st.text_input(f"Type  {dlg_ticker}  to confirm")
             _ready = _conf_check and _conf_text.strip().upper() == dlg_ticker.upper()
             _xb1, _xb2 = st.columns(2)
             with _xb1:
@@ -2135,70 +2193,39 @@ def render_holdings_tab() -> None:
                 if st.button("Cancel", use_container_width=True):
                     st.rerun()
 
-        # ── Compact holdings cards ────────────────────────────────────────────
-        st.divider()
-        st.markdown("#### 💼 Holdings")
-
-        for _ci, _card_ticker in enumerate(sorted(holdings.keys())):
-            _ch   = holdings[_card_ticker]
-            _ccy  = getattr(_ch, "currency", "USD")
-            _fx_r = _fx.get(_ccy)
-            _rate = _fx_r.rate if _fx_r else 1.0
-            _mv_b = round(_ch.market_value * _rate, 2)
-            _pnl_s = "🟢" if _ch.unrealized_pnl_pct >= 0 else "🔴"
-
-            with st.container(border=True):
-                # Row 1 — identity
-                _ri1, _ri2 = st.columns([3, 1])
-                with _ri1:
-                    st.markdown(f"**{_card_ticker}** · {_ch.company_name or ''}")
-                with _ri2:
-                    st.caption(f"`{_ccy}`")
-
-                # Row 2 — metrics
-                _rm1, _rm2, _rm3, _rm4 = st.columns(4)
-                with _rm1:
-                    _qf = f"{_ch.quantity:,.2f}" if _ch.quantity >= 1_000 else f"{_ch.quantity:.4f}"
-                    st.metric("Qty", _qf)
-                with _rm2:
-                    st.metric("Price", f"{_ch.current_price:,.2f}")
-                with _rm3:
-                    st.metric(f"MV ({_base_ccy})", f"{_mv_b:,.0f}")
-                with _rm4:
-                    st.metric(
-                        "P&L",
-                        f"{_pnl_s} {_ch.unrealized_pnl_pct:+.1f}%",
-                        delta=f"{_ch.unrealized_pnl:+,.0f}",
-                        delta_color="off",
-                    )
-
-                # Row 3 — action buttons (unique keys include index)
-                _ra1, _ra2, _ra3, _ra4 = st.columns(4)
-                with _ra1:
-                    if st.button(
-                        "➕ Buy", key=f"buy_btn_{_card_ticker}_{_ci}",
-                        use_container_width=True, help="Buy more shares",
-                    ):
-                        _dlg_buy(_card_ticker, _ch)
-                with _ra2:
-                    if st.button(
-                        "📤 Sell", key=f"sell_btn_{_card_ticker}_{_ci}",
-                        use_container_width=True, help="Sell or close position",
-                        disabled=(_ch.quantity <= 1e-9),
-                    ):
-                        _dlg_sell(_card_ticker, _ch)
-                with _ra3:
-                    if st.button(
-                        "✏️ Edit", key=f"edit_btn_{_card_ticker}_{_ci}",
-                        use_container_width=True, help="Edit / correct holding",
-                    ):
-                        _dlg_edit(_card_ticker, _ch)
-                with _ra4:
-                    if st.button(
-                        "🗑️ Del", key=f"del_btn_{_card_ticker}_{_ci}",
-                        use_container_width=True, help="Delete holding",
-                    ):
-                        _dlg_delete(_card_ticker, _ch)
+        # ── Action bar — shown when a table row is selected ───────────────────
+        _sel_rows = getattr(getattr(_tbl_sel, "selection", None), "rows", [])
+        if _sel_rows:
+            _si = _sel_rows[0]
+            _st = _ticker_order[_si] if _si < len(_ticker_order) else None
+            _sh = holdings.get(_st) if _st else None
+            if _st and _sh:
+                with st.container(border=True):
+                    _abar_info, _ab1, _ab2, _ab3, _ab4 = st.columns([3, 1, 1, 1, 1])
+                    with _abar_info:
+                        _ab_ccy = getattr(_sh, "currency", "USD")
+                        st.markdown(
+                            f"**{_st}** · {_sh.company_name}  "
+                            f"| {_sh.quantity:,.4f} shares · "
+                            f"{_sh.unrealized_pnl_pct:+.1f}%"
+                        )
+                    with _ab1:
+                        if st.button("➕ Buy", key="tbl_buy_btn",
+                                     use_container_width=True, type="primary"):
+                            _dlg_buy(_st, _sh)
+                    with _ab2:
+                        if st.button("📤 Sell", key="tbl_sell_btn",
+                                     use_container_width=True, type="primary",
+                                     disabled=(_sh.quantity <= 1e-9)):
+                            _dlg_sell(_st, _sh)
+                    with _ab3:
+                        if st.button("✏️ Edit", key="tbl_edit_btn",
+                                     use_container_width=True):
+                            _dlg_edit(_st, _sh)
+                    with _ab4:
+                        if st.button("🗑️ Del", key="tbl_del_btn",
+                                     use_container_width=True):
+                            _dlg_delete(_st, _sh)
 
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
