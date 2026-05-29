@@ -98,8 +98,9 @@ class Holding:
     cik:           str   = ""          # SEC CIK when sec_linked
     purchase_date: str   = ""          # ISO date, optional
     notes:         str   = ""          # free-text notes
-    price_source:  str   = "manual"    # "manual" | "yfinance" | "live"
-    price_date:    str   = ""          # ISO date of last price update
+    price_source:       str   = "manual"    # "manual" | "yfinance" | "live"
+    price_date:         str   = ""          # ISO date of last price update
+    default_account_id: str   = ""          # linked investment account (optional)
 
     # ── Derived metrics ───────────────────────────────────────────────────────
     @property
@@ -124,13 +125,15 @@ class Holding:
 @dataclass
 class Transaction:
     """One manual buy/sell record."""
-    ticker:    str
-    side:      str        # "BUY" | "SELL"
-    quantity:  float
-    price:     float
-    date:      str        # ISO date
-    notes:     str = ""
-    recorded_at: str = ""  # ISO timestamp
+    ticker:      str
+    side:        str        # "BUY" | "SELL"
+    quantity:    float
+    price:       float
+    date:        str        # ISO date
+    notes:       str  = ""
+    recorded_at: str  = ""  # ISO timestamp
+    account_id:  str  = ""  # linked investment account (optional)
+    fees:        float = 0.0  # broker/custody fees
 
 
 # ── Holdings persistence ──────────────────────────────────────────────────────

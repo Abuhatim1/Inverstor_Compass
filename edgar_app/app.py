@@ -2150,17 +2150,8 @@ def render_holdings_tab() -> None:
                 key="ed_sel",
                 format_func=lambda t: f"{t}  —  {holdings[t].company_name}",
             )
+            # Always read the CURRENT holding from storage (never defaults to first)
             _ed_h = holdings[_ed_sel]
-
-            # When the user picks a different holding, clear stale form values
-            # so the new holding's data fills in via the value= defaults.
-            _prev_ed = st.session_state.get("_ed_prev_sel")
-            if _prev_ed != _ed_sel:
-                for _k in ("ed_tk", "ed_name", "ed_type", "ed_mkt", "ed_sec",
-                           "ed_cur", "ed_qty", "ed_cost", "ed_price",
-                           "ed_psrc", "ed_notes"):
-                    st.session_state.pop(_k, None)
-                st.session_state["_ed_prev_sel"] = _ed_sel
 
             def _idx(lst: list, val, default: int = 0) -> int:
                 try:
@@ -2168,71 +2159,71 @@ def render_holdings_tab() -> None:
                 except ValueError:
                     return default
 
-            # ── Edit form ─────────────────────────────────────────────────
+            # ── Edit form  (ticker-keyed widget keys eliminate stale-state bugs)
             st.markdown("##### Edit fields")
-            with st.form("edit_holding_form", clear_on_submit=False):
+            with st.form(f"edit_holding_form_{_ed_sel}", clear_on_submit=False):
                 ef1, ef2 = st.columns(2)
                 with ef1:
                     ed_ticker = st.text_input(
                         "Ticker / Asset ID",
                         value=_ed_sel,
-                        key="ed_tk",
+                        key=f"ed_tk_{_ed_sel}",
                         help="Rename this holding by changing the ticker.",
                     )
                     ed_name = st.text_input(
                         "Asset name",
                         value=_ed_h.company_name,
-                        key="ed_name",
+                        key=f"ed_name_{_ed_sel}",
                     )
                     ed_type = st.selectbox(
                         "Asset type", ASSET_TYPES,
                         index=_idx(ASSET_TYPES, getattr(_ed_h, "asset_type", "Stock")),
-                        key="ed_type",
+                        key=f"ed_type_{_ed_sel}",
                     )
                     ed_market = st.selectbox(
                         "Market", MARKETS,
                         index=_idx(MARKETS, _ed_h.market),
-                        key="ed_mkt",
+                        key=f"ed_mkt_{_ed_sel}",
                     )
                     ed_sector = st.selectbox(
                         "Sector", DEFAULT_SECTORS,
                         index=_idx(DEFAULT_SECTORS, _ed_h.sector),
-                        key="ed_sec",
+                        key=f"ed_sec_{_ed_sel}",
                     )
                 with ef2:
                     ed_currency = st.selectbox(
                         "Currency", CURRENCIES,
                         index=_idx(CURRENCIES, getattr(_ed_h, "currency", "USD")),
-                        key="ed_cur",
+                        key=f"ed_cur_{_ed_sel}",
                     )
                     ed_qty = st.number_input(
                         "Quantity",
                         value=float(_ed_h.quantity),
                         min_value=0.0, step=1.0, format="%.4f",
-                        key="ed_qty",
+                        key=f"ed_qty_{_ed_sel}",
                     )
                     ed_cost = st.number_input(
                         "Avg cost per unit",
                         value=float(_ed_h.avg_cost),
                         min_value=0.0, step=0.01, format="%.4f",
-                        key="ed_cost",
+                        key=f"ed_cost_{_ed_sel}",
                     )
                     ed_price = st.number_input(
                         "Current price per unit",
                         value=float(_ed_h.current_price),
                         min_value=0.0, step=0.01, format="%.4f",
-                        key="ed_price",
+                        key=f"ed_price_{_ed_sel}",
                     )
                     ed_psrc = st.selectbox(
                         "Price source",
                         ["yfinance", "manual"],
                         index=0 if getattr(_ed_h, "price_source", "manual") == "yfinance" else 1,
-                        key="ed_psrc",
+                        key=f"ed_psrc_{_ed_sel}",
                     )
                 ed_notes = st.text_input(
                     "Notes (optional)",
                     value=getattr(_ed_h, "notes", ""),
-                    key="ed_notes", max_chars=200,
+                    key=f"ed_notes_{_ed_sel}", max_chars=200,
                 )
 
                 if st.form_submit_button("💾 Save Changes", type="primary"):
@@ -2250,11 +2241,13 @@ def render_holdings_tab() -> None:
                         for _e in _errs:
                             st.error(_e)
                     else:
-                        # Ticker rename — soft-delete old key first
                         if ed_tk_clean != _ed_sel:
                             soft_delete_holding(_ed_sel)
+                            # Clear ticker-specific keys for the old ticker
+                            for _sfx in ("tk", "name", "type", "mkt", "sec", "cur",
+                                         "qty", "cost", "price", "psrc", "notes"):
+                                st.session_state.pop(f"ed_{_sfx}_{_ed_sel}", None)
                             st.session_state.pop("ed_sel", None)
-                            st.session_state.pop("_ed_prev_sel", None)
                         upsert_holding(
                             ticker=ed_tk_clean,
                             company_name=ed_name.strip() or ed_tk_clean,
@@ -2275,7 +2268,7 @@ def render_holdings_tab() -> None:
                         st.toast(f"✅ {ed_tk_clean} updated.", icon="💾")
                         st.rerun()
 
-            # ── Delete section ────────────────────────────────────────────
+            # ── Delete section ─────────────────────────────────────────────────
             st.divider()
             st.markdown("##### Delete this holding")
             st.warning(
@@ -2286,16 +2279,16 @@ def render_holdings_tab() -> None:
 
             _del_cb = st.checkbox(
                 "I understand this will remove this holding from my portfolio",
-                key="del_confirm_cb",
+                key=f"del_cb_{_ed_sel}",
             )
             _del_txt = st.text_input(
                 "Type the ticker exactly to confirm",
-                key="del_confirm_txt",
+                key=f"del_txt_{_ed_sel}",
                 placeholder=f"Type  {_ed_sel}  here",
             )
             _also_thesis = st.checkbox(
                 "Also delete research / thesis data for this ticker",
-                key="del_also_thesis",
+                key=f"del_thesis_{_ed_sel}",
                 help=(
                     "Removes the CoreThesis (investment thesis, risk matrix, "
                     "scenarios) stored under this ticker. "
@@ -2311,7 +2304,7 @@ def render_holdings_tab() -> None:
                 f"🗑️ Confirm Delete — {_ed_sel}",
                 type="primary",
                 disabled=not _can_delete,
-                key="del_confirm_btn",
+                key=f"del_btn_{_ed_sel}",
             ):
                 soft_delete_holding(_ed_sel)
                 if _also_thesis:
@@ -2324,95 +2317,455 @@ def render_holdings_tab() -> None:
                     f"✅ **{_ed_sel}** removed from Holdings. "
                     "A backup was saved to deleted_holdings.json."
                 )
-                for _k in ("del_confirm_cb", "del_confirm_txt",
-                           "del_also_thesis", "ed_sel", "_ed_prev_sel"):
-                    st.session_state.pop(_k, None)
+                # Clear all ticker-specific keys for the deleted holding
+                for _sfx in ("tk", "name", "type", "mkt", "sec", "cur",
+                             "qty", "cost", "price", "psrc", "notes"):
+                    st.session_state.pop(f"ed_{_sfx}_{_ed_sel}", None)
+                for _sfx in ("cb", "txt", "thesis", "btn"):
+                    st.session_state.pop(f"del_{_sfx}_{_ed_sel}", None)
+                st.session_state.pop("ed_sel", None)
                 st.rerun()
 
-    # ── Record Transaction form ───────────────────────────────────────────────
-    with st.expander("🔁 Record Buy / Sell Transaction", expanded=False):
-        with st.form("record_txn", clear_on_submit=True):
-            t1, t2 = st.columns(2)
-            with t1:
-                # Source ticker
-                all_tickers = sorted(set(holdings.keys()) | set(watchlist.keys()))
-                if all_tickers:
-                    txn_src = st.radio(
-                        "Source",
-                        options=["From Existing", "New Ticker"],
-                        horizontal=True,
-                        key="txn_src",
-                    )
-                    if txn_src == "From Existing":
-                        txn_ticker = st.selectbox("Ticker", options=all_tickers, key="txn_tk_sel")
-                    else:
-                        txn_ticker = st.text_input("Ticker", key="txn_tk_txt").strip().upper()
-                else:
-                    txn_ticker = st.text_input("Ticker", key="txn_tk_txt").strip().upper()
-                txn_side = st.radio("Side", options=["BUY", "SELL"], horizontal=True, key="txn_side")
-                txn_qty  = st.number_input("Quantity", min_value=0.0, step=1.0, key="txn_qty")
-                txn_price = st.number_input(
-                    "Price ($/share)", min_value=0.0, step=0.01, format="%.2f", key="txn_price",
-                )
-            with t2:
-                txn_date = st.date_input("Date", value=date.today(), key="txn_date")
-                txn_notes = st.text_area("Notes (optional)", key="txn_notes", height=80)
-                # Fields below only used if BUY creates a brand-new holding
-                new_h_market   = st.selectbox("Market (new only)", MARKETS, key="txn_mkt")
-                new_h_sector   = st.selectbox("Sector (new only)", DEFAULT_SECTORS, key="txn_sec")
-                new_h_type     = st.selectbox("Asset type (new only)", ASSET_TYPES, key="txn_type")
-                new_h_currency = st.selectbox("Currency (new only)", CURRENCIES, key="txn_cur")
-            if st.form_submit_button("🔁 Record transaction", type="primary"):
-                if not txn_ticker:
-                    st.error("Ticker is required.")
-                else:
-                    # Get company name from watchlist or existing holding if available
-                    company_name = ""
-                    if txn_ticker in watchlist:
-                        company_name = watchlist[txn_ticker].company_name
-                    elif txn_ticker in holdings:
-                        company_name = holdings[txn_ticker].company_name
-                    else:
-                        company_name = txn_ticker
 
-                    txn, updated, err = record_transaction(
-                        ticker=txn_ticker,
-                        side=txn_side,
-                        quantity=float(txn_qty),
-                        price=float(txn_price),
-                        txn_date=txn_date.isoformat(),
-                        notes=txn_notes,
-                        company_name=company_name,
-                        market=new_h_market,
-                        sector=new_h_sector,
-                        asset_type=new_h_type,
-                        currency=new_h_currency,
-                    )
-                    if err:
-                        st.error(err)
-                    else:
-                        st.toast(f"{txn_side} {txn_qty:g} {txn_ticker} @ ${txn_price:.2f} recorded",
-                                 icon="🔁")
+def render_accounts_tab() -> None:
+    """Investment Accounts — manage accounts and cash balances."""
+    from portfolio.accounts import (
+        load_accounts, upsert_account, update_account_cash,
+        account_display_name, ACCOUNT_TYPES,
+    )
+    from portfolio.cash_ledger import append_cash_entry
+    from portfolio import CURRENCIES
+    from fx_rates import get_rates_for_holdings
+    import pandas as pd
+    from datetime import date as _date_cls
+
+    st.header("💳 Accounts")
+    st.caption(
+        "Manage your investment accounts, bank accounts, and cash wallets. "
+        "Each account tracks its own cash balance independently."
+    )
+
+    accounts = load_accounts()
+    active   = {aid: a for aid, a in accounts.items() if a.active}
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    _ab_ccy = st.session_state.get("holdings_base_ccy", "SAR")
+    _ab_ccys = list({a.base_currency for a in active.values()})
+    _ab_fx   = get_rates_for_holdings(_ab_ccys, _ab_ccy) if _ab_ccys else {}
+    _total_cash = sum(
+        a.cash_balance * (_ab_fx[a.base_currency].rate if a.base_currency in _ab_fx else 1.0)
+        for a in active.values()
+    )
+
+    if accounts:
+        acm1, acm2, acm3 = st.columns(3)
+        acm1.metric("Active Accounts", len(active))
+        acm2.metric(f"Total Cash ({_ab_ccy})", f"{_total_cash:,.2f}")
+        acm3.metric("Currencies", len({a.base_currency for a in active.values()}))
+
+    # ── Account cards ─────────────────────────────────────────────────────────
+    if active:
+        st.subheader("📂 Your Accounts")
+        for aid, a in sorted(active.items(), key=lambda x: x[1].account_name):
+            with st.container(border=True):
+                ac1, ac2, ac3 = st.columns([3, 2, 2])
+                with ac1:
+                    st.markdown(f"**{a.account_name}**")
+                    if a.institution:
+                        st.caption(a.institution)
+                    st.caption(f"{a.account_type} · {a.base_currency}")
+                with ac2:
+                    st.metric(f"Cash ({a.base_currency})", f"{a.cash_balance:,.2f}")
+                with ac3:
+                    if st.button("+ Deposit",  key=f"dep_btn_{aid}"):
+                        st.session_state[f"dep_open_{aid}"] = not st.session_state.get(f"dep_open_{aid}", False)
+                    if st.button("− Withdraw", key=f"wdr_btn_{aid}"):
+                        st.session_state[f"wdr_open_{aid}"] = not st.session_state.get(f"wdr_open_{aid}", False)
+
+                if st.session_state.get(f"dep_open_{aid}"):
+                    with st.form(f"dep_form_{aid}"):
+                        _d1, _d2 = st.columns(2)
+                        with _d1:
+                            _d_amt  = st.number_input("Amount", min_value=0.01, step=100.0, format="%.2f")
+                            _d_dt   = st.date_input("Date", value=_date_cls.today())
+                        with _d2:
+                            _d_note = st.text_input("Note (optional)")
+                        if st.form_submit_button("✅ Confirm Deposit", type="primary"):
+                            update_account_cash(aid, _d_amt)
+                            append_cash_entry(
+                                account_id=aid, transaction_type="DEPOSIT",
+                                currency=a.base_currency, amount=_d_amt,
+                                notes=_d_note or "Manual deposit", entry_date=_d_dt.isoformat(),
+                            )
+                            st.session_state.pop(f"dep_open_{aid}", None)
+                            st.toast(f"Deposited {a.base_currency} {_d_amt:,.2f}", icon="💰")
+                            st.rerun()
+
+                if st.session_state.get(f"wdr_open_{aid}"):
+                    with st.form(f"wdr_form_{aid}"):
+                        _w1, _w2 = st.columns(2)
+                        with _w1:
+                            _w_amt  = st.number_input("Amount", min_value=0.01, step=100.0, format="%.2f")
+                            _w_dt   = st.date_input("Date", value=_date_cls.today())
+                        with _w2:
+                            _w_note = st.text_input("Note (optional)")
+                        if st.form_submit_button("✅ Confirm Withdrawal", type="primary"):
+                            update_account_cash(aid, -_w_amt)
+                            append_cash_entry(
+                                account_id=aid, transaction_type="WITHDRAWAL",
+                                currency=a.base_currency, amount=-_w_amt,
+                                notes=_w_note or "Manual withdrawal", entry_date=_w_dt.isoformat(),
+                            )
+                            st.session_state.pop(f"wdr_open_{aid}", None)
+                            st.toast(f"Withdrew {a.base_currency} {_w_amt:,.2f}", icon="💸")
+                            st.rerun()
+
+    elif not accounts:
+        st.info("No accounts yet — add your first account below.", icon="💡")
+
+    # ── Inactive accounts ─────────────────────────────────────────────────────
+    inactive = {aid: a for aid, a in accounts.items() if not a.active}
+    if inactive:
+        with st.expander(f"💤 Inactive Accounts ({len(inactive)})", expanded=False):
+            for aid, a in inactive.items():
+                ic1, ic2 = st.columns([4, 1])
+                ic1.caption(
+                    f"**{a.account_name}** · {a.institution or '—'} · "
+                    f"{a.base_currency} {a.cash_balance:,.2f}"
+                )
+                with ic2:
+                    if st.button("Reactivate", key=f"react_{aid}"):
+                        upsert_account(
+                            account_id=aid,
+                            account_name=a.account_name,
+                            institution=a.institution,
+                            account_type=a.account_type,
+                            base_currency=a.base_currency,
+                            notes=a.notes,
+                            active=True,
+                        )
                         st.rerun()
+
+    # ── Add Account form ──────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("➕ Add Account", expanded=not accounts):
+        with st.form("add_account_form"):
+            fa1, fa2 = st.columns(2)
+            with fa1:
+                na_name = st.text_input("Account name *", placeholder="e.g. Derayah USD")
+                na_inst = st.text_input("Institution",    placeholder="e.g. Derayah")
+                na_type = st.selectbox("Account type", ACCOUNT_TYPES)
+            with fa2:
+                na_ccy  = st.selectbox("Base currency", CURRENCIES)
+                na_bal  = st.number_input(
+                    "Opening cash balance", min_value=0.0, step=100.0, format="%.2f",
+                    help="Leave 0 to add cash via + Deposit later.",
+                )
+                na_note = st.text_input("Notes (optional)")
+            if st.form_submit_button("➕ Add Account", type="primary"):
+                if not na_name.strip():
+                    st.error("Account name is required.")
+                else:
+                    new_a = upsert_account(
+                        account_name  = na_name.strip(),
+                        institution   = na_inst.strip(),
+                        account_type  = na_type,
+                        base_currency = na_ccy,
+                        opening_cash  = na_bal,
+                        notes         = na_note.strip(),
+                    )
+                    if na_bal > 0:
+                        append_cash_entry(
+                            account_id=new_a.account_id,
+                            transaction_type="INITIAL_BALANCE",
+                            currency=na_ccy, amount=na_bal,
+                            notes="Opening balance",
+                        )
+                    st.toast(f"Account '{na_name}' created.", icon="✅")
+                    st.rerun()
+
+    # ── Edit / Deactivate ─────────────────────────────────────────────────────
+    if active:
+        st.divider()
+        with st.expander("✏️ Edit Account", expanded=False):
+            _ea_opts = {account_display_name(a): aid for aid, a in active.items()}
+            _ea_lbl  = st.selectbox("Select account to edit", list(_ea_opts.keys()))
+            _ea_id   = _ea_opts[_ea_lbl]
+            _ea      = active[_ea_id]
+            with st.form("edit_account_form"):
+                ee1, ee2 = st.columns(2)
+                with ee1:
+                    ea_name = st.text_input("Account name", value=_ea.account_name)
+                    ea_inst = st.text_input("Institution",  value=_ea.institution)
+                    ea_type = st.selectbox("Account type", ACCOUNT_TYPES,
+                                           index=ACCOUNT_TYPES.index(_ea.account_type)
+                                           if _ea.account_type in ACCOUNT_TYPES else 0)
+                with ee2:
+                    ea_ccy  = st.selectbox("Base currency", CURRENCIES,
+                                           index=CURRENCIES.index(_ea.base_currency)
+                                           if _ea.base_currency in CURRENCIES else 0)
+                    ea_note = st.text_input("Notes", value=_ea.notes)
+                    ea_act  = st.checkbox("Active", value=_ea.active)
+                ea_sub1, ea_sub2 = st.columns(2)
+                with ea_sub1:
+                    if st.form_submit_button("💾 Save", type="primary"):
+                        upsert_account(
+                            account_id=_ea_id,
+                            account_name=ea_name.strip() or _ea.account_name,
+                            institution=ea_inst.strip(),
+                            account_type=ea_type,
+                            base_currency=ea_ccy,
+                            notes=ea_note.strip(),
+                            active=ea_act,
+                        )
+                        st.toast("Account updated.", icon="💾")
+                        st.rerun()
+
+
+def render_transactions_tab() -> None:
+    """Buy / Sell transaction recording and full history."""
+    from portfolio import (
+        ASSET_TYPES, CURRENCIES, DEFAULT_SECTORS, MARKETS,
+        load_holdings, load_transactions, load_portfolio, record_transaction,
+    )
+    from portfolio.accounts import (
+        load_accounts, active_accounts, account_display_name,
+    )
+    from portfolio.cash_ledger import append_cash_entry
+    import pandas as pd
+    from datetime import date as _date_cls
+
+    st.header("🔁 Transactions")
+    st.caption(
+        "Record buy and sell transactions. "
+        "Cash is automatically debited / credited to the linked account."
+    )
+
+    holdings  = load_holdings()
+    watchlist = load_portfolio()
+    accounts  = load_accounts()
+    _act_accts = {aid: a for aid, a in accounts.items() if a.active}
+
+    # ── Record form ───────────────────────────────────────────────────────────
+    with st.expander("🔁 Record Buy / Sell", expanded=True):
+        tr1, tr2 = st.columns(2)
+        with tr1:
+            all_tickers = sorted(set(holdings.keys()) | set(watchlist.keys()))
+            if all_tickers:
+                _txn_src = st.radio("Source", ["From existing", "New ticker"],
+                                    horizontal=True, key="txn_tab_src")
+                if _txn_src == "From existing":
+                    txn_ticker = st.selectbox("Ticker", all_tickers, key="txn_tab_tk_sel")
+                else:
+                    txn_ticker = st.text_input("Ticker", key="txn_tab_tk_txt").strip().upper()
+            else:
+                txn_ticker = st.text_input("Ticker", key="txn_tab_tk_txt").strip().upper()
+
+            txn_side  = st.radio("Side", ["BUY", "SELL"], horizontal=True, key="txn_tab_side")
+            txn_qty   = st.number_input("Quantity",   min_value=0.0, step=1.0,         key="txn_tab_qty")
+            txn_price = st.number_input("Price/unit", min_value=0.0, step=0.01, format="%.4f", key="txn_tab_price")
+            txn_fees  = st.number_input(
+                "Fees", min_value=0.0, step=1.0, format="%.2f", key="txn_tab_fees",
+                help="Broker fees. 0 if none.",
+            )
+
+        with tr2:
+            txn_date  = st.date_input("Date", value=_date_cls.today(), key="txn_tab_date")
+            txn_notes = st.text_area("Notes (optional)", key="txn_tab_notes", height=70)
+
+            # Detect holding's currency for account filter
+            _h_ccy = "USD"
+            if txn_ticker and txn_ticker in holdings:
+                _h_ccy = getattr(holdings[txn_ticker], "currency", "USD")
+
+            # Account selector — filtered by currency
+            _matching = {aid: a for aid, a in _act_accts.items()
+                         if a.base_currency == _h_ccy}
+            _acct_opts = {"(none — skip cash tracking)": None}
+            _acct_opts.update({account_display_name(a): aid for aid, a in _matching.items()})
+
+            if _act_accts and not _matching:
+                st.warning(
+                    f"No active **{_h_ccy}** account found. "
+                    "Add one in the **💳 Accounts** tab.",
+                    icon="⚠️",
+                )
+            _acct_lbl = st.selectbox(
+                f"Account ({_h_ccy})", list(_acct_opts.keys()), key="txn_tab_acct",
+            )
+            txn_account_id = _acct_opts.get(_acct_lbl)
+
+            # Cash impact preview
+            if txn_qty > 0 and txn_price > 0:
+                _gross = txn_qty * txn_price
+                if txn_side == "BUY":
+                    st.info(f"Cash out: **{_h_ccy} {_gross + txn_fees:,.2f}**", icon="💸")
+                else:
+                    st.info(f"Cash in: **{_h_ccy} {_gross - txn_fees:,.2f}**",  icon="💰")
+
+            # Metadata for new holdings created by BUY
+            new_h_market   = st.selectbox("Market (new holding)", MARKETS,       key="txn_tab_mkt")
+            new_h_sector   = st.selectbox("Sector (new holding)", DEFAULT_SECTORS, key="txn_tab_sec")
+            new_h_type     = st.selectbox("Type   (new holding)", ASSET_TYPES,   key="txn_tab_type")
+            _ccy_idx = CURRENCIES.index(_h_ccy) if _h_ccy in CURRENCIES else 0
+            new_h_currency = st.selectbox("Currency (new holding)", CURRENCIES,
+                                          index=_ccy_idx, key="txn_tab_cur")
+
+        if st.button("🔁 Record transaction", type="primary", key="txn_tab_submit"):
+            if not txn_ticker:
+                st.error("Ticker is required.")
+            elif txn_qty <= 0:
+                st.error("Quantity must be > 0.")
+            else:
+                _cn = (
+                    watchlist[txn_ticker].company_name if txn_ticker in watchlist
+                    else holdings[txn_ticker].company_name if txn_ticker in holdings
+                    else txn_ticker
+                )
+                txn, updated, err = record_transaction(
+                    ticker=txn_ticker, side=txn_side,
+                    quantity=float(txn_qty), price=float(txn_price),
+                    txn_date=txn_date.isoformat(), notes=txn_notes,
+                    company_name=_cn, market=new_h_market, sector=new_h_sector,
+                    asset_type=new_h_type, currency=new_h_currency,
+                )
+                if err:
+                    st.error(err)
+                else:
+                    if txn_account_id:
+                        _gross2 = float(txn_qty) * float(txn_price)
+                        _net    = (-(_gross2 + txn_fees) if txn_side == "BUY"
+                                   else (_gross2 - txn_fees))
+                        append_cash_entry(
+                            account_id=txn_account_id,
+                            transaction_type=txn_side,
+                            currency=_h_ccy, amount=_net,
+                            linked_ticker=txn_ticker,
+                            notes=txn_notes or f"{txn_side} {txn_qty:g} @ {txn_price}",
+                            entry_date=txn_date.isoformat(),
+                        )
+                        if txn_fees > 0:
+                            append_cash_entry(
+                                account_id=txn_account_id,
+                                transaction_type="FEE",
+                                currency=_h_ccy, amount=-txn_fees,
+                                linked_ticker=txn_ticker,
+                                notes="Broker fee",
+                                entry_date=txn_date.isoformat(),
+                            )
+                        try:
+                            from portfolio.accounts import update_account_cash
+                            update_account_cash(txn_account_id, _net)
+                        except Exception:
+                            pass
+                    st.toast(f"{txn_side} {txn_qty:g} {txn_ticker} @ {txn_price:.4f} recorded",
+                             icon="🔁")
+                    st.rerun()
 
     # ── Transaction history ───────────────────────────────────────────────────
     txns = load_transactions()
     if txns:
         st.subheader("📜 Transaction History")
-        st.caption(f"{len(txns)} transaction(s) recorded. Most recent first.")
-        sorted_txns = sorted(txns, key=lambda t: (t.date, t.recorded_at), reverse=True)
-        txn_rows = [{
-            "Date":      t.date,
-            "Ticker":    t.ticker,
-            "Side":      t.side,
-            "Quantity":  t.quantity,
-            "Price":     round(t.price, 2),
-            "Value":     round(t.quantity * t.price, 2),
-            "Notes":     t.notes,
-        } for t in sorted_txns]
-        st.dataframe(pd.DataFrame(txn_rows), hide_index=True, use_container_width=True)
+        _sorted = sorted(txns, key=lambda t: (t.date, t.recorded_at), reverse=True)
+        _acct_names = {aid: a.account_name for aid, a in accounts.items()}
+        rows = [{
+            "Date":     t.date,
+            "Ticker":   t.ticker,
+            "Side":     t.side,
+            "Qty":      t.quantity,
+            "Price":    round(t.price, 4),
+            "Value":    round(t.quantity * t.price, 2),
+            "Fees":     getattr(t, "fees", 0.0),
+            "Account":  _acct_names.get(getattr(t, "account_id", ""), "—") or "—",
+            "Notes":    t.notes,
+        } for t in _sorted]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.caption(f"{len(txns)} transaction(s) total.")
     else:
-        st.caption("No transactions recorded yet.")
+        st.info("No transactions recorded yet.", icon="ℹ️")
+
+
+def render_cash_ledger_tab() -> None:
+    """Cash Ledger — full audit trail of all cash movements."""
+    from portfolio.cash_ledger import load_ledger, txn_icon, CASH_TXN_TYPES
+    from portfolio.accounts import load_accounts
+    import pandas as pd
+
+    st.header("💵 Cash Ledger")
+    st.caption("Complete history of cash movements across all accounts.")
+
+    accounts = load_accounts()
+    entries  = load_ledger()
+
+    if not entries:
+        st.info(
+            "No cash entries yet. "
+            "Record a transaction in **🔁 Transactions** or add an account in **💳 Accounts**.",
+            icon="💡",
+        )
+        return
+
+    # ── Filters ───────────────────────────────────────────────────────────────
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        _acct_opts = {"All accounts": None}
+        _acct_opts.update({
+            f"{a.account_name} ({a.base_currency})": aid
+            for aid, a in sorted(accounts.items(), key=lambda x: x[1].account_name)
+        })
+        _sel_acct = st.selectbox("Filter by account", list(_acct_opts.keys()), key="cl_acct")
+        _sel_aid  = _acct_opts[_sel_acct]
+    with fc2:
+        _type_opts = ["All types"] + CASH_TXN_TYPES
+        _sel_type  = st.selectbox("Filter by type", _type_opts, key="cl_type")
+
+    filtered = [
+        e for e in entries
+        if (_sel_aid is None or e.account_id == _sel_aid)
+        and (_sel_type == "All types" or e.transaction_type == _sel_type)
+    ]
+    filtered.sort(key=lambda e: (e.date, e.recorded_at), reverse=True)
+
+    if not filtered:
+        st.info("No entries match the current filters.", icon="ℹ️")
+        return
+
+    rows = []
+    for e in filtered:
+        _an = accounts[e.account_id].account_name if e.account_id in accounts else (e.account_id or "—")
+        rows.append({
+            "":         txn_icon(e.transaction_type),
+            "Date":     e.date,
+            "Account":  _an,
+            "Type":     e.transaction_type,
+            "Amount":   round(e.amount, 2),
+            "Ccy":      e.currency,
+            "Ticker":   e.linked_ticker or "—",
+            "Notes":    e.notes or "—",
+        })
+
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.caption(f"{len(filtered)} of {len(entries)} entries shown.")
+
+    # ── Running balance per account (if filtered) ─────────────────────────────
+    if _sel_aid and _sel_aid in accounts:
+        _acct_entries = sorted(
+            [e for e in entries if e.account_id == _sel_aid],
+            key=lambda e: (e.date, e.recorded_at),
+        )
+        running = 0.0
+        bal_rows = []
+        for e in _acct_entries:
+            running = round(running + e.amount, 8)
+            bal_rows.append({
+                "Date":    e.date,
+                "Type":    e.transaction_type,
+                "Amount":  round(e.amount, 2),
+                "Balance": running,
+                "Notes":   e.notes or "—",
+            })
+        with st.expander("📊 Running balance for this account", expanded=False):
+            st.dataframe(pd.DataFrame(bal_rows), hide_index=True, use_container_width=True)
 
 
 def render_thesis_memory_tab() -> None:
@@ -4072,9 +4425,13 @@ st.caption(
     "SEC filings · AI analysis · Portfolio state · Delta intelligence · Market prices"
 )
 
-(tab_holdings, tab_decisions, tab_risk, tab_command,
+(tab_holdings, tab_accounts, tab_transactions, tab_cash,
+ tab_decisions, tab_risk, tab_command,
  tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload) = st.tabs([
     "💼 Holdings",
+    "💳 Accounts",
+    "🔁 Transactions",
+    "💵 Cash Ledger",
     "🎯 Decision Queue",
     "🛡️ Portfolio Risk",
     "🧭 Command Center",
@@ -4087,6 +4444,15 @@ st.caption(
 
 with tab_holdings:
     render_holdings_tab()
+
+with tab_accounts:
+    render_accounts_tab()
+
+with tab_transactions:
+    render_transactions_tab()
+
+with tab_cash:
+    render_cash_ledger_tab()
 
 with tab_decisions:
     render_decision_queue_tab()

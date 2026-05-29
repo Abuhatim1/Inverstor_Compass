@@ -1,0 +1,174 @@
+Add Investment Accounts and Cash Ledger architecture.
+
+Problem:
+The app currently tracks holdings but does not track where cash comes from or where sale proceeds go. Portfolio must support multiple investment/bank accounts and currencies.
+
+Requirements:
+
+1. Add Investment Accounts module.
+
+Each account should include:
+- account_id
+- account_name
+- institution_name
+- account_type: Brokerage / Bank / Cash / Other
+- base_currency: SAR / USD / EUR / Other
+- opening_cash_balance
+- current_cash_balance
+- notes
+- active/inactive status
+
+2. Allow unlimited accounts.
+
+Examples:
+- Derayah USD Account
+- AlRajhi Tadawul SAR
+- SNB Investment SAR
+- IBKR USD
+- Cash SAR
+- Cash USD
+
+3. Add Accounts tab.
+
+Functions:
+- Add account
+- Edit account
+- Deactivate account
+- Add initial/default cash balance
+- View current cash balance by currency
+- View total cash by base portfolio currency
+
+4. Add Cash Ledger.
+
+Every cash movement must be stored:
+- date
+- account_id
+- transaction_type:
+  - INITIAL_BALANCE
+  - DEPOSIT
+  - WITHDRAWAL
+  - BUY
+  - SELL
+  - DIVIDEND
+  - FEE
+  - TRANSFER_IN
+  - TRANSFER_OUT
+  - FX_CONVERSION
+- currency
+- amount
+- fx_rate if applicable
+- linked_asset_ticker optional
+- notes
+
+5. Buy transaction workflow.
+
+When user records BUY:
+- user must select investment account
+- only accounts with same currency as the asset should be selectable
+- if no matching account exists, show:
+  "No matching account currency. Create account or change asset currency."
+- deduct cash from selected account:
+  cash impact = quantity * price + fees
+- do not allow negative cash unless user enables:
+  "Allow margin/negative cash"
+
+6. Sell transaction workflow.
+
+When user records SELL:
+- user must select account where proceeds go
+- only accounts with same currency as asset should be selectable
+- add cash to selected account:
+  proceeds = quantity * price - fees
+- reduce holding quantity
+- keep sell record in transaction history
+
+7. Asset-account link.
+
+Each holding should allow:
+- linked_account_id
+- currency must match account base currency
+- if asset currency changes, validate linked account again
+
+8. Cash transfer between accounts.
+
+Add transfer form:
+- from_account
+- to_account
+- amount
+- from_currency
+- to_currency
+- fx_rate
+- transfer_fee optional
+- transfer_date
+
+Rules:
+- If same currency:
+  transfer amount directly.
+- If different currencies:
+  require fx_rate.
+  converted_amount = amount * fx_rate.
+- deduct from source account.
+- add converted amount to destination account.
+- store both transfer legs in Cash Ledger.
+- show confirmation preview before save.
+
+9. FX handling.
+
+- Add default FX rates:
+  USD/SAR = 3.75
+  SAR/USD = 1 / 3.75
+- Allow manual FX override.
+- Later can integrate live FX.
+- Show warning when manual/default FX is used.
+
+10. Portfolio valuation.
+
+Portfolio total should include:
+- market value of holdings converted to portfolio base currency
+- plus cash balances converted to portfolio base currency
+
+Add:
+- Total holdings value
+- Total cash value
+- Total portfolio value
+- Cash allocation %
+- Invested allocation %
+
+11. Holdings tab update.
+
+Show for each holding:
+- linked account
+- asset currency
+- market value local
+- market value base currency
+- unrealized P&L local
+- unrealized P&L base currency
+
+12. Prevent inconsistent transactions.
+
+Validation:
+- cannot buy asset using account with different currency
+- cannot sell more quantity than owned
+- cannot transfer more cash than available unless negative cash enabled
+- cannot delete account if it has transactions, only deactivate it
+
+13. Data storage.
+
+Use JSON files for now:
+- accounts.json
+- cash_ledger.json
+- transactions.json
+- holdings.json
+
+14. UI.
+
+Add tabs:
+- Accounts
+- Cash Ledger
+- Holdings
+- Transactions
+
+Make Accounts visible near Holdings.
+
+15. Keep it lightweight and beginner-friendly.
+Do not add bank API integration yet.

@@ -96,7 +96,7 @@
   },
   "2222.SE": {
     "ticker": "2222.SE",
-    "company_name": "2222.SE",
+    "company_name": "Saudi Aramco",
     "market": "Saudi",
     "sector": "Energy",
     "quantity": 7104.0,
@@ -111,7 +111,7 @@
     "purchase_date": "2020-05-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-28"
+    "price_date": "2026-05-29"
   },
   "4164.SR": {
     "ticker": "4164.SR",

@@ -1,0 +1,299 @@
+Implement a complete Holdings, Asset Master, Accounts, Cash Ledger, and Transaction architecture fix.
+
+Current problems:
+1. Edit Holding form is not correctly bound to the selected ticker and sometimes shows the first asset’s values.
+2. Ticker/company/price fields are manually editable even when Yahoo Finance data exists.
+3. Ticker validation is a separate step. It should auto-resolve immediately.
+4. Holdings, transactions, watchlist, market intel, and filing search do not share one consistent asset identity layer.
+5. There are no investment accounts/cash balances.
+6. Buy/sell transactions are not linked to specific accounts.
+7. Sell transactions should remember the original buy account unless manually overridden.
+
+Build the following:
+
+A) Central Asset Master / Asset Resolver
+
+Create centralized asset_master.json and a shared function:
+
+resolve_asset(ticker_or_name)
+
+Return:
+- resolved_ticker
+- yahoo_available: True/False
+- company_name
+- asset_type
+- exchange
+- market
+- currency
+- current_price
+- price_source
+- last_updated
+- sec_available: True/False
+- cik if available
+- pricing_mode: Yahoo-linked / Manual-priced
+
+Behavior:
+1. When a ticker is entered or selected anywhere in the app, call resolve_asset automatically.
+2. Auto-fill company name, currency, current price, exchange, and market if Yahoo Finance is available.
+3. No separate Validate button required.
+4. If Yahoo Finance finds the asset:
+   - mark as Yahoo-linked
+   - make company name, current price, and currency read-only by default
+   - allow editing only behind checkbox: “Override market data manually”
+5. If Yahoo Finance does not find the asset:
+   - mark as Manual-priced
+   - allow manual company/asset name, price, currency, valuation date, and notes.
+6. Never block asset creation because Yahoo or SEC is unavailable.
+7. If yfinance is slow, timeout after 5 seconds.
+8. Do not freeze UI.
+9. Add Retry Market Data button only if resolution fails.
+10. SEC is optional:
+   - if SEC available, enable filings
+   - if SEC unavailable, show “SEC filings unavailable for this asset”
+11. Prevent duplicate asset records for same resolved_ticker + market.
+
+Apply this resolver to:
+- Add Holding
+- Edit Holding
+- Buy/Sell transactions
+- Research Watchlist
+- Market Intel ticker selector
+- Filing Search where applicable
+
+B) Fix Edit Holding Binding
+
+1. In Holdings tab, keep a clearly visible Edit/Delete Holding section.
+2. When user selects a ticker, load that exact holding from holdings storage.
+3. Do not default to the first holding.
+4. Form values must be keyed by selected ticker, e.g. edit_qty_{ticker}.
+5. When ticker selection changes, reload fields from that holding.
+6. Prevent stale session_state values from previous selections.
+7. Allow editing:
+   - ticker
+   - asset name
+   - market
+   - asset type
+   - sector
+   - currency
+   - quantity
+   - average cost
+   - current price
+   - price source
+   - linked account
+   - notes
+8. Delete holding must require:
+   - checkbox confirmation
+   - typing ticker exactly
+   - final Confirm Delete button
+9. Deleting holding removes only Actual Holdings.
+10. Do not delete Research Watchlist or Thesis data unless user explicitly selects that option.
+
+C) Investment Accounts Module
+
+Add unlimited investment/bank/cash accounts.
+
+Each account should include:
+- account_id
+- account_name
+- institution_name
+- account_type: Brokerage / Bank / Cash / Other
+- base_currency: SAR / USD / EUR / Other
+- opening_cash_balance
+- current_cash_balance
+- notes
+- active/inactive status
+
+Examples:
+- Derayah USD Account
+- AlRajhi Tadawul SAR
+- SNB Investment SAR
+- IBKR USD
+- Cash SAR
+- Cash USD
+
+Add Accounts tab with:
+- Add account
+- Edit account
+- Deactivate account
+- Add initial/default cash balance
+- View current cash balance by currency
+- View total cash converted to portfolio base currency
+
+D) Cash Ledger
+
+Create cash_ledger.json.
+
+Every cash movement must be stored:
+- date
+- account_id
+- transaction_type:
+  - INITIAL_BALANCE
+  - DEPOSIT
+  - WITHDRAWAL
+  - BUY
+  - SELL
+  - DIVIDEND
+  - FEE
+  - TRANSFER_IN
+  - TRANSFER_OUT
+  - FX_CONVERSION
+- currency
+- amount
+- fx_rate if applicable
+- linked_asset_ticker optional
+- notes
+
+E) Buy Transaction Workflow
+
+When recording BUY:
+1. Use resolve_asset automatically when ticker is entered.
+2. User selects investment account.
+3. Only accounts with same currency as the asset are selectable.
+4. If no matching account exists, show:
+   “No matching account currency. Create account or change asset currency.”
+5. Deduct cash from selected account:
+   cash impact = quantity * price + fees
+6. Do not allow negative cash unless user enables:
+   “Allow margin/negative cash”
+7. Save selected account_id:
+   - on the buy transaction
+   - as holding.default_account_id
+8. If holding does not exist, create it.
+9. If holding exists, update quantity and average cost.
+10. Keep transaction history.
+
+F) Sell Transaction Workflow
+
+When recording SELL:
+1. Auto-select holding.default_account_id.
+2. Show label:
+   “Default proceeds account from original buy”
+3. Allow override only if user checks:
+   “Use different account for this sale”
+4. If override is used, require reason/note:
+   - asset transferred to another broker
+   - manual correction
+   - proceeds received elsewhere
+5. Only accounts with same currency as asset are selectable.
+6. Add cash to selected account:
+   proceeds = quantity * price - fees
+7. Reduce holding quantity.
+8. Prevent selling more quantity than owned.
+9. Keep sell record in transaction history.
+10. If position becomes zero, keep it in history and optionally mark as closed.
+
+G) Holding Transfer Between Accounts
+
+Add simple action:
+“Transfer Holding Between Accounts”
+
+Fields:
+- ticker
+- quantity
+- from_account
+- to_account
+- transfer_date
+- notes
+
+Rules:
+1. Currency must match asset currency.
+2. Update linked account for that quantity.
+3. If partial holdings exist across multiple accounts, track sub-holdings by account.
+4. Sell should default to the account where quantity exists.
+5. If multiple accounts hold same ticker, user selects which account/lot to sell from.
+6. Prevent selling from an account that does not hold that asset quantity.
+7. Keep this lightweight; do not build full tax-lot accounting yet.
+
+H) Cash Transfer Between Accounts
+
+Add transfer form:
+- from_account
+- to_account
+- amount
+- from_currency
+- to_currency
+- fx_rate
+- transfer_fee optional
+- transfer_date
+
+Rules:
+1. If same currency:
+   - transfer amount directly.
+2. If different currencies:
+   - require fx_rate.
+   - converted_amount = amount * fx_rate.
+3. Deduct from source account.
+4. Add converted amount to destination account.
+5. Store both transfer legs in Cash Ledger.
+6. Show confirmation preview before saving.
+7. Prevent transfer more than available unless negative cash is enabled.
+
+I) FX Handling
+
+1. Add base portfolio currency setting:
+   - SAR
+   - USD
+Default: SAR
+
+2. Add default FX:
+   - USD/SAR = 3.75
+   - SAR/USD = 1/3.75
+
+3. Allow manual FX override.
+4. Try live FX if available through yfinance.
+5. Show warning when manual/default FX is used.
+6. Portfolio total must not add mixed currencies directly.
+
+J) Portfolio Valuation
+
+Portfolio total should include:
+- holdings market value converted to portfolio base currency
+- plus cash balances converted to portfolio base currency
+
+Show:
+- Total holdings value
+- Total cash value
+- Total portfolio value
+- Cash allocation %
+- Invested allocation %
+- Market value local
+- Market value base currency
+- Unrealized P&L local
+- Unrealized P&L base currency
+- Portfolio weight using base currency only
+
+K) Data Storage
+
+Use JSON files for now:
+- asset_master.json
+- accounts.json
+- cash_ledger.json
+- transactions.json
+- holdings.json
+
+L) UI Changes
+
+Add or organize tabs near the front:
+1. Holdings
+2. Accounts
+3. Transactions
+4. Cash Ledger
+5. Decision Queue
+6. Portfolio Risk
+7. Command Center
+8. Research Watchlist
+9. Market Intel
+10. Filing Search
+
+Keep UI mobile-friendly.
+
+M) Safety and Stability
+
+1. Use safe fallbacks everywhere.
+2. Missing fields should show “Unknown”, not crash.
+3. If yfinance fails, continue in Manual-priced mode.
+4. If SEC fails, continue without SEC.
+5. Do not overwrite manually overridden fields unless user confirms.
+6. Keep implementation lightweight and beginner-friendly.
+7. Do not add bank API integration.
+8. Do not add broker API integration.
