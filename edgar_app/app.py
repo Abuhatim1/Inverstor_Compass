@@ -80,39 +80,112 @@ from portfolio import (
 st.set_page_config(
     page_title="بوصلة",
     page_icon="🧭",
-    layout="centered",
+    layout="wide",
 )
 
-# ── Brand / global-header CSS ─────────────────────────────────────────────────
+# ── Global CSS — brand bar, KPI strip, sticky header ──────────────────────────
 st.markdown(
     """
     <style>
-    /* Bidi / Arabic text */
+    /* ── Bidi / Arabic text ─────────────────────────────────────────────── */
     [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] div,
-    [data-testid="stMarkdownContainer"] span {
-        unicode-bidi: plaintext;
+    [data-testid="stMarkdownContainer"] span { unicode-bidi: plaintext; }
+
+    /* ── Page chrome ────────────────────────────────────────────────────── */
+    /* Reduce default Streamlit top padding — our header sits right at top  */
+    .block-container {
+        padding-top: 0.4rem !important;
+        padding-left: 2rem   !important;
+        padding-right: 2rem  !important;
     }
-    /* Tighten Streamlit's default top padding so the header sits high */
-    .block-container { padding-top: 0.6rem !important; }
-    /* Compact selectbox inside the header — remove bottom margin */
-    [data-testid="stSelectbox"] { margin-bottom: 0 !important; }
-    /* KPI label rows — no extra spacing */
-    .gh-kpi { padding-top: 4px; line-height: 1.15; }
+
+    /* ── Sticky global header ───────────────────────────────────────────── */
+    /* Targets the st.columns row that contains .bousala-appbar            */
+    [data-testid="stHorizontalBlock"]:has(.bousala-appbar) {
+        position: sticky !important;
+        top: 2.875rem !important;          /* sit below Streamlit toolbar   */
+        z-index: 999  !important;
+        background-color: #ffffff !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        padding-bottom: 6px  !important;
+        padding-top:    4px  !important;
+        /* Stretch edge-to-edge within the block-container  */
+        margin-left:  -2rem !important;
+        margin-right: -2rem !important;
+        padding-left:  2rem !important;
+        padding-right: 2rem !important;
+    }
+
+    /* ── Brand bar ──────────────────────────────────────────────────────── */
+    .bousala-appbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+        padding: 4px 0;
+    }
+    .bousala-appbar .ba-name {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0f172a;
+        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+        letter-spacing: 0.01em;
+        line-height: 1.2;
+    }
+    .bousala-appbar .ba-sub {
+        font-size: 0.62rem;
+        color: #94a3b8;
+        letter-spacing: 0.04em;
+        line-height: 1.4;
+    }
+
+    /* ── KPI strip ──────────────────────────────────────────────────────── */
+    .gh-kpi-row {
+        display: flex;
+        gap: 2.2rem;
+        align-items: flex-start;
+        flex-wrap: nowrap;          /* landscape: always one row            */
+        padding: 4px 0;
+    }
+    .gh-kpi { min-width: 0; }
     .gh-lbl {
-        font-size: 0.58rem; color: #9ca3af;
-        text-transform: uppercase; letter-spacing: 0.07em; line-height: 1.6;
+        font-size: 0.68rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        line-height: 1.6;
+        white-space: nowrap;
     }
-    .gh-big  { font-size: 1.4rem;  font-weight: 700; }
-    .gh-med  { font-size: 1.08rem; font-weight: 600; }
-    .gh-sm   { font-size: 0.92rem; font-weight: 600; }
-    .gh-xs   { font-size: 0.76rem; color: #6b7280; }
-    /* Responsive: on narrow screens shrink the big number */
-    @media (max-width: 640px) {
-        .gh-big { font-size: 1.1rem; }
-        .gh-med { font-size: 0.9rem; }
-        .gh-sm  { font-size: 0.8rem; }
+    /* Font hierarchy ── portfolio → P&L → cash → refresh */
+    .gh-val-big { font-size: 2rem;   font-weight: 700; line-height: 1.1; white-space: nowrap; }
+    .gh-val-med { font-size: 1.5rem; font-weight: 600; line-height: 1.1; white-space: nowrap; }
+    .gh-val-sm  { font-size: 1.25rem;font-weight: 600; line-height: 1.1; }
+    .gh-val-xs  { font-size: 1rem;   color: #6b7280;   line-height: 1.4; }
+    .gh-pct     { font-size: 0.82rem; font-weight: 500; }
+
+    /* Portrait / narrow screens: wrap KPIs into 2 rows max               */
+    @media (max-width: 700px) {
+        .gh-kpi-row {
+            flex-wrap: wrap;
+            gap: 0.9rem 1.8rem;
+        }
+        /* Row 1: Portfolio + P&L */
+        .gh-kpi:nth-child(1),
+        .gh-kpi:nth-child(2) { flex: 1 1 42%; }
+        /* Row 2: Cash + Refresh */
+        .gh-kpi:nth-child(3),
+        .gh-kpi:nth-child(4) { flex: 1 1 42%; }
+        /* Shrink font sizes proportionally */
+        .gh-val-big { font-size: 1.35rem; }
+        .gh-val-med { font-size: 1.05rem; }
+        .gh-val-sm  { font-size: 0.9rem; }
+        .gh-val-xs  { font-size: 0.82rem; }
     }
+
+    /* Compact selectbox — remove extra bottom margin inside header        */
+    [data-testid="stHorizontalBlock"]:has(.bousala-appbar)
+    [data-testid="stSelectbox"] { margin-bottom: 0 !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -5112,68 +5185,77 @@ def render_upload_tab() -> None:
 """)
 
 
-# ── Global compact header (brand bar + KPI strip, shown above every tab) ──────
+# ── Global header — brand (left) · KPIs (center) · controls (right) ──────────
 def render_global_header() -> str:
     """
-    Single-row app bar:
-      [SVG logo + بوصلة] | [Portfolio] | [P&L] | [Cash] | [Refresh] | [CCY▾] | [💱]
-    Returns the selected base currency.
+    Professional three-zone app bar rendered above all tabs.
+    LEFT : compass SVG + بوصلة المستثمر (inline, ~48 px logo)
+    CENTER: Portfolio · P&L · Cash · Refresh  — horizontal flex row
+    RIGHT : CCY selector + 💱 FX refresh button
+    Returns the selected base currency string.
+    Sticky behaviour via CSS  :has(.bousala-appbar) on the parent stHorizontalBlock.
     """
     from portfolio import load_holdings
     from portfolio.accounts import load_accounts as _gh_accts
     from fx_rates import get_rates_for_holdings, refresh_fx_rates
     from portfolio.valuation import calculate_portfolio_valuation
 
-    # ── Minimal compass SVG with $ needle ─────────────────────────────────
+    # ── Compass SVG — 48 × 48 px, two-tone needle, $ centre ──────────────
     _SVG = (
-        '<svg viewBox="0 0 32 32" width="26" height="26" xmlns="http://www.w3.org/2000/svg">'
-        '<circle cx="16" cy="16" r="13.5" fill="none" stroke="#334155" stroke-width="1.4"/>'
-        '<line x1="16" y1="3.5"  x2="16" y2="7"    stroke="#334155" stroke-width="1.6" stroke-linecap="round"/>'
-        '<line x1="16" y1="25"   x2="16" y2="28.5" stroke="#334155" stroke-width="1.0" stroke-linecap="round"/>'
-        '<line x1="3.5"  y1="16" x2="7"    y2="16" stroke="#334155" stroke-width="1.0" stroke-linecap="round"/>'
-        '<line x1="25"   y1="16" x2="28.5" y2="16" stroke="#334155" stroke-width="1.0" stroke-linecap="round"/>'
-        '<polygon points="16,6 18.2,15.5 16,18.5 13.8,15.5" fill="#0ea5e9"/>'
-        '<polygon points="16,26 18.2,16.5 16,13.5 13.8,16.5" fill="#f43f5e"/>'
-        '<circle cx="16" cy="16" r="3.8" fill="white" stroke="#334155" stroke-width="0.7"/>'
-        '<text x="16" y="16" font-size="5" font-family="Arial,sans-serif" font-weight="bold" '
-        'text-anchor="middle" dominant-baseline="central" fill="#334155">$</text>'
+        '<svg viewBox="0 0 32 32" width="48" height="48"'
+        ' xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">'
+        '<circle cx="16" cy="16" r="13.5"'
+        ' fill="none" stroke="#334155" stroke-width="1.3"/>'
+        # Cardinal tick marks (N bold, others thin)
+        '<line x1="16" y1="3.2" x2="16" y2="7"'
+        ' stroke="#334155" stroke-width="2" stroke-linecap="round"/>'
+        '<line x1="16" y1="25" x2="16" y2="28.8"'
+        ' stroke="#334155" stroke-width="1" stroke-linecap="round"/>'
+        '<line x1="3.2" y1="16" x2="7" y2="16"'
+        ' stroke="#334155" stroke-width="1" stroke-linecap="round"/>'
+        '<line x1="25" y1="16" x2="28.8" y2="16"'
+        ' stroke="#334155" stroke-width="1" stroke-linecap="round"/>'
+        # Needle: north = sky-blue, south = rose
+        '<polygon points="16,5.5 18.5,15.5 16,18.8 13.5,15.5" fill="#0ea5e9"/>'
+        '<polygon points="16,26.5 18.5,16.5 16,13.2 13.5,16.5" fill="#f43f5e"/>'
+        # Centre hub + $ symbol
+        '<circle cx="16" cy="16" r="4"'
+        ' fill="white" stroke="#334155" stroke-width="0.8"/>'
+        '<text x="16" y="16" font-size="5.2" font-family="Arial,sans-serif"'
+        ' font-weight="bold" text-anchor="middle"'
+        ' dominant-baseline="central" fill="#334155">$</text>'
         '</svg>'
     )
+
+    # Brand block — carries marker class for sticky CSS selector
     _BRAND = (
-        f"<div style='display:flex;align-items:center;gap:7px;padding:2px 0 0 0'>"
-        f"  {_SVG}"
-        f"  <div style='line-height:1.25'>"
-        f"    <div style='font-size:0.92rem;font-weight:700;color:#0f172a;"
-        f"         letter-spacing:0.01em;font-family:Segoe UI,Tahoma,Arial,sans-serif'>"
-        f"بوصلة</div>"
-        f"    <div style='font-size:0.58rem;color:#94a3b8;letter-spacing:0.04em'>"
-        f"بوصلة المستثمر</div>"
-        f"  </div>"
-        f"</div>"
+        f'<div class="bousala-appbar">'
+        f'  {_SVG}'
+        f'  <div>'
+        f'    <div class="ba-name">بوصلة المستثمر</div>'
+        f'  </div>'
+        f'</div>'
     )
 
-    # 7 columns: brand | portfolio | P&L | cash | refresh | CCY select | FX btn
-    _cb, _cp, _cpl, _cca, _cr, _ccy, _cfx = st.columns(
-        [1.1, 1.65, 1.35, 0.82, 0.92, 0.62, 0.30]
-    )
+    # ── Three-zone columns ─────────────────────────────────────────────────
+    # LEFT brand | CENTER KPIs (most space) | RIGHT controls
+    _cL, _cM, _cR = st.columns([1.1, 5.5, 1.2])
 
-    # Brand (pure HTML — no Streamlit widget needed)
-    with _cb:
+    # LEFT — brand (pure HTML, no Streamlit widget)
+    with _cL:
         st.markdown(_BRAND, unsafe_allow_html=True)
 
-    # CCY selector first so its value is available for calculations below
-    with _ccy:
-        st.markdown("<div style='padding-top:2px'>", unsafe_allow_html=True)
+    # RIGHT — CCY selector first so its value is ready for valuation below
+    with _cR:
         _base_ccy = st.selectbox(
-            "CCY",
+            "Currency",
             options=["SAR", "USD", "EUR", "GBP"],
             key="global_base_ccy",
             label_visibility="collapsed",
             help="Base currency for all portfolio totals.",
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Compute valuation ──────────────────────────────────────────────────
+    # ── Compute portfolio valuation ────────────────────────────────────────
     _gh_hld  = load_holdings()
     _gh_ccys = list({getattr(h, "currency", "USD") for h in _gh_hld.values()}) if _gh_hld else []
     _gh_fx   = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
@@ -5183,65 +5265,62 @@ def render_global_header() -> str:
     _pc      = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
     _ps      = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
 
-    def _kpi(label: str, value_html: str) -> str:
-        return (
-            f"<div class='gh-kpi'>"
-            f"<div class='gh-lbl'>{label}</div>"
-            f"{value_html}"
-            f"</div>"
-        )
-
-    # ── Portfolio value (largest) ──────────────────────────────────────────
-    with _cp:
+    # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
+    with _cM:
         if _has:
-            st.markdown(_kpi(
-                f"Portfolio ({_base_ccy})",
-                f"<div class='gh-big'>{_gh_val.total_portfolio_value_base:,.0f}</div>",
-            ), unsafe_allow_html=True)
+            _pct_html = f'<span class="gh-pct">({_ps}{_gh_val.unrealized_pnl_pct:.1f}%)</span>'
+            st.markdown(
+                f'<div class="gh-kpi-row">'
+                # Portfolio value — largest
+                f'  <div class="gh-kpi">'
+                f'    <div class="gh-lbl">Portfolio ({_base_ccy})</div>'
+                f'    <div class="gh-val-big">{_gh_val.total_portfolio_value_base:,.0f}</div>'
+                f'  </div>'
+                # P&L — medium-large, coloured
+                f'  <div class="gh-kpi">'
+                f'    <div class="gh-lbl">Unrealized P&amp;L</div>'
+                f'    <div class="gh-val-med" style="color:{_pc}">'
+                f'      {_ps}{_gh_val.unrealized_pnl_base:,.0f} {_pct_html}'
+                f'    </div>'
+                f'  </div>'
+                # Cash — medium
+                f'  <div class="gh-kpi">'
+                f'    <div class="gh-lbl">Cash</div>'
+                f'    <div class="gh-val-sm">{_gh_val.cash_value_base:,.0f}</div>'
+                f'  </div>'
+                # Last refresh — small / muted
+                f'  <div class="gh-kpi">'
+                f'    <div class="gh-lbl">Refresh</div>'
+                f'    <div class="gh-val-xs">{_gh_ref}</div>'
+                f'  </div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
         else:
-            st.markdown(_kpi(
-                f"Portfolio ({_base_ccy})",
-                "<div class='gh-xs'>No holdings</div>",
-            ), unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="gh-kpi-row">'
+                f'  <div class="gh-kpi">'
+                f'    <div class="gh-lbl">Portfolio ({_base_ccy})</div>'
+                f'    <div class="gh-val-xs" style="color:#94a3b8;margin-top:4px">'
+                f'      No holdings yet — add one below</div>'
+                f'  </div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    # ── Unrealized P&L (medium-large, coloured) ───────────────────────────
-    with _cpl:
-        if _has:
-            _pct = f"<span style='font-size:0.72rem'>({_ps}{_gh_val.unrealized_pnl_pct:.1f}%)</span>"
-            st.markdown(_kpi(
-                "Unrealized P&L",
-                f"<div class='gh-med' style='color:{_pc}'>"
-                f"{_ps}{_gh_val.unrealized_pnl_base:,.0f} {_pct}</div>",
-            ), unsafe_allow_html=True)
-
-    # ── Cash (medium) ──────────────────────────────────────────────────────
-    with _cca:
-        if _has:
-            st.markdown(_kpi(
-                "Cash",
-                f"<div class='gh-sm'>{_gh_val.cash_value_base:,.0f}</div>",
-            ), unsafe_allow_html=True)
-
-    # ── Last refresh (small/muted) ─────────────────────────────────────────
-    with _cr:
-        st.markdown(_kpi(
-            "Refresh",
-            f"<div class='gh-xs'>{_gh_ref}</div>",
-        ), unsafe_allow_html=True)
-
-    # ── FX refresh button ──────────────────────────────────────────────────
-    with _cfx:
-        st.markdown("<div style='padding-top:16px'>", unsafe_allow_html=True)
-        if st.button("💱", key="global_refresh_fx_btn", use_container_width=True,
+    # RIGHT — FX refresh button (below the CCY selector)
+    with _cR:
+        if st.button("💱 Refresh FX", key="global_refresh_fx_btn",
+                     use_container_width=True,
                      help="Refresh FX rates from Yahoo Finance."):
             if _gh_hld:
-                with st.spinner("…"):
+                with st.spinner("Fetching rates…"):
                     refresh_fx_rates(_gh_ccys, _base_ccy)
                 st.toast("FX rates updated", icon="💱")
                 st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.divider()
+    # Divider replaces the one previously rendered by st.divider() —
+    # the sticky CSS already draws border-bottom on the header block.
     return _base_ccy
 
 

@@ -1,0 +1,187 @@
+HEADER REDESIGN – PROFESSIONAL DESKTOP & LANDSCAPE LAYOUT
+
+The current header still wastes a large amount of horizontal space.
+
+The issue is not the amount of information.
+The issue is poor space allocation.
+
+==================================================
+1. HEADER STRUCTURE
+==================================================
+
+Create a three-zone header:
+
+LEFT ZONE
+- Logo
+- App name
+
+CENTER ZONE
+- Portfolio KPIs
+
+RIGHT ZONE
+- Base currency selector
+- Refresh status
+- Quick actions
+
+==================================================
+2. LOGO AREA
+==================================================
+
+Current logo is too small.
+
+Increase logo size by approximately 50%.
+
+Target:
+
+Logo height:
+48–64px
+
+Display:
+
+[Logo]
+بوصلة المستثمر
+
+on a single line.
+
+Do not stack title underneath logo.
+
+Example:
+
+🧭 بوصلة المستثمر
+
+This should behave like a professional application brand bar.
+
+==================================================
+3. KPI AREA
+==================================================
+
+Portfolio KPIs are the most important information.
+
+Give them most of the horizontal space.
+
+Landscape layout:
+
+Portfolio Value
+638,794 SAR
+
+Unrealized P&L
++53,220 (+9.1%)
+
+Cash
+0 SAR
+
+Last Refresh
+13:24
+
+Display all in one row.
+
+==================================================
+4. FONT HIERARCHY
+==================================================
+
+Portfolio Value:
+Largest font
+
+32-36px
+
+P&L:
+24-28px
+
+Cash:
+20-22px
+
+Refresh:
+16-18px
+
+Labels:
+12-14px
+
+==================================================
+5. RESPONSIVE LANDSCAPE RULE
+==================================================
+
+Landscape mode must NEVER stack KPI cards vertically.
+
+Everything should remain in one horizontal executive dashboard.
+
+Example:
+
+[Logo]
+[Portfolio]
+[P&L]
+[Cash]
+[Refresh]
+[Currency]
+
+==================================================
+6. PORTRAIT RULE
+==================================================
+
+Portrait may use:
+
+Row 1:
+Portfolio + P&L
+
+Row 2:
+Cash + Refresh + Currency
+
+Maximum 2 rows.
+
+==================================================
+7. REMOVE WASTED SPACE
+==================================================
+
+Current header has large empty margins.
+
+Reduce left/right padding.
+
+Allow KPI section to expand.
+
+Target:
+
+Header content should use 80-90% of available width.
+
+==================================================
+8. STICKY HEADER
+==================================================
+
+Keep header visible while scrolling.
+
+Use compact sticky mode.
+
+When user scrolls down:
+
+Collapse header into:
+
+[Logo] [Portfolio Value] [P&L]
+
+only.
+
+==================================================
+9. PROFESSIONAL REFERENCE STYLE
+==================================================
+
+Use layout inspiration from:
+
+- Interactive Brokers
+- TradingView
+- Yahoo Finance Portfolio
+- Bloomberg Terminal dashboards
+
+The header should feel like an investment platform, not a landing page.
+
+==================================================
+10. SUCCESS CRITERIA
+==================================================
+
+Landscape:
+- Logo clearly visible
+- All KPIs visible
+- No truncation
+- No hidden metrics
+- No large empty areas
+
+Portrait:
+- Compact
+- Maximum 2 rows
+- Holdings table visible immediately below header
