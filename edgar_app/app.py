@@ -274,10 +274,38 @@ def _collect_all_tickers() -> list[str]:
         return []
 
 
+def _apply_prices_to_holdings(
+    fetched: dict,
+    holdings: dict | None = None,
+) -> tuple[list[str], list[str]]:
+    """
+    Immediately write successful fetch results to holdings storage.
+    Tickers whose fetch failed keep their previously stored price — untouched.
+    Returns (ok_list, fail_list).
+    """
+    from portfolio import update_current_price, load_holdings as _lh
+    _h = holdings if holdings is not None else _lh()
+    ok_list:   list[str] = []
+    fail_list: list[str] = []
+    for ticker, md in fetched.items():
+        if ticker not in _h:
+            continue  # watchlist-only tickers are not written to holdings
+        try:
+            if md.is_ok and md.current_price:
+                update_current_price(ticker, float(md.current_price), source="yfinance")
+                ok_list.append(ticker)
+            else:
+                fail_list.append(ticker)
+        except Exception:
+            fail_list.append(ticker)
+    return ok_list, fail_list
+
+
 def _run_price_refresh(*, force: bool = True) -> int:
     """
     Refresh market prices for every known ticker.
     Safe to call on every rerun — never triggers AI analysis.
+    Applies successful prices to holdings immediately (no second step needed).
     Returns the count of tickers fetched successfully.
     """
     from market_prices import refresh_all_prices, save_to_session
@@ -287,6 +315,7 @@ def _run_price_refresh(*, force: bool = True) -> int:
             return 0
         results = refresh_all_prices(tickers, force=force)
         save_to_session(results)
+        _apply_prices_to_holdings(results)   # persist to holdings.json automatically
         return sum(1 for d in results.values() if d.is_ok)
     except Exception:
         return 0
@@ -1821,19 +1850,23 @@ def render_holdings_tab() -> None:
                 "🔄 Refresh Market Prices",
                 use_container_width=True,
                 key="refresh_mp_holdings",
-                help="Force-fetches live prices from yfinance, bypassing cache.",
+                help="Fetches live prices and immediately updates holdings — no second step needed.",
             ):
-                with st.spinner("Fetching live prices…"):
-                    ticker_keys = [t for t, h in holdings.items()
-                                   if getattr(h, "has_ticker", True)]
+                ticker_keys = [t for t, h in holdings.items()
+                               if getattr(h, "has_ticker", True)]
+                with st.spinner(f"Fetching prices for {len(ticker_keys)} ticker(s)…"):
                     fetched = refresh_all_prices(ticker_keys, force=True)
                 save_to_session(fetched)
-                ok   = [t for t, d in fetched.items() if d.is_ok]
-                fail = [t for t, d in fetched.items() if not d.is_ok]
-                if ok:
-                    st.toast(f"Fetched prices for {len(ok)} ticker(s)", icon="📡")
-                for t in fail:
-                    st.toast(f"{t}: market data unavailable", icon="⚠️")
+                # Immediately write prices — no confirmation button needed
+                ok_list, fail_list = _apply_prices_to_holdings(fetched, holdings)
+                if ok_list:
+                    st.toast(
+                        f"Updated successfully: {len(ok_list)} · "
+                        f"Failed: {len(fail_list)}",
+                        icon="✅",
+                    )
+                for t in fail_list:
+                    st.toast(f"{t}: price unavailable — keeping stored value", icon="⚠️")
                 st.rerun()
         with mp2:
             st.caption(f"{sess_icon} {sess_label}")
@@ -1908,43 +1941,32 @@ def render_holdings_tab() -> None:
 
         if live_rows:
             ok_count = len(live_ok_map)
+            fail_count = len(live_rows) - ok_count
             has_fallback = any(
                 live_cache.get(t) and live_cache[t].is_ok
                 and live_cache[t].price_source == "previous_close_fallback"
                 for t in holdings
             )
-            with st.expander(
-                f"📡 Live Market Prices ({ok_count}/{len(live_rows)} fetched)",
-                expanded=True,
-            ):
-                st.warning(
-                    "⚠️ Price may be delayed or unavailable from yfinance. "
-                    "Always verify against your broker or Yahoo Finance directly.",
-                    icon="⚠️",
-                )
+            _exp_title = (
+                f"📡 Market Prices — Updated: {ok_count}"
+                + (f" · Failed: {fail_count}" if fail_count else "")
+            )
+            with st.expander(_exp_title, expanded=True):
+                if fail_count:
+                    st.warning(
+                        f"**{fail_count} ticker(s) could not be fetched** — their stored "
+                        "prices are unchanged. Failures shown with ⚠️ below.",
+                        icon="⚠️",
+                    )
                 if has_fallback:
-                    st.error(
-                        "One or more prices are showing **previousClose** as a "
-                        "fallback — no live or intraday price was available. "
-                        "These are marked with ⚠️ in the Source column.",
-                        icon="🔴",
+                    st.info(
+                        "One or more prices are using **previousClose** as a fallback "
+                        "— no live or intraday price was available.",
+                        icon="ℹ️",
                     )
 
                 live_df = pd.DataFrame(live_rows).astype(str)
                 st.dataframe(live_df, hide_index=True, use_container_width=True)
-
-                if ok_count:
-                    if st.button(
-                        "✅ Apply live prices to holdings",
-                        type="primary", key="apply_live_prices_btn",
-                        help="Writes fetched prices to holdings storage. "
-                             "Only tickers with a successful fetch are updated — "
-                             "manually-entered prices are preserved when fetch failed.",
-                    ):
-                        for t_key, price in live_ok_map.items():
-                            update_current_price(t_key, price)
-                        st.toast(f"Applied {ok_count} live price(s)", icon="✅")
-                        st.rerun()
 
                 if debug_rows:
                     with st.expander("🔬 Debug: raw yfinance probe values", expanded=False):
