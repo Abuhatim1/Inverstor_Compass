@@ -1692,42 +1692,51 @@ def render_holdings_tab() -> None:
     import pandas as pd
     from datetime import date
 
-    st.header("💼 Actual Holdings")
-    st.caption(
-        "Positions you actually own. Risk Engine reads from this tab. "
-        "Watchlist tickers can be promoted via **💼 Add to Holdings** on the "
-        "**🔬 Research Watchlist** tab."
-    )
+    st.header("💼 Holdings")
 
     holdings  = load_holdings()
     watchlist = load_portfolio()
 
-    # ── Base currency selector ────────────────────────────────────────────────
     from fx_rates import get_rates_for_holdings, refresh_fx_rates
-    _bc1, _bc2, _bc3 = st.columns([1, 1, 4])
-    with _bc1:
+    from portfolio.valuation import calculate_portfolio_valuation
+    from portfolio.accounts import load_accounts as _load_accts
+
+    # ── Compact global header ─────────────────────────────────────────────────
+    _h1, _h2, _h3, _h4, _h5, _h6, _h7 = st.columns([1.2, 1.4, 1.4, 1.4, 1.4, 1.2, 0.6])
+    with _h1:
         _base_ccy = st.selectbox(
-            "Base Currency",
+            "Base currency",
             options=["SAR", "USD", "EUR", "GBP"],
             index=0,
             key="holdings_base_ccy",
-            help="All portfolio totals and weight percentages are shown in this currency.",
+            help="All totals shown in this currency.",
         )
-    with _bc2:
+
+    _all_ccys  = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
+    _fx        = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
+    _manual_fx = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
+    _val       = calculate_portfolio_valuation(holdings, _load_accts(), _base_ccy, fx_rates=_fx)
+    _last_ref  = st.session_state.get("mp_last_refresh") or "—"
+
+    if holdings:
+        _h2.metric("Holdings",  f"{_val.holdings_value_base:,.0f} {_base_ccy}")
+        _h3.metric("Cash",      f"{_val.cash_value_base:,.0f} {_base_ccy}")
+        _h4.metric("Total",     f"{_val.total_portfolio_value_base:,.0f} {_base_ccy}")
+        _h5.metric(
+            "Unrealized P&L",
+            f"{_val.unrealized_pnl_base:,.0f} {_base_ccy}",
+            delta=f"{_val.unrealized_pnl_pct:+.2f}%",
+        )
+        _h6.metric("Last Refresh", _last_ref)
+    with _h7:
         st.write("")
-        if st.button("💱 Refresh FX", key="refresh_fx_btn",
-                     help="Fetch live FX rates from Yahoo Finance."):
+        if st.button("💱", key="refresh_fx_btn", use_container_width=True,
+                     help="Refresh FX rates from Yahoo Finance."):
             if holdings:
-                _ccys = list({getattr(h, "currency", "USD") for h in holdings.values()})
                 with st.spinner("Fetching FX rates…"):
-                    refresh_fx_rates(_ccys, _base_ccy)
+                    refresh_fx_rates(_all_ccys, _base_ccy)
                 st.toast("FX rates updated", icon="💱")
                 st.rerun()
-
-    # FX rates (cached; refreshed by button above or after 5 min TTL)
-    _all_ccys = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
-    _fx       = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
-    _manual_fx = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
 
     def _mv_base(h) -> float:
         ccy  = getattr(h, "currency", "USD")
@@ -1739,48 +1748,10 @@ def render_holdings_tab() -> None:
         rate = _fx[ccy].rate if ccy in _fx else 1.0
         return h.cost_basis * rate
 
-    # ── Centralized valuation engine (re-uses the same FX cache — no extra calls)
-    from portfolio.valuation import calculate_portfolio_valuation
-    from portfolio.accounts import load_accounts as _load_accts
-    _val = calculate_portfolio_valuation(
-        holdings, _load_accts(), _base_ccy, fx_rates=_fx
-    )
-
-    # ── Summary metrics ───────────────────────────────────────────────────────
-    if holdings:
-        _last_ref = st.session_state.get("mp_last_refresh") or "—"
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Positions",                    _val.n_holdings)
-        m2.metric(f"Holdings ({_base_ccy})",      f"{_val.holdings_value_base:,.2f}")
-        m3.metric(f"Cash ({_base_ccy})",          f"{_val.cash_value_base:,.2f}")
-        m4.metric(f"Total Portfolio ({_base_ccy})",f"{_val.total_portfolio_value_base:,.2f}")
-        m5.metric(
-            f"Unrealized P&L ({_base_ccy})",
-            f"{_val.unrealized_pnl_base:,.2f}",
-            delta=f"{_val.unrealized_pnl_pct:+.2f}%",
-        )
-        m6.metric("Last Price Refresh", _last_ref)
-
-        if _manual_fx:
-            st.warning(
-                f"⚠️ Totals in **{_base_ccy}** use estimated default FX rates for: "
-                f"**{', '.join(_manual_fx)}**. "
-                "Click **💱 Refresh FX** or enter rates manually.",
-                icon="💱",
-            )
-        elif _val.warnings:
-            for _w in _val.warnings:
-                st.warning(_w, icon="⚠️")
-        else:
-            st.caption(
-                f"💱 Totals in **{_base_ccy}** · FX rates sourced live from Yahoo Finance. "
-                f"Invested {_val.invested_allocation_pct:.1f}% · Cash {_val.cash_allocation_pct:.1f}%"
-            )
-    else:
+    if not holdings:
         st.info(
-            "No holdings yet. Use the **➕ Add Holding** form below, record a "
-            "**BUY** transaction, or click **💼 Add to Holdings** on a watchlist "
-            "entry.",
+            "No holdings yet. Click **➕ Add New Position** below, "
+            "upload in bulk, or promote a watchlist ticker.",
             icon="💡",
         )
 
@@ -1791,44 +1762,6 @@ def render_holdings_tab() -> None:
             refresh_all_prices, save_to_session,
         )
         live_cache = get_all_from_session()
-
-        # Controls: single refresh button + session info
-        h_c1, h_c2, h_c3 = st.columns([1, 2, 2])
-        with h_c1:
-            if st.button(
-                "🔄 Refresh prices now",
-                key="refresh_mp_holdings",
-                use_container_width=True,
-                help="Fetch live prices from Yahoo Finance and update holdings immediately.",
-            ):
-                # Build normalized ticker → original ticker map
-                ticker_map = {
-                    _normalize_ticker(t): t
-                    for t, h in holdings.items()
-                    if getattr(h, "has_ticker", True)
-                }
-                with st.spinner(f"Fetching {len(ticker_map)} price(s)…"):
-                    fetched_norm = refresh_all_prices(list(ticker_map.keys()), force=True)
-                save_to_session(fetched_norm)
-                # Remap normalized keys back to original holding keys for storage
-                fetched_orig = {
-                    ticker_map[k]: v
-                    for k, v in fetched_norm.items()
-                    if k in ticker_map
-                }
-                ok_list, fail_list = _apply_prices_to_holdings(fetched_orig, holdings)
-                st.toast(
-                    f"Updated: {len(ok_list)} · Failed: {len(fail_list)}",
-                    icon="✅" if ok_list else "⚠️",
-                )
-                st.rerun()
-        with h_c2:
-            sess_icon, sess_label = market_session_label()
-            st.caption(f"{sess_icon} {sess_label}")
-        with h_c3:
-            last_ref = st.session_state.get("mp_last_refresh")
-            if last_ref:
-                st.caption(f"Last updated: {last_ref}")
 
         # ── Build the holdings table ───────────────────────────────────────────
         _mv_col       = f"MV ({_base_ccy})"
@@ -1882,7 +1815,97 @@ def render_holdings_tab() -> None:
                 "CCY":      st.column_config.TextColumn("CCY",        width="small"),
             },
         )
-        st.caption("👆 Tap a row to select it, then use the action bar  ·  🟢 profit  🔴 loss  ⚪ flat")
+        st.caption("👆 Tap a row to select it, then use the action bar below  ·  🟢 profit  🔴 loss  ⚪ flat")
+
+        # ── Table action buttons ───────────────────────────────────────────────
+        _tab1, _tab2, _tab3, _tab4 = st.columns(4)
+        with _tab1:
+            # Refresh prices
+            if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
+                         use_container_width=True,
+                         help="Fetch live prices from Yahoo Finance."):
+                _ticker_map = {
+                    _normalize_ticker(t): t
+                    for t, h in holdings.items()
+                    if getattr(h, "has_ticker", True)
+                }
+                with st.spinner(f"Fetching {len(_ticker_map)} price(s)…"):
+                    _fetched_norm = refresh_all_prices(list(_ticker_map.keys()), force=True)
+                save_to_session(_fetched_norm)
+                _fetched_orig = {
+                    _ticker_map[k]: v
+                    for k, v in _fetched_norm.items()
+                    if k in _ticker_map
+                }
+                _ok_list, _fail_list = _apply_prices_to_holdings(_fetched_orig, holdings)
+                _s_lbl = market_session_label()[1]
+                st.toast(
+                    f"Updated {len(_ok_list)} · Failed {len(_fail_list)} · {_s_lbl}",
+                    icon="✅" if _ok_list else "⚠️",
+                )
+                st.rerun()
+        with _tab2:
+            # Download CSV
+            import io as _io
+            _csv_buf = _io.StringIO()
+            _csv_buf.write(
+                "ticker,company_name,asset_type,market,sector,currency,"
+                "opening_quantity,avg_cost,current_price,market_value,unrealized_pnl_pct\n"
+            )
+            for _r in rows:
+                _tk2 = _r["Ticker"]
+                _hh  = holdings.get(_tk2)
+                if _hh:
+                    _csv_buf.write(
+                        f"{_tk2},"
+                        f"{_hh.company_name},"
+                        f"{getattr(_hh,'asset_type','Stock')},"
+                        f"{getattr(_hh,'market','US')},"
+                        f"{getattr(_hh,'sector','Other')},"
+                        f"{getattr(_hh,'currency','USD')},"
+                        f"{_hh.quantity},"
+                        f"{_hh.avg_cost},"
+                        f"{_hh.current_price},"
+                        f"{_hh.market_value},"
+                        f"{_hh.unrealized_pnl_pct}\n"
+                    )
+            st.download_button(
+                "⬇️ Download CSV",
+                data=_csv_buf.getvalue(),
+                file_name=f"holdings_{date.today()}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_holdings_csv",
+            )
+        with _tab3:
+            if st.button("⬆️ Bulk Upload", key="open_bulk_upload_btn",
+                         use_container_width=True,
+                         help="Upload multiple new positions from a CSV file."):
+                _dlg_bulk_upload()
+        with _tab4:
+            if st.button("➕ Add New Position", key="open_add_new_btn",
+                         type="primary", use_container_width=True,
+                         help="Open a single new position with a BUY transaction."):
+                _dlg_add_new()
+
+        # ── Secondary diagnostics ──────────────────────────────────────────────
+        # FX rate warnings
+        if _manual_fx:
+            st.warning(
+                f"Totals in **{_base_ccy}** use estimated FX for: "
+                f"**{', '.join(_manual_fx)}**. Click 💱 to refresh.",
+                icon="💱",
+            )
+        elif _val.warnings:
+            for _w in _val.warnings:
+                st.warning(_w, icon="⚠️")
+        else:
+            _s_icon, _s_lbl2 = market_session_label()
+            st.caption(
+                f"{_s_icon} {_s_lbl2}  ·  "
+                f"Invested {_val.invested_allocation_pct:.1f}%  ·  "
+                f"Cash {_val.cash_allocation_pct:.1f}%"
+            )
 
         # Warn about any .SE tickers needing normalization
         se_tickers = [t for t in holdings if t.upper().endswith(".SE")]
@@ -2506,6 +2529,351 @@ def render_holdings_tab() -> None:
                 if st.button("Cancel", use_container_width=True):
                     st.rerun()
 
+        # ── Dialog: Bulk Upload New Holdings ─────────────────────────────────
+        @st.dialog("⬆️ Bulk Upload New Holdings", width="large")
+        def _dlg_bulk_upload():
+            import csv, io as _bio
+            from datetime import datetime as _dt
+            from portfolio.holdings import normalize_ticker as _ntk_bu
+
+            REQUIRED_COLS = [
+                "ticker", "company_name", "asset_type", "market", "sector",
+                "currency", "account_name", "opening_quantity", "opening_price",
+                "current_market_price", "fees", "opening_date", "notes",
+            ]
+            ALLOWED_ASSET_TYPES = {
+                "Stock", "ETF", "Fund", "Crypto", "Bond",
+                "Cash Equivalent", "Commodity", "Other",
+            }
+            ALLOWED_CURRENCIES = set(CURRENCIES)
+            DATE_FMT = "%Y/%m/%d"
+
+            TEMPLATE_ROW = (
+                "MSFT,Microsoft Corporation,Stock,US,Technology,"
+                "USD,US Brokerage,1,426.99,426.99,0,2026/05/29,Initial position"
+            )
+
+            st.caption(
+                "Upload new positions in bulk. Each row creates an opening BUY transaction. "
+                "Existing open holdings are never modified by bulk upload."
+            )
+
+            # Template download
+            _tmpl = ",".join(REQUIRED_COLS) + "\n" + TEMPLATE_ROW
+            _tcol, _hcol = st.columns([1, 3])
+            with _tcol:
+                st.download_button(
+                    "⬇️ Download Template",
+                    data=_tmpl,
+                    file_name="holdings_upload_template.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="bulk_dl_template",
+                )
+            with _hcol:
+                with st.expander("ℹ️ Format guide"):
+                    st.markdown(
+                        f"**Required columns (exact names):**  \n"
+                        f"`{', '.join(REQUIRED_COLS)}`\n\n"
+                        f"**Date format:** `YYYY/MM/DD`  \n"
+                        f"**Asset types:** {', '.join(sorted(ALLOWED_ASSET_TYPES))}  \n"
+                        f"**Currencies:** {', '.join(sorted(ALLOWED_CURRENCIES))}  \n"
+                        f"**notes:** optional — can be blank\n\n"
+                        f"**Example row:**  \n`{TEMPLATE_ROW}`"
+                    )
+
+            st.divider()
+            _uploaded = st.file_uploader(
+                "Select CSV file", type=["csv"], key="bulk_upload_file"
+            )
+            if not _uploaded:
+                return
+
+            # ── Parse ─────────────────────────────────────────────────────────
+            try:
+                _content = _uploaded.read().decode("utf-8-sig")
+                _reader  = csv.DictReader(_bio.StringIO(_content))
+                _bu_rows = list(_reader)
+                _file_cols = list(_reader.fieldnames or [])
+            except Exception as _pe:
+                st.error(
+                    f"Bulk upload rejected. No records were imported.\n\n"
+                    f"Could not parse CSV: {_pe}"
+                )
+                return
+
+            # ── Column check ──────────────────────────────────────────────────
+            _missing_cols = [c for c in REQUIRED_COLS if c not in _file_cols]
+            if _missing_cols:
+                st.error(
+                    "Bulk upload rejected. No records were imported.\n\n"
+                    f"**Missing columns:** {', '.join(_missing_cols)}  \n"
+                    f"**Expected:** `{', '.join(REQUIRED_COLS)}`"
+                )
+                return
+            if not _bu_rows:
+                st.warning("The uploaded file contains no data rows.")
+                return
+
+            # ── Load context for validation ───────────────────────────────────
+            _ex_holdings = load_holdings()
+            _open_norms  = {_ntk_bu(k) for k, h in _ex_holdings.items() if h.quantity > 1e-9}
+            _accts_raw   = _load_accts_raw()
+            _acct_by_name = {
+                a.account_name: (aid, a)
+                for aid, a in _accts_raw.items() if a.active
+            }
+
+            # ── Row validation ────────────────────────────────────────────────
+            _errors:    list[tuple[int, list[str]]] = []
+            _validated: list[dict] = []
+            _seen_norms: set[str]  = set()
+
+            for _ri, _row in enumerate(_bu_rows, start=2):
+                _re: list[str] = []
+
+                # ticker
+                _raw_tk = str(_row.get("ticker", "")).strip()
+                _norm_tk = ""
+                if not _raw_tk:
+                    _re.append("ticker is required")
+                else:
+                    _norm_tk = _ntk_bu(_raw_tk.upper())
+                    if _norm_tk in _open_norms:
+                        _re.append(
+                            f"ticker '{_raw_tk}' already has an open holding — "
+                            "use row actions to update it"
+                        )
+                    if _norm_tk in _seen_norms:
+                        _re.append(
+                            f"ticker '{_raw_tk}' appears more than once in this file"
+                        )
+                    _seen_norms.add(_norm_tk)
+
+                # company_name
+                if not str(_row.get("company_name", "")).strip():
+                    _re.append("company_name is required")
+
+                # asset_type
+                _at = str(_row.get("asset_type", "")).strip()
+                if _at not in ALLOWED_ASSET_TYPES:
+                    _re.append(
+                        f"asset_type '{_at}' is not valid. "
+                        f"Allowed: {', '.join(sorted(ALLOWED_ASSET_TYPES))}"
+                    )
+
+                # market
+                if not str(_row.get("market", "")).strip():
+                    _re.append("market is required")
+
+                # sector
+                if not str(_row.get("sector", "")).strip():
+                    _re.append("sector is required (use 'Unknown' if not applicable)")
+
+                # currency
+                _ccy = str(_row.get("currency", "")).strip()
+                if _ccy not in ALLOWED_CURRENCIES:
+                    _re.append(
+                        f"currency '{_ccy}' is not valid. "
+                        f"Allowed: {', '.join(sorted(ALLOWED_CURRENCIES))}"
+                    )
+
+                # account_name + currency match
+                _acct_name = str(_row.get("account_name", "")).strip()
+                _acct_aid  = ""
+                if not _acct_name:
+                    _re.append("account_name is required")
+                elif _acct_name not in _acct_by_name:
+                    _re.append(
+                        f"account '{_acct_name}' does not match any active account"
+                    )
+                else:
+                    _acct_aid, _acct_obj = _acct_by_name[_acct_name]
+                    if _acct_obj.base_currency != _ccy:
+                        _re.append(
+                            f"currency '{_ccy}' does not match account "
+                            f"'{_acct_name}' currency '{_acct_obj.base_currency}'"
+                        )
+
+                # opening_quantity
+                _qty = None
+                try:
+                    _qty = float(_row.get("opening_quantity", ""))
+                    if _qty <= 0:
+                        _re.append("opening_quantity must be > 0")
+                except (ValueError, TypeError):
+                    _re.append("opening_quantity must be a number")
+
+                # opening_price
+                _op = None
+                try:
+                    _op = float(_row.get("opening_price", ""))
+                    if _op < 0:
+                        _re.append("opening_price must be >= 0")
+                except (ValueError, TypeError):
+                    _re.append("opening_price must be a number")
+
+                # current_market_price
+                _cmp = None
+                try:
+                    _cmp = float(_row.get("current_market_price", ""))
+                    if _cmp < 0:
+                        _re.append("current_market_price must be >= 0")
+                except (ValueError, TypeError):
+                    _re.append("current_market_price must be a number")
+
+                # fees
+                _fees = 0.0
+                try:
+                    _fees = float(_row.get("fees", "0") or "0")
+                    if _fees < 0:
+                        _re.append("fees must be >= 0")
+                except (ValueError, TypeError):
+                    _re.append("fees must be a number")
+
+                # opening_date
+                _date_str = str(_row.get("opening_date", "")).strip()
+                _parsed_dt = None
+                try:
+                    _parsed_dt = _dt.strptime(_date_str, DATE_FMT).date()
+                except ValueError:
+                    _re.append(
+                        f"opening_date '{_date_str}' must be in YYYY/MM/DD format "
+                        "(e.g. 2026/05/29)"
+                    )
+
+                if _re:
+                    _errors.append((_ri, _re))
+                elif _qty is not None and _op is not None and _cmp is not None:
+                    _total_cost = _qty * _op + _fees
+                    _validated.append({
+                        "ticker":         _norm_tk,
+                        "company_name":   str(_row["company_name"]).strip(),
+                        "asset_type":     _at,
+                        "market":         str(_row["market"]).strip(),
+                        "sector":         str(_row["sector"]).strip(),
+                        "currency":       _ccy,
+                        "account_name":   _acct_name,
+                        "account_id":     _acct_aid,
+                        "opening_quantity": _qty,
+                        "opening_price":  _op,
+                        "current_market_price": _cmp,
+                        "fees":           _fees,
+                        "opening_date":   _parsed_dt.isoformat() if _parsed_dt else None,
+                        "notes":          str(_row.get("notes", "")).strip(),
+                        "total_cost":     _total_cost,
+                    })
+
+            if _errors:
+                st.error("Bulk upload rejected. No records were imported.")
+                for _row_num, _row_errs in _errors:
+                    for _err in _row_errs:
+                        st.markdown(f"- **Row {_row_num}:** {_err}")
+                return
+
+            # ── Cash validation ───────────────────────────────────────────────
+            _acct_costs: dict[str, float] = {}
+            for _v in _validated:
+                _aid_k = _v["account_id"]
+                _acct_costs[_aid_k] = _acct_costs.get(_aid_k, 0.0) + _v["total_cost"]
+
+            _cash_errors: list[str] = []
+            for _aid_k, _needed in _acct_costs.items():
+                _a = _accts_raw.get(_aid_k)
+                if _a and _a.cash_balance < _needed:
+                    _cash_errors.append(
+                        f"Insufficient cash in account **{_a.account_name}**. "
+                        f"Required: {_needed:,.2f} {_a.base_currency}, "
+                        f"Available: {_a.cash_balance:,.2f} {_a.base_currency}."
+                    )
+
+            if _cash_errors:
+                st.error("Bulk upload rejected. No records were imported.")
+                for _ce in _cash_errors:
+                    st.markdown(f"- {_ce}")
+                return
+
+            # ── Preview ───────────────────────────────────────────────────────
+            st.success(f"✅ {len(_validated)} rows validated — ready to import.")
+            _prev_df = pd.DataFrame([{
+                "Ticker":   _v["ticker"],
+                "Company":  _v["company_name"],
+                "Qty":      _v["opening_quantity"],
+                "Price":    _v["opening_price"],
+                "Fees":     _v["fees"],
+                "Cost":     _v["total_cost"],
+                "Account":  _v["account_name"],
+                "CCY":      _v["currency"],
+                "Date":     _v["opening_date"],
+            } for _v in _validated])
+            st.dataframe(_prev_df, hide_index=True, use_container_width=True)
+
+            # ── Confirm import ────────────────────────────────────────────────
+            _cb1, _cb2 = st.columns(2)
+            with _cb1:
+                if st.button("✅ Import All", type="primary",
+                             use_container_width=True, key="bulk_confirm_btn"):
+                    # Re-read cash for optimistic check
+                    _accts_fresh = _load_accts_raw()
+                    _abort = []
+                    for _aid_k, _needed in _acct_costs.items():
+                        _a2 = _accts_fresh.get(_aid_k)
+                        if _a2 and _a2.cash_balance < _needed:
+                            _abort.append(
+                                f"Cash changed for '{_a2.account_name}' — aborting."
+                            )
+                    if _abort:
+                        st.error("\n".join(_abort))
+                        return
+
+                    _imported = 0
+                    _imp_errors: list[str] = []
+                    for _v in _validated:
+                        try:
+                            _t2, _h2, _err2 = record_transaction(
+                                ticker=_v["ticker"], side="BUY",
+                                quantity=_v["opening_quantity"],
+                                price=_v["opening_price"],
+                                txn_date=_v["opening_date"],
+                                notes=_v["notes"],
+                                company_name=_v["company_name"],
+                                market=_v["market"],
+                                sector=_v["sector"],
+                                asset_type=_v["asset_type"],
+                                currency=_v["currency"],
+                                has_ticker=True,
+                                account_id=_v["account_id"],
+                                fees=_v["fees"],
+                            )
+                            if _err2:
+                                _imp_errors.append(f"{_v['ticker']}: {_err2}")
+                            else:
+                                if _v["current_market_price"] > 0:
+                                    update_current_price(
+                                        _v["ticker"],
+                                        _v["current_market_price"],
+                                        source="upload",
+                                    )
+                                _upd_cash(_v["account_id"], -_v["total_cost"])
+                                _imported += 1
+                        except Exception as _ex2:
+                            _imp_errors.append(f"{_v['ticker']}: {_ex2}")
+
+                    if _imp_errors:
+                        st.error(
+                            f"Partially imported {_imported}/{len(_validated)}:\n"
+                            + "\n".join(_imp_errors)
+                        )
+                    else:
+                        st.toast(
+                            f"Imported {_imported} holding(s) successfully.",
+                            icon="✅",
+                        )
+                        st.rerun()
+            with _cb2:
+                if st.button("Cancel", use_container_width=True, key="bulk_cancel_btn"):
+                    st.rerun()
+
         # ── Action bar — shown when a table row is selected ───────────────────
         _sel_rows = getattr(getattr(_tbl_sel, "selection", None), "rows", [])
         if _sel_rows:
@@ -2540,18 +2908,18 @@ def render_holdings_tab() -> None:
                                      use_container_width=True):
                             _dlg_delete(_st, _sh)
 
-    # ── + Add New Holding button ──────────────────────────────────────────────
-    st.divider()
-    _btn_col, _hint_col = st.columns([1, 4])
-    with _btn_col:
-        if st.button("➕ Add New Holding", key="open_add_new_btn",
-                     type="primary", use_container_width=True):
-            _dlg_add_new()
-    with _hint_col:
-        st.caption(
-            "Opens a brand-new position with a full BUY transaction history.  "
-            "To modify an existing holding, select its row above."
-        )
+    # ── Bulk Upload button when portfolio is empty ────────────────────────────
+    if not holdings:
+        _ec1, _ec2 = st.columns(2)
+        with _ec1:
+            if st.button("⬆️ Bulk Upload", key="open_bulk_upload_empty_btn",
+                         use_container_width=True,
+                         help="Upload multiple new positions from a CSV file."):
+                _dlg_bulk_upload()
+        with _ec2:
+            if st.button("➕ Add New Position", key="open_add_new_empty_btn",
+                         type="primary", use_container_width=True):
+                _dlg_add_new()
 
     # ── Valuation debug ───────────────────────────────────────────────────────
     if holdings:

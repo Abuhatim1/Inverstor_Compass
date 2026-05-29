@@ -1,0 +1,266 @@
+HOLDINGS PAGE OPTIMIZATION + BULK UPLOAD
+
+1) Holdings page layout
+
+Optimize the Holdings page so the Holdings List/Table is the first main visual element.
+
+The user should immediately see the holdings table without scrolling.
+
+Move global portfolio details into a compact standard header.
+
+The standard header should appear across all tabs/pages and include key global information such as:
+
+- Base currency
+- Total portfolio value
+- Total holdings value
+- Total cash
+- Daily / latest portfolio P&L if available
+- Last price update time
+
+Keep the header compact and consistent across tabs.
+
+The Holdings page order should be:
+
+1. Standard global header
+2. Holdings table
+3. Table actions:
+   - Refresh prices
+   - Download CSV
+   - Bulk Upload New Holdings
+   - + Add New Position
+4. Any secondary details or diagnostics below
+
+Do not place large cards before the holdings table.
+
+--------------------------------------------------
+
+2) Bulk upload new holdings
+
+Since the holdings list can be downloaded as CSV, add the ability to upload bulk new holdings from CSV.
+
+Important:
+Bulk upload is only for NEW holdings.
+
+Do NOT allow bulk update of existing open holdings.
+
+If uploaded file contains a ticker/account combination that already exists as an open holding:
+
+Reject the entire file.
+
+Show message:
+
+"Bulk upload rejected: file contains existing open holdings. Existing positions must be updated from their holding row."
+
+--------------------------------------------------
+
+3) Strict file validation
+
+The uploader must validate the full CSV before importing anything.
+
+If any required field is missing, renamed, misspelled, incorrectly typed, or invalid:
+
+Reject the entire uploaded file.
+
+Do not partially import valid rows.
+
+Show a clear error message explaining:
+- Which columns are missing or invalid
+- Which row has the issue
+- What the expected format should be
+
+--------------------------------------------------
+
+4) Required CSV columns
+
+The uploaded CSV must exactly match the expected template.
+
+Required columns:
+
+ticker
+company_name
+asset_type
+market
+sector
+currency
+account_name
+opening_quantity
+opening_price
+current_market_price
+fees
+opening_date
+notes
+
+Column names must match exactly.
+
+No alternative names.
+
+No missing columns.
+
+No duplicate columns.
+
+--------------------------------------------------
+
+5) Field validation rules
+
+ticker:
+Required.
+Normalize internally.
+Saudi tickers must use .SR internally.
+
+company_name:
+Required.
+
+asset_type:
+Required.
+Allowed values:
+Stock
+ETF
+Fund
+Crypto
+Bond
+Cash Equivalent
+Other
+
+market:
+Required.
+Examples:
+US
+Saudi
+UAE
+Other
+
+sector:
+Required.
+If unknown, allow:
+Unknown
+
+currency:
+Required.
+Must match account currency.
+Allowed values:
+SAR
+USD
+
+account_name:
+Required.
+Must match an existing account.
+
+opening_quantity:
+Required.
+Numeric.
+Must be greater than 0.
+
+opening_price:
+Required.
+Numeric.
+Must be greater than or equal to 0.
+
+current_market_price:
+Required.
+Numeric.
+Must be greater than or equal to 0.
+
+fees:
+Required.
+Numeric.
+Can be 0 or greater.
+
+opening_date:
+Required.
+Format:
+YYYY/MM/DD
+
+notes:
+Optional.
+Can be blank.
+
+--------------------------------------------------
+
+6) Cash validation for bulk upload
+
+Each uploaded row creates a real opening BUY transaction.
+
+Therefore:
+- Cash validation must apply
+- Account cash must be sufficient
+- Currency must match the account
+- No correction mode in bulk upload
+
+If total required cash for one account exceeds available account cash:
+
+Reject the entire file.
+
+Show message:
+
+"Bulk upload rejected: insufficient cash in account [account name]. Required: X, Available: Y."
+
+--------------------------------------------------
+
+7) Duplicate prevention
+
+Before import, check all rows.
+
+Reject file if:
+- Duplicate ticker + account exists inside the uploaded file
+- Ticker + account already exists as an open holding
+- Same ticker format appears twice after normalization, e.g. 2222.SE and 2222.SR
+
+--------------------------------------------------
+
+8) Import behavior
+
+If validation passes:
+
+For each row:
+- Create an opening BUY transaction
+- Deduct cash from the linked account
+- Create holding from transaction history
+- Recalculate portfolio values
+
+Do not create holdings directly.
+
+Holdings must always be derived from transactions.
+
+--------------------------------------------------
+
+9) Template guidance
+
+Add a "Download Bulk Upload Template" button.
+
+The template should contain exactly the required columns in the correct order.
+
+Also show a small help section:
+
+Example CSV row:
+
+ticker,company_name,asset_type,market,sector,currency,account_name,opening_quantity,opening_price,current_market_price,fees,opening_date,notes
+MSFT,Microsoft Corporation,Stock,US,Technology,USD,US Brokerage,1,426.99,426.99,0,2026/05/29,Initial position
+
+--------------------------------------------------
+
+10) User-facing rejection message
+
+When rejecting a file, use a clear message:
+
+"Bulk upload rejected. No records were imported."
+
+Then show:
+- Error type
+- Row number if applicable
+- Column name if applicable
+- Expected format
+- Example correction
+
+--------------------------------------------------
+
+11) Business principle
+
+Bulk upload is for initial portfolio setup only.
+
+Existing open holdings must be updated only from their specific row actions:
+- Buy
+- Sell
+- Edit
+- Record Correction
+
+This keeps transaction history clean and prevents hidden cost-basis errors.
