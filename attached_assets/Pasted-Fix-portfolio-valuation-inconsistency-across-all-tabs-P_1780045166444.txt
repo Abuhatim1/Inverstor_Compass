@@ -1,0 +1,104 @@
+Fix portfolio valuation inconsistency across all tabs.
+
+Problem:
+Total market value in Holdings does not match Command Center, Portfolio Risk, and possibly other tabs. Currency conversion may also be inconsistent.
+
+Goal:
+Create one centralized Portfolio Valuation Engine used everywhere.
+
+Requirements:
+
+1. Create a single source of truth function:
+calculate_portfolio_valuation()
+
+It should return:
+- base_currency
+- holdings_value_base
+- cash_value_base
+- total_portfolio_value_base
+- invested_allocation_percent
+- cash_allocation_percent
+- per_holding_values
+- fx_rates_used
+- valuation_timestamp
+- warnings
+
+2. Every tab must use this same function:
+- Holdings
+- Command Center
+- Portfolio Risk
+- Decision Queue
+- Accounts
+- Performance Summary
+- any KPI cards
+
+No tab should independently sum holdings or currencies.
+
+3. Currency conversion rules:
+- Each holding has local currency.
+- local_market_value = quantity × current_price
+- base_market_value = local_market_value × fx_rate_to_base_currency
+- If local currency = base currency, fx_rate = 1
+- If USD/SAR, use 3.75 by default unless live/manual override exists
+- If SAR/USD, use 1/3.75
+- For other currencies, use stored/manual FX rate or show warning.
+- Never add values from different currencies directly.
+
+4. Cash conversion:
+- Each account has base currency.
+- cash_value_base = account_cash × fx_rate_to_base_currency
+- Include cash in total portfolio value.
+- Show holdings value and cash value separately.
+
+5. Portfolio weights:
+- Must be calculated using base_market_value only.
+- Weight = holding_base_value / total_portfolio_value_base
+- Also show invested-only weight if useful:
+  holding_base_value / holdings_value_base
+
+6. Unrealized P&L:
+Calculate both:
+- local unrealized P&L
+- base currency unrealized P&L
+Use consistent FX logic.
+
+7. Add valuation reconciliation debug section:
+"Valuation Reconciliation"
+Show:
+- holding ticker
+- quantity
+- current price
+- local currency
+- local market value
+- FX rate used
+- base market value
+- source tab value if available
+- warnings
+
+8. Add FX debug table:
+- currency pair
+- rate used
+- source: manual / default / yfinance / missing
+- last updated
+
+9. Replace all old calculations in:
+- Command Center
+- Portfolio Risk
+- Holdings KPI
+- Accounts summary
+- Decision Queue weights
+with calculate_portfolio_valuation() output.
+
+10. Add tests / sanity checks:
+- USD holding + SAR holding should not be added directly.
+- Portfolio total should match across all tabs.
+- Sum of per_holding base values + cash base value = total portfolio value.
+- Weights should total approximately 100%.
+
+11. If data is missing:
+- show "Missing FX / Missing price"
+- exclude from total only if necessary
+- show warning clearly
+- do not crash.
+
+12. Keep it lightweight and beginner-friendly.

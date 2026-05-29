@@ -55,7 +55,10 @@ def render_command_center_tab() -> None:
         load_market_intel_state,
         load_portfolio,
         portfolio_weights,
+        calculate_portfolio_valuation,
+        load_accounts,
     )
+    from fx_rates import get_rates_for_holdings
     import pandas as pd
 
     st.header("⚡ Portfolio Command Center")
@@ -69,6 +72,7 @@ def render_command_center_tab() -> None:
     watchlist  = load_portfolio()          # list[PortfolioEntry]
     mi_state   = load_market_intel_state()
     theses     = load_all_core_theses()    # dict[str, CoreThesis]
+    accounts   = load_accounts()
 
     if not holdings:
         st.info(
@@ -77,6 +81,14 @@ def render_command_center_tab() -> None:
             icon="💡",
         )
         return
+
+    # ── Centralized valuation (single source of truth for all KPIs) ───────────
+    _base_ccy_cc = st.session_state.get("holdings_base_ccy", "SAR")
+    _ccys_cc = list({getattr(h, "currency", "USD") for h in holdings.values()})
+    _fx_cc   = get_rates_for_holdings(_ccys_cc, _base_ccy_cc) if _ccys_cc else {}
+    valuation = calculate_portfolio_valuation(
+        holdings, accounts, _base_ccy_cc, fx_rates=_fx_cc
+    )
 
     # Derived helpers
     weights      = portfolio_weights(holdings)
@@ -109,7 +121,7 @@ def render_command_center_tab() -> None:
 
     # ── Section 1 · KPI Cards ─────────────────────────────────────────────────
     _render_kpi_cards(
-        holdings, weights, risk_result, dq_result,
+        holdings, weights, risk_result, dq_result, valuation,
         RISK_REGIME_BADGE, URGENCY_BADGE,
     )
 
@@ -158,14 +170,16 @@ def render_command_center_tab() -> None:
 
 # ── Section renderers ─────────────────────────────────────────────────────────
 
-def _render_kpi_cards(holdings, weights, risk_result, dq_result,
+def _render_kpi_cards(holdings, weights, risk_result, dq_result, valuation,
                       RISK_REGIME_BADGE, URGENCY_BADGE):
     st.subheader("📊 Portfolio at a Glance")
 
-    total_mv    = sum(h.market_value for h in holdings.values())
-    total_cost  = sum(h.cost_basis   for h in holdings.values())
-    total_pnl   = total_mv - total_cost
-    pnl_pct     = (total_pnl / total_cost * 100) if total_cost else 0.0
+    # ── Values from the centralized valuation engine (FX-corrected) ───────────
+    base_ccy   = valuation.base_currency
+    total_mv   = valuation.holdings_value_base        # invested assets, base ccy
+    total_port = valuation.total_portfolio_value_base  # holdings + cash
+    pnl_abs    = valuation.unrealized_pnl_base
+    pnl_pct    = valuation.unrealized_pnl_pct
 
     # Risk regime
     if risk_result:
@@ -190,15 +204,22 @@ def _render_kpi_cards(holdings, weights, risk_result, dq_result,
         if dq_result else None
     )
 
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Total Portfolio Value",   f"${total_mv:,.0f}")
-    k2.metric("Unrealized P&L",
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1.metric(f"Holdings ({base_ccy})",     f"{total_mv:,.0f}")
+    k2.metric(f"Total Portfolio ({base_ccy})", f"{total_port:,.0f}",
+              help=f"Holdings {valuation.invested_allocation_pct:.1f}% + "
+                   f"Cash {valuation.cash_allocation_pct:.1f}%")
+    k3.metric("Unrealized P&L",
               f"{'+' if pnl_pct >= 0 else ''}{pnl_pct:.1f}%",
-              delta=f"${total_pnl:+,.0f}")
-    k3.metric("Risk Regime",             regime_str)
-    k4.metric("Highest Attention",       top_str)
-    k5.metric("Requiring Review",
+              delta=f"{pnl_abs:+,.0f} {base_ccy}")
+    k4.metric("Risk Regime",             regime_str)
+    k5.metric("Highest Attention",       top_str)
+    k6.metric("Requiring Review",
               str(review_count) if review_count is not None else "Missing data")
+
+    if valuation.warnings:
+        for _w in valuation.warnings:
+            st.warning(_w, icon="⚠️")
 
 
 def _render_cio_brief(dq_result, theses, risk_result,

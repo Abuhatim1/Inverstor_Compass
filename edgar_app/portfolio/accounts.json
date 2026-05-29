@@ -1,0 +1,35 @@
+{
+  "c38b4be4": {
+    "account_id": "c38b4be4",
+    "account_name": "US Market",
+    "institution": "Rajhi Capital",
+    "account_type": "Brokerage",
+    "base_currency": "USD",
+    "cash_balance": 0.0,
+    "notes": "",
+    "active": true,
+    "created_at": "2026-05-29"
+  },
+  "488be063": {
+    "account_id": "488be063",
+    "account_name": "Saudi  Market",
+    "institution": "Rajhi Capital",
+    "account_type": "Brokerage",
+    "base_currency": "SAR",
+    "cash_balance": 0.0,
+    "notes": "",
+    "active": true,
+    "created_at": "2026-05-29"
+  },
+  "5cc295b7": {
+    "account_id": "5cc295b7",
+    "account_name": "Saudi  Market",
+    "institution": "SNB Capital",
+    "account_type": "Brokerage",
+    "base_currency": "SAR",
+    "cash_balance": 0.0,
+    "notes": "",
+    "active": true,
+    "created_at": "2026-05-29"
+  }
+}

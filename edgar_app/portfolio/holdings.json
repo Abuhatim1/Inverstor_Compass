@@ -15,8 +15,9 @@
     "cik": "",
     "purchase_date": "",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "DOCS": {
     "ticker": "DOCS",
@@ -34,8 +35,9 @@
     "cik": "",
     "purchase_date": "",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "CSAI": {
     "ticker": "CSAI",
@@ -53,8 +55,9 @@
     "cik": "",
     "purchase_date": "",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "EXEL": {
     "ticker": "EXEL",
@@ -72,8 +75,9 @@
     "cik": "",
     "purchase_date": "",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "CPRX": {
     "ticker": "CPRX",
@@ -91,12 +95,13 @@
     "cik": "",
     "purchase_date": "",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "2222.SE": {
     "ticker": "2222.SE",
-    "company_name": "Saudi Aramco",
+    "company_name": "أرامكو السعودية",
     "market": "Saudi",
     "sector": "Energy",
     "quantity": 7104.0,
@@ -111,11 +116,12 @@
     "purchase_date": "2020-05-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29"
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "4164.SR": {
     "ticker": "4164.SR",
-    "company_name": "4164.SR",
+    "company_name": "النهدي",
     "market": "Saudi",
     "sector": "Healthcare",
     "quantity": 952.0,
@@ -129,12 +135,13 @@
     "cik": "",
     "purchase_date": "2023-05-01",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   },
   "7010.SR": {
     "ticker": "7010.SR",
-    "company_name": "Saudi Telecom Co.",
+    "company_name": "الإتصالات السعودية (STC)",
     "market": "Saudi",
     "sector": "Communication Services",
     "quantity": 3470.0,
@@ -148,7 +155,8 @@
     "cik": "",
     "purchase_date": "2020-05-01",
     "notes": "",
-    "price_source": "manual",
-    "price_date": "2026-05-28"
+    "price_source": "yfinance",
+    "price_date": "2026-05-29",
+    "default_account_id": ""
   }
 }

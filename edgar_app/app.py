@@ -1424,6 +1424,77 @@ _UPLOAD_SOURCES = {
 }
 
 
+def _render_valuation_debug(val) -> None:
+    """
+    Collapsible valuation reconciliation section.
+    Pass the PortfolioValuation returned by calculate_portfolio_valuation().
+    Shows per-holding breakdown, FX table, totals sanity-check, and warnings.
+    """
+    import pandas as pd
+
+    with st.expander("🔍 Valuation Reconciliation & FX Debug", expanded=False):
+        if not val or not val.per_holding:
+            st.info("No valuation data to display.", icon="ℹ️")
+            return
+
+        st.caption(
+            f"All values in **{val.base_currency}**. "
+            f"Computed at {val.valuation_timestamp[:19]}."
+        )
+
+        # ── Per-holding table ──────────────────────────────────────────────────
+        st.markdown("**Per-holding breakdown**")
+        rows = []
+        for r in val.per_holding:
+            rows.append({
+                "Ticker":         r.ticker,
+                "Qty":            r.quantity,
+                "Price":          round(r.current_price, 4),
+                "Local Ccy":      r.local_currency,
+                "Local MV":       round(r.local_market_value, 2),
+                "FX Rate":        round(r.fx_rate, 6),
+                "FX Src":         r.fx_source,
+                f"Base MV ({val.base_currency})":  round(r.base_market_value, 2),
+                f"Base P&L ({val.base_currency})": round(r.base_unrealized_pnl, 2),
+                "Wt% (invested)": f"{r.invested_weight_pct:.2f}%",
+                "Wt% (total)":    f"{r.total_weight_pct:.2f}%",
+                "⚠️":             r.warning or "—",
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+        # ── FX rates table ──────────────────────────────────────────────────────
+        st.markdown("**FX rates used**")
+        fx_rows = []
+        for ccy, fxr in sorted(val.fx_rates_used.items()):
+            fx_rows.append({
+                "Pair":         f"{ccy}→{val.base_currency}",
+                "Rate":         round(fxr.rate, 6),
+                "Source":       fxr.source,
+                "Fetched":      fxr.fetched_at[:19],
+            })
+        if fx_rows:
+            st.dataframe(pd.DataFrame(fx_rows), hide_index=True, use_container_width=True)
+        else:
+            st.caption("No FX pairs used (single-currency portfolio).")
+
+        # ── Totals reconciliation ───────────────────────────────────────────────
+        st.markdown("**Totals reconciliation**")
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        rc1.metric(f"Holdings ({val.base_currency})", f"{val.holdings_value_base:,.2f}")
+        rc2.metric(f"Cash ({val.base_currency})",     f"{val.cash_value_base:,.2f}")
+        rc3.metric("Total Portfolio",                  f"{val.total_portfolio_value_base:,.2f}")
+        _wt_sum = round(sum(r.invested_weight_pct for r in val.per_holding), 1)
+        rc4.metric("Weight Sum Check", f"{_wt_sum}% (should be ≈100%)")
+
+        # ── Warnings ───────────────────────────────────────────────────────────
+        if val.warnings:
+            st.markdown("**Warnings**")
+            for w in val.warnings:
+                st.warning(w, icon="⚠️")
+        else:
+            st.success("✅ No valuation warnings.", icon="✅")
+
+
 def render_portfolio_risk_tab() -> None:
     """Portfolio Risk Engine dashboard — operates on Actual Holdings only."""
     from portfolio import (
@@ -1459,9 +1530,20 @@ def render_portfolio_risk_tab() -> None:
     positions = build_positions(holdings, watchlist, mi_state)
     result    = compute_portfolio_risk(positions)
 
+    # ── Centralized valuation (for base-currency totals) ──────────────────────
+    from portfolio.valuation import calculate_portfolio_valuation
+    from portfolio.accounts import load_accounts as _load_accts_risk
+    from fx_rates import get_rates_for_holdings as _gfx_risk
+    _base_ccy_risk = st.session_state.get("holdings_base_ccy", "SAR")
+    _ccys_risk = list({getattr(h, "currency", "USD") for h in holdings.values()})
+    _fx_risk   = _gfx_risk(_ccys_risk, _base_ccy_risk) if _ccys_risk else {}
+    _val_risk  = calculate_portfolio_valuation(
+        holdings, _load_accts_risk(), _base_ccy_risk, fx_rates=_fx_risk
+    )
+
     # ── Risk score header ─────────────────────────────────────────────────────
     icon, label = RISK_REGIME_BADGE.get(result.risk_regime, ("⚪", result.risk_regime))
-    score_cols = st.columns([1, 1, 1, 1])
+    score_cols = st.columns([1, 1, 1, 1, 1])
     with score_cols[0]:
         st.metric("Portfolio Risk Score", f"{result.risk_score}/100")
     with score_cols[1]:
@@ -1469,7 +1551,15 @@ def render_portfolio_risk_tab() -> None:
     with score_cols[2]:
         st.metric("Positions", result.n_positions)
     with score_cols[3]:
-        st.metric("Total Market Value", f"${result.total_market_value:,.2f}")
+        st.metric(
+            f"Holdings ({_base_ccy_risk})",
+            f"{_val_risk.holdings_value_base:,.2f}",
+        )
+    with score_cols[4]:
+        st.metric(
+            f"Total Portfolio ({_base_ccy_risk})",
+            f"{_val_risk.total_portfolio_value_base:,.2f}",
+        )
 
     st.progress(result.risk_score / 100.0)
 
@@ -1540,6 +1630,8 @@ def render_portfolio_risk_tab() -> None:
 
     st.caption(f"Computed at {result.computed_at}")
 
+    _render_valuation_debug(_val_risk)
+
 
 def render_holdings_tab() -> None:
     """Actual Holdings + Transactions tab."""
@@ -1601,35 +1693,42 @@ def render_holdings_tab() -> None:
         rate = _fx[ccy].rate if ccy in _fx else 1.0
         return h.cost_basis * rate
 
+    # ── Centralized valuation engine (re-uses the same FX cache — no extra calls)
+    from portfolio.valuation import calculate_portfolio_valuation
+    from portfolio.accounts import load_accounts as _load_accts
+    _val = calculate_portfolio_valuation(
+        holdings, _load_accts(), _base_ccy, fx_rates=_fx
+    )
+
     # ── Summary metrics ───────────────────────────────────────────────────────
     if holdings:
-        _total_mv  = sum(_mv_base(h) for h in holdings.values())
-        _total_cb  = sum(_cb_base(h) for h in holdings.values())
-        _total_pnl = _total_mv - _total_cb
-        _pnl_pct   = (_total_pnl / _total_cb * 100.0) if _total_cb > 0 else 0.0
-        _last_ref  = st.session_state.get("mp_last_refresh") or "—"
-
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Positions", len(holdings))
-        m2.metric(f"Market Value ({_base_ccy})", f"{_total_mv:,.2f}")
-        m3.metric(f"Cost Basis ({_base_ccy})",   f"{_total_cb:,.2f}")
-        m4.metric(
+        _last_ref = st.session_state.get("mp_last_refresh") or "—"
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Positions",                    _val.n_holdings)
+        m2.metric(f"Holdings ({_base_ccy})",      f"{_val.holdings_value_base:,.2f}")
+        m3.metric(f"Cash ({_base_ccy})",          f"{_val.cash_value_base:,.2f}")
+        m4.metric(f"Total Portfolio ({_base_ccy})",f"{_val.total_portfolio_value_base:,.2f}")
+        m5.metric(
             f"Unrealized P&L ({_base_ccy})",
-            f"{_total_pnl:,.2f}",
-            delta=f"{_pnl_pct:+.2f}%",
+            f"{_val.unrealized_pnl_base:,.2f}",
+            delta=f"{_val.unrealized_pnl_pct:+.2f}%",
         )
-        m5.metric("Last Price Refresh", _last_ref)
+        m6.metric("Last Price Refresh", _last_ref)
 
         if _manual_fx:
             st.warning(
-                f"⚠️ Portfolio totals converted to **{_base_ccy}** using estimated "
-                f"default FX rates for: **{', '.join(_manual_fx)}**. "
+                f"⚠️ Totals in **{_base_ccy}** use estimated default FX rates for: "
+                f"**{', '.join(_manual_fx)}**. "
                 "Click **💱 Refresh FX** or enter rates manually.",
                 icon="💱",
             )
+        elif _val.warnings:
+            for _w in _val.warnings:
+                st.warning(_w, icon="⚠️")
         else:
             st.caption(
-                f"💱 Totals in **{_base_ccy}** · FX rates sourced live from Yahoo Finance."
+                f"💱 Totals in **{_base_ccy}** · FX rates sourced live from Yahoo Finance. "
+                f"Invested {_val.invested_allocation_pct:.1f}% · Cash {_val.cash_allocation_pct:.1f}%"
             )
     else:
         st.info(
@@ -1647,8 +1746,8 @@ def render_holdings_tab() -> None:
             "All other fields are edited in the **🖊️ Edit / Delete Holding** section below."
         )
 
-        # Base-currency total for weight calculation
-        _bw_total = sum(_mv_base(h) for h in holdings.values()) or 1.0
+        # Base-currency total for weight calculation — from valuation engine
+        _bw_total = _val.holdings_value_base or 1.0
 
         _mv_col  = f"MV ({_base_ccy})"
         _pnl_col = f"P&L ({_base_ccy})"
@@ -2134,6 +2233,10 @@ def render_holdings_tab() -> None:
                     st.session_state.pop("ah_validation", None)
                     st.toast(f"{ticker_key} added / updated in Holdings", icon="💼")
                     st.rerun()
+
+    # ── Valuation reconciliation debug (collapsible) ─────────────────────────
+    if holdings:
+        _render_valuation_debug(_val)
 
     # ── Edit / Delete Holding ─────────────────────────────────────────────────
     st.divider()

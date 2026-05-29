@@ -101,6 +101,11 @@ from .cash_ledger import (
     ledger_for_account,
     ledger_for_ticker,
 )
+from .valuation import (
+    PerHoldingValuation,
+    PortfolioValuation,
+    calculate_portfolio_valuation,
+)
 from .risk import (
     DEFAULT_SECTORS,
     MARKETS,
@@ -283,6 +288,10 @@ __all__ = [
     "build_preview_thesis",
     "thesis_preview_summary",
     "normalize_scenario_probabilities",
+    # Portfolio Valuation Engine
+    "PerHoldingValuation",
+    "PortfolioValuation",
+    "calculate_portfolio_valuation",
     # Investment Accounts
     "ACCOUNT_TYPES",
     "Account",
