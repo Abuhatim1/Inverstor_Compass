@@ -1948,6 +1948,18 @@ def render_holdings_tab() -> None:
             "automatically — so this holding has a full cost-basis history from day one."
         )
 
+        # ── Pre-render: flush pending ticker (watchlist / Saudi suggestion) ──
+        # Must run before ANY widget renders to avoid the "set after render" crash.
+        _pending_tk = st.session_state.pop("_ahn_pending_tk", None)
+        _do_val = False
+        if _pending_tk:
+            st.session_state["ahn_ticker_input"] = _pending_tk
+            _do_val = True  # auto-trigger validation this rerun
+
+        # Default quantity = 1 on first open (before the widget renders)
+        if "ahn_qty" not in st.session_state:
+            st.session_state["ahn_qty"] = 1.0
+
         # ── Market inference helper ───────────────────────────────────────────
         def _guess_market(vr) -> str:
             exch = (getattr(vr, "exchange", "") or "").upper()
@@ -1978,13 +1990,15 @@ def render_holdings_tab() -> None:
                 )
             with _tc2:
                 st.write("")
-                _do_val = st.button(
+                if st.button(
                     "🔍 Validate & Fill", key="ahn_val_btn",
                     use_container_width=True,
                     help="Fetch from Yahoo Finance and auto-fill all form fields.",
-                )
+                ):
+                    _do_val = True
 
-            # Saudi shorthand suggestion — clicking sets ticker and triggers validation
+            # Saudi shorthand suggestion
+            # Uses pending-key so we never set ahn_ticker_input after it rendered.
             _sa_sug = suggest_saudi_ticker(_tk_raw or "")
             if _sa_sug:
                 _sas1, _sas2 = st.columns([3, 1])
@@ -1992,27 +2006,26 @@ def render_holdings_tab() -> None:
                     st.caption(f"💡 Did you mean **{_sa_sug}**?")
                 with _sas2:
                     if st.button(f"Use {_sa_sug}", key="ahn_sa_btn", use_container_width=True):
-                        st.session_state["ahn_ticker_input"] = _sa_sug
-                        _do_val = True
+                        st.session_state["_ahn_pending_tk"] = _sa_sug
+                        st.rerun()
 
-            # Watchlist quick-fill
+            # Watchlist quick-fill — auto-validates on selection, no extra button.
+            # on_change fires before the next render, so we store in a pending key
+            # and pick it up at the top of the dialog on the following rerun.
             _wl_opts = sorted(watchlist.keys())
             if _wl_opts:
-                _wlc1, _wlc2 = st.columns([3, 1])
-                with _wlc1:
-                    _wl_pick = st.selectbox(
-                        "Or pick from Watchlist…",
-                        options=["— enter manually —"] + _wl_opts,
-                        key="ahn_wl_pick",
-                    )
-                with _wlc2:
-                    st.write("")
-                    if (
-                        st.button("📋 Fill & Validate", key="ahn_wl_btn", use_container_width=True)
-                        and _wl_pick != "— enter manually —"
-                    ):
-                        st.session_state["ahn_ticker_input"] = _wl_pick
-                        _do_val = True
+                def _on_wl_change():
+                    _sel = st.session_state.get("ahn_wl_pick", "")
+                    if _sel:
+                        st.session_state["_ahn_pending_tk"] = _sel
+
+                st.selectbox(
+                    "Or pick from Watchlist",
+                    options=[""] + _wl_opts,
+                    format_func=lambda x: "— select a ticker —" if x == "" else x,
+                    key="ahn_wl_pick",
+                    on_change=_on_wl_change,
+                )
 
             # ── Validation — runs BEFORE form fields so session state is ready ──
             if _do_val:
