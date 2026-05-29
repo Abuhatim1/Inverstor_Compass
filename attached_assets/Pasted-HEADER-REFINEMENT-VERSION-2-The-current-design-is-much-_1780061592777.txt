@@ -1,0 +1,163 @@
+HEADER REFINEMENT – VERSION 2
+
+The current design is much better, but the header can be optimized further for both portrait and landscape modes.
+
+--------------------------------------------------
+
+1) MOVE LOGO AND APP NAME TO TOP-LEFT
+
+Reduce the visual footprint of the logo and title.
+
+Current issue:
+The logo and app name occupy too much vertical space and behave like a landing page.
+
+Desired behavior:
+
+Top-left corner:
+
+🧭 بوصلة المستثمر
+
+Small, clean, professional.
+
+Approximately the size of a navigation brand/logo rather than a page title.
+
+The user should immediately see portfolio information and content below.
+
+--------------------------------------------------
+
+2) LOGO REDESIGN
+
+Current compass logo is acceptable but can be simplified.
+
+Desired concept:
+
+A minimal compass icon where:
+
+- The compass needle resembles a $
+or
+- The compass center subtly incorporates $
+
+The design should remain:
+
+- Clean
+- Professional
+- Recognizable at small sizes
+- Suitable as favicon/app icon
+
+Avoid:
+- Complex illustrations
+- Heavy gradients
+- Detailed artwork
+
+Think:
+Bloomberg
+TradingView
+Yahoo Finance
+Interactive Brokers
+
+Simple and memorable.
+
+--------------------------------------------------
+
+3) REMOVE LANDING PAGE FEEL
+
+The application is a working portfolio tool.
+
+It should not feel like a homepage.
+
+Reduce:
+
+- Large empty whitespace
+- Large title area
+- Promotional-style hero section
+
+The focus should be operational.
+
+--------------------------------------------------
+
+4) KPI HEADER REFINEMENT
+
+Place KPI information directly under the compact logo bar.
+
+Example:
+
+Portfolio
+638.8K SAR
+
+P&L
++53.2K
+
+Cash
+0
+
+Refresh
+13:22
+
+Use responsive sizing:
+
+Largest:
+Portfolio Value
+
+Medium:
+P&L
+
+Small:
+Cash and Refresh
+
+--------------------------------------------------
+
+5) PORTRAIT MODE
+
+Use a compact KPI strip.
+
+Maximum 2 rows.
+
+No excessive vertical spacing.
+
+The holdings table should begin almost immediately below the KPI strip.
+
+--------------------------------------------------
+
+6) LANDSCAPE MODE
+
+Landscape has significantly more horizontal space.
+
+Use a single-row executive dashboard.
+
+Example:
+
+[Portfolio] [P&L] [Cash] [Refresh] [Base Currency]
+
+all in one row.
+
+Avoid stacking.
+
+--------------------------------------------------
+
+7) GLOBAL NAVIGATION FEEL
+
+The top section should feel like a professional application header:
+
+[Logo] [App Name]
+
+--------------------------------
+
+[KPI Strip]
+
+--------------------------------
+
+[Current Tab Content]
+
+This structure should remain consistent across all tabs.
+
+--------------------------------------------------
+
+SUCCESS CRITERIA
+
+When opening the app:
+
+1. Logo visible but unobtrusive.
+2. Portfolio KPIs visible immediately.
+3. Main content visible immediately.
+4. No landing-page feel.
+5. Maximum information density without feeling crowded.

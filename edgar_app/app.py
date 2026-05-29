@@ -83,22 +83,35 @@ st.set_page_config(
     layout="centered",
 )
 
-# ── Arabic / brand CSS ────────────────────────────────────────────────────────
+# ── Brand / global-header CSS ─────────────────────────────────────────────────
 st.markdown(
     """
     <style>
-    /* Proper bidirectional rendering for Arabic text */
-    .bousala-title {
-        direction: rtl;
-        unicode-bidi: embed;
-        text-align: center;
-        font-family: 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
-    }
-    /* Preserve bidi for all markdown containers */
+    /* Bidi / Arabic text */
     [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] div,
     [data-testid="stMarkdownContainer"] span {
         unicode-bidi: plaintext;
+    }
+    /* Tighten Streamlit's default top padding so the header sits high */
+    .block-container { padding-top: 0.6rem !important; }
+    /* Compact selectbox inside the header — remove bottom margin */
+    [data-testid="stSelectbox"] { margin-bottom: 0 !important; }
+    /* KPI label rows — no extra spacing */
+    .gh-kpi { padding-top: 4px; line-height: 1.15; }
+    .gh-lbl {
+        font-size: 0.58rem; color: #9ca3af;
+        text-transform: uppercase; letter-spacing: 0.07em; line-height: 1.6;
+    }
+    .gh-big  { font-size: 1.4rem;  font-weight: 700; }
+    .gh-med  { font-size: 1.08rem; font-weight: 600; }
+    .gh-sm   { font-size: 0.92rem; font-weight: 600; }
+    .gh-xs   { font-size: 0.76rem; color: #6b7280; }
+    /* Responsive: on narrow screens shrink the big number */
+    @media (max-width: 640px) {
+        .gh-big { font-size: 1.1rem; }
+        .gh-med { font-size: 0.9rem; }
+        .gh-sm  { font-size: 0.8rem; }
     }
     </style>
     """,
@@ -5099,17 +5112,58 @@ def render_upload_tab() -> None:
 """)
 
 
-# ── Global compact header (shown above every tab) ─────────────────────────────
+# ── Global compact header (brand bar + KPI strip, shown above every tab) ──────
 def render_global_header() -> str:
-    """Compact KPI bar: base-ccy selector + portfolio value + P&L + cash + refresh."""
+    """
+    Single-row app bar:
+      [SVG logo + بوصلة] | [Portfolio] | [P&L] | [Cash] | [Refresh] | [CCY▾] | [💱]
+    Returns the selected base currency.
+    """
     from portfolio import load_holdings
     from portfolio.accounts import load_accounts as _gh_accts
     from fx_rates import get_rates_for_holdings, refresh_fx_rates
     from portfolio.valuation import calculate_portfolio_valuation
 
-    _c1, _c2, _c3, _c4, _c5, _c6 = st.columns([0.55, 1.9, 1.35, 0.9, 1.05, 0.35])
+    # ── Minimal compass SVG with $ needle ─────────────────────────────────
+    _SVG = (
+        '<svg viewBox="0 0 32 32" width="26" height="26" xmlns="http://www.w3.org/2000/svg">'
+        '<circle cx="16" cy="16" r="13.5" fill="none" stroke="#334155" stroke-width="1.4"/>'
+        '<line x1="16" y1="3.5"  x2="16" y2="7"    stroke="#334155" stroke-width="1.6" stroke-linecap="round"/>'
+        '<line x1="16" y1="25"   x2="16" y2="28.5" stroke="#334155" stroke-width="1.0" stroke-linecap="round"/>'
+        '<line x1="3.5"  y1="16" x2="7"    y2="16" stroke="#334155" stroke-width="1.0" stroke-linecap="round"/>'
+        '<line x1="25"   y1="16" x2="28.5" y2="16" stroke="#334155" stroke-width="1.0" stroke-linecap="round"/>'
+        '<polygon points="16,6 18.2,15.5 16,18.5 13.8,15.5" fill="#0ea5e9"/>'
+        '<polygon points="16,26 18.2,16.5 16,13.5 13.8,16.5" fill="#f43f5e"/>'
+        '<circle cx="16" cy="16" r="3.8" fill="white" stroke="#334155" stroke-width="0.7"/>'
+        '<text x="16" y="16" font-size="5" font-family="Arial,sans-serif" font-weight="bold" '
+        'text-anchor="middle" dominant-baseline="central" fill="#334155">$</text>'
+        '</svg>'
+    )
+    _BRAND = (
+        f"<div style='display:flex;align-items:center;gap:7px;padding:2px 0 0 0'>"
+        f"  {_SVG}"
+        f"  <div style='line-height:1.25'>"
+        f"    <div style='font-size:0.92rem;font-weight:700;color:#0f172a;"
+        f"         letter-spacing:0.01em;font-family:Segoe UI,Tahoma,Arial,sans-serif'>"
+        f"بوصلة</div>"
+        f"    <div style='font-size:0.58rem;color:#94a3b8;letter-spacing:0.04em'>"
+        f"بوصلة المستثمر</div>"
+        f"  </div>"
+        f"</div>"
+    )
 
-    with _c1:
+    # 7 columns: brand | portfolio | P&L | cash | refresh | CCY select | FX btn
+    _cb, _cp, _cpl, _cca, _cr, _ccy, _cfx = st.columns(
+        [1.1, 1.65, 1.35, 0.82, 0.92, 0.62, 0.30]
+    )
+
+    # Brand (pure HTML — no Streamlit widget needed)
+    with _cb:
+        st.markdown(_BRAND, unsafe_allow_html=True)
+
+    # CCY selector first so its value is available for calculations below
+    with _ccy:
+        st.markdown("<div style='padding-top:2px'>", unsafe_allow_html=True)
         _base_ccy = st.selectbox(
             "CCY",
             options=["SAR", "USD", "EUR", "GBP"],
@@ -5117,77 +5171,67 @@ def render_global_header() -> str:
             label_visibility="collapsed",
             help="Base currency for all portfolio totals.",
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    _gh_hld    = load_holdings()
-    _gh_ccys   = list({getattr(h, "currency", "USD") for h in _gh_hld.values()}) if _gh_hld else []
-    _gh_fx     = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
-    _gh_val    = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
-    _gh_ref    = st.session_state.get("mp_last_refresh") or "—"
-    _has_data  = bool(_gh_hld)
-    _pnl_col   = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
-    _pnl_sign  = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
+    # ── Compute valuation ──────────────────────────────────────────────────
+    _gh_hld  = load_holdings()
+    _gh_ccys = list({getattr(h, "currency", "USD") for h in _gh_hld.values()}) if _gh_hld else []
+    _gh_fx   = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
+    _gh_val  = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
+    _gh_ref  = st.session_state.get("mp_last_refresh") or "—"
+    _has     = bool(_gh_hld)
+    _pc      = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
+    _ps      = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
 
-    _lbl  = ("<div style='font-size:0.6rem;color:#9ca3af;text-transform:uppercase;"
-             "letter-spacing:0.06em;line-height:1.4'>{}</div>")
-    _big  = "<div style='font-size:1.42rem;font-weight:700;line-height:1.15;margin-top:1px'>{}</div>"
-    _med  = "<div style='font-size:1.1rem;font-weight:600;line-height:1.15;margin-top:1px;color:{c}'>{v}</div>"
-    _sm   = "<div style='font-size:1.0rem;font-weight:600;line-height:1.15;margin-top:1px'>{}</div>"
-    _xs   = "<div style='font-size:0.78rem;color:#6b7280;line-height:1.4;margin-top:1px'>{}</div>"
-
-    with _c2:
-        if _has_data:
-            st.markdown(
-                f"<div style='padding-top:3px'>"
-                + _lbl.format(f"Portfolio ({_base_ccy})")
-                + _big.format(f"{_gh_val.total_portfolio_value_base:,.0f}")
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f"<div style='padding-top:3px'>"
-                + _lbl.format(f"Portfolio ({_base_ccy})")
-                + _xs.format("No holdings")
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-
-    with _c3:
-        if _has_data:
-            st.markdown(
-                f"<div style='padding-top:3px'>"
-                + _lbl.format("Unrealized P&L")
-                + _med.format(
-                    c=_pnl_col,
-                    v=(f"{_pnl_sign}{_gh_val.unrealized_pnl_base:,.0f} "
-                       f"<span style='font-size:0.76rem'>"
-                       f"({_pnl_sign}{_gh_val.unrealized_pnl_pct:.1f}%)</span>"),
-                )
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-
-    with _c4:
-        if _has_data:
-            st.markdown(
-                f"<div style='padding-top:3px'>"
-                + _lbl.format("Cash")
-                + _sm.format(f"{_gh_val.cash_value_base:,.0f}")
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-
-    with _c5:
-        st.markdown(
-            f"<div style='padding-top:3px'>"
-            + _lbl.format("Last Refresh")
-            + _xs.format(_gh_ref)
-            + "</div>",
-            unsafe_allow_html=True,
+    def _kpi(label: str, value_html: str) -> str:
+        return (
+            f"<div class='gh-kpi'>"
+            f"<div class='gh-lbl'>{label}</div>"
+            f"{value_html}"
+            f"</div>"
         )
 
-    with _c6:
-        st.markdown("<div style='padding-top:18px'>", unsafe_allow_html=True)
+    # ── Portfolio value (largest) ──────────────────────────────────────────
+    with _cp:
+        if _has:
+            st.markdown(_kpi(
+                f"Portfolio ({_base_ccy})",
+                f"<div class='gh-big'>{_gh_val.total_portfolio_value_base:,.0f}</div>",
+            ), unsafe_allow_html=True)
+        else:
+            st.markdown(_kpi(
+                f"Portfolio ({_base_ccy})",
+                "<div class='gh-xs'>No holdings</div>",
+            ), unsafe_allow_html=True)
+
+    # ── Unrealized P&L (medium-large, coloured) ───────────────────────────
+    with _cpl:
+        if _has:
+            _pct = f"<span style='font-size:0.72rem'>({_ps}{_gh_val.unrealized_pnl_pct:.1f}%)</span>"
+            st.markdown(_kpi(
+                "Unrealized P&L",
+                f"<div class='gh-med' style='color:{_pc}'>"
+                f"{_ps}{_gh_val.unrealized_pnl_base:,.0f} {_pct}</div>",
+            ), unsafe_allow_html=True)
+
+    # ── Cash (medium) ──────────────────────────────────────────────────────
+    with _cca:
+        if _has:
+            st.markdown(_kpi(
+                "Cash",
+                f"<div class='gh-sm'>{_gh_val.cash_value_base:,.0f}</div>",
+            ), unsafe_allow_html=True)
+
+    # ── Last refresh (small/muted) ─────────────────────────────────────────
+    with _cr:
+        st.markdown(_kpi(
+            "Refresh",
+            f"<div class='gh-xs'>{_gh_ref}</div>",
+        ), unsafe_allow_html=True)
+
+    # ── FX refresh button ──────────────────────────────────────────────────
+    with _cfx:
+        st.markdown("<div style='padding-top:16px'>", unsafe_allow_html=True)
         if st.button("💱", key="global_refresh_fx_btn", use_container_width=True,
                      help="Refresh FX rates from Yahoo Finance."):
             if _gh_hld:
@@ -5202,22 +5246,6 @@ def render_global_header() -> str:
 
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
-st.markdown(
-    """
-    <div class="bousala-title" style="padding:1.2rem 0 0.4rem 0;">
-      <div style="font-size:3.2rem; line-height:1.1;">🧭</div>
-      <div style="font-size:2.4rem; font-weight:800; letter-spacing:0.02em;">بوصلة</div>
-      <div style="font-size:1.15rem; color:#888; margin-top:0.3rem; font-weight:400;">
-        بوصلة المستثمر
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-st.caption(
-    "SEC filings · AI analysis · Portfolio state · Delta intelligence · Market prices"
-)
-
 render_global_header()
 
 (tab_holdings, tab_closed, tab_accounts, tab_transactions, tab_cash,
