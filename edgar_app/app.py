@@ -1948,6 +1948,24 @@ def render_holdings_tab() -> None:
             "automatically — so this holding has a full cost-basis history from day one."
         )
 
+        # ── Market inference helper ───────────────────────────────────────────
+        def _guess_market(vr) -> str:
+            exch = (getattr(vr, "exchange", "") or "").upper()
+            ccy  = (getattr(vr, "currency",  "") or "").upper()
+            _US = {"NMS","NGS","NGM","NCM","NYSE","AMEX","PCX","NYQ",
+                   "BATS","NASDAQGS","NASDAQGM","NASDAQCM","CBT","CME","NYB","NYM","CBOE"}
+            if exch in _US or ccy == "USD":
+                return "US"
+            if exch in {"SAU","TAD"} or ccy == "SAR":
+                return "Saudi"
+            if exch in {"LSE","IOB"} or ccy == "GBP":
+                return "UK"
+            if ccy in {"EUR","CHF","DKK","SEK","NOK"}:
+                return "Europe"
+            if ccy in {"JPY","HKD","SGD","CNY","KRW","AUD","NZD"}:
+                return "Asia"
+            return "Other"
+
         # ── Ticker input ──────────────────────────────────────────────────────
         _has_tk = st.checkbox("Has a market ticker (Yahoo Finance)", value=True, key="ahn_has_tk")
         if _has_tk:
@@ -1960,15 +1978,18 @@ def render_holdings_tab() -> None:
                 )
             with _tc2:
                 st.write("")
-                _do_val = st.button("🔍 Validate", key="ahn_val_btn", use_container_width=True,
-                                    help="Check on Yahoo Finance and auto-fill details.")
+                _do_val = st.button(
+                    "🔍 Validate & Fill", key="ahn_val_btn",
+                    use_container_width=True,
+                    help="Fetch from Yahoo Finance and auto-fill all form fields.",
+                )
 
-            # Saudi shorthand suggestion
+            # Saudi shorthand suggestion — clicking sets ticker and triggers validation
             _sa_sug = suggest_saudi_ticker(_tk_raw or "")
             if _sa_sug:
                 _sas1, _sas2 = st.columns([3, 1])
                 with _sas1:
-                    st.caption(f"💡 Did you mean **{_sa_sug}** (Yahoo Finance format)?")
+                    st.caption(f"💡 Did you mean **{_sa_sug}**?")
                 with _sas2:
                     if st.button(f"Use {_sa_sug}", key="ahn_sa_btn", use_container_width=True):
                         st.session_state["ahn_ticker_input"] = _sa_sug
@@ -1980,88 +2001,97 @@ def render_holdings_tab() -> None:
                 _wlc1, _wlc2 = st.columns([3, 1])
                 with _wlc1:
                     _wl_pick = st.selectbox(
-                        "Or quick-fill from Watchlist",
+                        "Or pick from Watchlist…",
                         options=["— enter manually —"] + _wl_opts,
                         key="ahn_wl_pick",
                     )
                 with _wlc2:
                     st.write("")
                     if (
-                        st.button("📋 Use", key="ahn_wl_btn", use_container_width=True)
+                        st.button("📋 Fill & Validate", key="ahn_wl_btn", use_container_width=True)
                         and _wl_pick != "— enter manually —"
                     ):
                         st.session_state["ahn_ticker_input"] = _wl_pick
                         _do_val = True
 
-            # Run validation
+            # ── Validation — runs BEFORE form fields so session state is ready ──
             if _do_val:
                 _to_check = st.session_state.get("ahn_ticker_input", "").strip().upper()
                 if _to_check:
-                    with st.spinner(f"Checking **{_to_check}** on Yahoo Finance…"):
+                    with st.spinner(f"Validating **{_to_check}**…"):
                         _vr = validate_yahoo_ticker(_to_check)
                     st.session_state["ahn_validation"] = _vr
 
-            # Show result
+                    if _vr.exists:
+                        # Write directly into widget session-state keys so the
+                        # form fields below pick up the values on THIS render.
+                        st.session_state["ahn_tk_confirm"] = _vr.resolved_ticker or _to_check
+                        if _vr.company_name:
+                            st.session_state["ahn_name"] = _vr.company_name
+                        if _vr.current_price and _vr.current_price > 0:
+                            st.session_state["ahn_price"] = float(_vr.current_price)
+                        if _vr.currency and _vr.currency in CURRENCIES:
+                            st.session_state["ahn_ccy"] = _vr.currency
+                        if _vr.asset_type and _vr.asset_type in ASSET_TYPES:
+                            st.session_state["ahn_type"] = _vr.asset_type
+                        _mkt = _guess_market(_vr)
+                        if _mkt in MARKETS:
+                            st.session_state["ahn_market"] = _mkt
+
+            # ── Compact validation badge (shown once fields are populated) ────
             _val = st.session_state.get("ahn_validation")
             if _val:
                 if _val.exists:
-                    st.success(f"✅ **{_val.resolved_ticker}** · {_val.company_name or '—'}")
-                    _vca, _vcb, _vcc, _vcd = st.columns(4)
-                    _vca.metric("Price",    f"{_val.current_price:.4f}" if _val.current_price else "—")
-                    _vcb.metric("Currency", _val.currency  or "—")
-                    _vcc.metric("Exchange", _val.exchange  or "—")
-                    _vcd.metric("Type",     _val.asset_type or "—")
+                    st.success(
+                        f"✅ **{_val.resolved_ticker}** — {_val.company_name or '—'}  "
+                        f"| {_val.currency}  {_val.current_price:.4f}"
+                        f"  | {_val.exchange}  | {_val.asset_type}"
+                    )
                 else:
                     st.warning(
-                        f"⚠️ **{_val.resolved_ticker}** not found — will be saved as Manual-priced."
+                        f"⚠️ **{_val.resolved_ticker}** not found on Yahoo Finance — "
+                        "fill details manually; price will be tracked as Manual."
                     )
         else:
-            _val = None
-            st.info("No ticker — price will be updated manually.", icon="ℹ️")
+            st.info("No ticker — price will be tracked manually.", icon="ℹ️")
+
+        _yahoo_ok = bool(
+            _has_tk
+            and st.session_state.get("ahn_validation")
+            and st.session_state["ahn_validation"].exists
+        )
 
         st.divider()
 
-        # ── Pre-fill from validation ──────────────────────────────────────────
-        _val     = st.session_state.get("ahn_validation")
-        _pf_tk   = _val.resolved_ticker if (_val and _val.exists) else st.session_state.get("ahn_ticker_input", "").strip().upper()
-        _pf_name = _val.company_name    if (_val and _val.exists) else ""
-        _pf_price = float(_val.current_price or 0.0) if (_val and _val.exists) else 0.0
-        _pf_ccy  = (_val.currency if _val and _val.exists and _val.currency in CURRENCIES else "USD")
-        _pf_type = (_val.asset_type if _val and _val.exists and _val.asset_type in ASSET_TYPES else "Stock")
-        _yahoo_ok = bool(_has_tk and _val and _val.exists)
-
-        # ── Core fields ───────────────────────────────────────────────────────
+        # ── Core fields — driven entirely by session state keys ───────────────
+        # (No value= / index= overrides; session state set above takes precedence)
         _fc1, _fc2 = st.columns(2)
         with _fc1:
             _ad_tk = st.text_input(
                 "Ticker / Asset ID",
-                value=_pf_tk,
                 key="ahn_tk_confirm",
-                help="Unique identifier — uppercase letters, digits and dots only.",
+                help="Auto-filled after Validate. Edit if needed.",
             )
-            _ad_name   = st.text_input("Company / Asset name", value=_pf_name, key="ahn_name")
-            _ad_type   = st.selectbox(
-                "Asset type", ASSET_TYPES,
-                index=ASSET_TYPES.index(_pf_type) if _pf_type in ASSET_TYPES else 0,
-                key="ahn_type",
-            )
-            _ad_market = st.selectbox("Market", MARKETS, key="ahn_market")
-            _ad_sector = st.selectbox("Sector", DEFAULT_SECTORS, key="ahn_sector")
+            _ad_name   = st.text_input("Company / Asset name", key="ahn_name")
+            _ad_type   = st.selectbox("Asset type",  ASSET_TYPES,    key="ahn_type")
+            _ad_market = st.selectbox("Market",       MARKETS,        key="ahn_market")
+            _ad_sector = st.selectbox("Sector",       DEFAULT_SECTORS, key="ahn_sector")
         with _fc2:
-            _ad_ccy = st.selectbox(
-                "Currency", CURRENCIES,
-                index=CURRENCIES.index(_pf_ccy) if _pf_ccy in CURRENCIES else 0,
-                key="ahn_ccy",
+            _ad_ccy   = st.selectbox("Currency", CURRENCIES, key="ahn_ccy")
+            _ad_qty   = st.number_input(
+                "Opening quantity",
+                min_value=0.0001, step=1.0, format="%.4f", key="ahn_qty",
             )
-            _ad_qty   = st.number_input("Opening quantity", min_value=0.0001, value=1.0, step=1.0,
-                                        format="%.4f", key="ahn_qty")
-            _ad_cost  = st.number_input("Opening price / avg cost per unit",
-                                        min_value=0.0, step=0.01, format="%.4f", key="ahn_cost",
-                                        help="The price you actually paid per share/unit.")
-            _ad_price = st.number_input("Current market price per unit",
-                                        value=_pf_price, min_value=0.0, step=0.01,
-                                        format="%.4f", key="ahn_price",
-                                        help="Today's market price — auto-filled from Yahoo when validated.")
+            _ad_cost  = st.number_input(
+                "Opening price / avg cost per unit",
+                min_value=0.0, step=0.01, format="%.4f", key="ahn_cost",
+                help="The price you actually paid.",
+            )
+            _ad_price = st.number_input(
+                "Current market price per unit",
+                min_value=0.0, step=0.01, format="%.4f", key="ahn_price",
+                help="Auto-filled from Yahoo Finance after Validate.",
+            )
 
         # ── Account, fees, date ───────────────────────────────────────────────
         _pairs  = _acct_pairs_for()
