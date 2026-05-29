@@ -1871,6 +1871,199 @@ def render_portfolio_risk_tab() -> None:
     _render_valuation_debug(_val_risk)
 
 
+def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
+    """
+    Portfolio Allocation charts — shown at the bottom of the Holdings tab.
+    Uses PortfolioValuation.per_holding so all values are FX-converted and
+    consistent with the rest of the app.
+    """
+    import io as _io
+    import plotly.graph_objects as go
+    import pandas as pd
+
+    st.divider()
+    st.subheader("📊 Portfolio Allocation")
+
+    # ── Build allocation rows ─────────────────────────────────────────────────
+    _excluded: list[str] = []
+    _rows: list[dict] = []
+    for _r in val.per_holding:
+        _h = holdings.get(_r.ticker)
+        if _h is None:
+            continue
+        if _r.missing_price or _r.missing_fx:
+            _excluded.append(_r.ticker)
+            continue
+        if _r.base_market_value <= 0:
+            continue
+        _rows.append({
+            "Ticker":  _r.ticker,
+            "Company": getattr(_h, "company_name", _r.ticker) or _r.ticker,
+            "Market":  getattr(_h, "market",  "Other"),
+            "Sector":  getattr(_h, "sector",  "Other"),
+            "CCY":     _r.local_currency,
+            "_mv":     _r.base_market_value,
+            "_wt":     _r.invested_weight_pct,
+        })
+
+    if _excluded:
+        st.warning(
+            "Excluded from allocation due to missing price or FX: "
+            f"**{', '.join(_excluded)}**",
+            icon="⚠️",
+        )
+
+    if not _rows:
+        st.info("Add holdings and refresh prices to see allocation charts.", icon="📊")
+        return
+
+    _df = pd.DataFrame(_rows)
+
+    # ── Controls ─────────────────────────────────────────────────────────────
+    _cc1, _cc2 = st.columns(2)
+    with _cc1:
+        _view = st.selectbox(
+            "Chart view",
+            ["By Asset", "By Sector", "By Market", "By Currency"],
+            key="alloc_chart_view",
+        )
+    _grp = {"By Asset": "Company", "By Sector": "Sector",
+             "By Market": "Market", "By Currency": "CCY"}[_view]
+    with _cc2:
+        _filter_opts = ["All"] + sorted(_df[_grp].unique().tolist())
+        _filter_sel  = st.selectbox(
+            "Filter",
+            _filter_opts,
+            key="alloc_filter",
+        )
+
+    # ── Aggregate for pie ─────────────────────────────────────────────────────
+    _agg = (
+        _df[[_grp, "_mv"]]
+        .groupby(_grp, as_index=False)["_mv"].sum()
+        .sort_values("_mv", ascending=False)
+        .reset_index(drop=True)
+    )
+    _total_mv = _agg["_mv"].sum()
+    _agg["_pct"] = (_agg["_mv"] / _total_mv * 100).round(1) if _total_mv > 0 else 0.0
+
+    _PAL = ["#0ea5e9","#f43f5e","#22c55e","#f59e0b","#8b5cf6",
+            "#ec4899","#14b8a6","#f97316","#6366f1","#84cc16",
+            "#06b6d4","#a855f7","#fb923c","#34d399"]
+    _colors = [_PAL[i % len(_PAL)] for i in range(len(_agg))]
+
+    # ── Pie / donut ───────────────────────────────────────────────────────────
+    _fig = go.Figure(go.Pie(
+        labels=_agg[_grp],
+        values=_agg["_mv"],
+        textinfo="percent",
+        textposition="inside",
+        insidetextorientation="radial",
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            f"MV: %{{value:,.0f}} {base_ccy}<br>"
+            "Share: %{percent:.1f}<extra></extra>"
+        ),
+        marker=dict(colors=_colors, line=dict(color="#ffffff", width=1.5)),
+        hole=0.38,
+    ))
+    _fig.update_layout(
+        margin=dict(l=8, r=8, t=28, b=8),
+        height=360,
+        showlegend=True,
+        legend=dict(orientation="v", x=1.01, y=0.5, font=dict(size=11)),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        annotations=[dict(
+            text=f"<b>{base_ccy}</b>",
+            x=0.5, y=0.5, font_size=13, showarrow=False,
+        )],
+    )
+
+    # Render with click-to-filter — fall back silently on older Streamlit
+    try:
+        _chart_ev = st.plotly_chart(
+            _fig,
+            use_container_width=True,
+            key="alloc_pie",
+            on_select="rerun",
+            selection_mode="points",
+        )
+        # If user clicked a slice, push that label into the filter widget
+        if _chart_ev and getattr(_chart_ev, "selection", None):
+            _pts = getattr(_chart_ev.selection, "points", [])
+            if _pts:
+                _lbl = _pts[0].get("label", "")
+                if _lbl and _lbl in _filter_opts and _filter_sel == "All":
+                    st.session_state["alloc_filter"] = _lbl
+                    st.rerun()
+    except TypeError:
+        st.plotly_chart(_fig, use_container_width=True)
+
+    # ── Export buttons ────────────────────────────────────────────────────────
+    _de1, _de2 = st.columns(2)
+    with _de1:
+        try:
+            _png_bytes = _fig.to_image(format="png", scale=2)
+            st.download_button(
+                "⬇️ Chart (PNG)",
+                data=_png_bytes,
+                file_name=f"allocation_{_view.replace(' ','_').lower()}.png",
+                mime="image/png",
+                key="alloc_dl_png",
+                use_container_width=True,
+            )
+        except Exception:
+            st.caption("PNG export unavailable.")
+    with _de2:
+        _exp = _df[["Ticker","Company","Market","Sector","CCY","_mv","_wt"]].copy()
+        _exp.columns = ["Ticker","Company","Market","Sector","CCY",
+                        f"MV ({base_ccy})","Weight %"]
+        _exp = _exp.sort_values("Weight %", ascending=False)
+        _csv_io = _io.StringIO()
+        _exp.to_csv(_csv_io, index=False, float_format="%.2f")
+        st.download_button(
+            "⬇️ Allocation (CSV)",
+            data=_csv_io.getvalue(),
+            file_name=f"allocation_{_view.replace(' ','_').lower()}.csv",
+            mime="text/csv",
+            key="alloc_dl_csv",
+            use_container_width=True,
+        )
+
+    # ── Filtered asset list ───────────────────────────────────────────────────
+    if _filter_sel == "All":
+        _disp = _df.copy()
+    else:
+        _disp = _df[_df[_grp] == _filter_sel].copy()
+
+    _disp = (
+        _disp[["Ticker","Company","Market","Sector","CCY","_mv","_wt"]]
+        .sort_values("_wt", ascending=False)
+        .reset_index(drop=True)
+    )
+    _disp.columns = ["Ticker","Company","Market","Sector","CCY",
+                     f"MV ({base_ccy})","Weight %"]
+
+    _filter_caption = (
+        f"**{_view}** · {len(_disp)} holding(s)"
+        + (f" · filtered to **{_filter_sel}**" if _filter_sel != "All" else " · all holdings")
+    )
+    st.caption(_filter_caption)
+
+    st.dataframe(
+        _disp,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            f"MV ({base_ccy})": st.column_config.NumberColumn(
+                f"MV ({base_ccy})", format="%,.0f"
+            ),
+            "Weight %": st.column_config.NumberColumn("Weight %", format="%.1f%%"),
+        },
+    )
+
+
 def render_holdings_tab() -> None:
     """Actual Holdings + Transactions tab."""
     from portfolio import (
@@ -1898,6 +2091,8 @@ def render_holdings_tab() -> None:
     _fx        = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
     _manual_fx = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
     _val       = calculate_portfolio_valuation(holdings, _load_accts(), _base_ccy, fx_rates=_fx)
+    # Per-holding weight map (invested weight, not including cash)
+    _wt_map    = {r.ticker: r.invested_weight_pct for r in _val.per_holding}
 
     def _mv_base(h) -> float:
         ccy  = getattr(h, "currency", "USD")
@@ -1955,6 +2150,7 @@ def render_holdings_tab() -> None:
                 "Price":    round(h.current_price, 4),
                 _mv_col:    mv_base,
                 "P&L %":    round(pnl_pct, 2),
+                "Wt %":     round(_wt_map.get(ticker, 0.0), 1),
                 "CCY":      ccy,
             })
 
@@ -1973,6 +2169,7 @@ def render_holdings_tab() -> None:
                 "Price":    st.column_config.NumberColumn("Price",    format="%.4f"),
                 _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.0f"),
                 "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
+                "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
                 "CCY":      st.column_config.TextColumn("CCY",        width="small"),
             },
         )
@@ -2109,6 +2306,9 @@ def render_holdings_tab() -> None:
                                 update_current_price(tk, new_p, source="manual")
                                 st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
+
+        # ── Portfolio Allocation ───────────────────────────────────────────────
+        _render_allocation_section(_val, holdings, _base_ccy)
 
     # ── Account helpers (needed by all dialogs, including Add New) ───────────
     from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
