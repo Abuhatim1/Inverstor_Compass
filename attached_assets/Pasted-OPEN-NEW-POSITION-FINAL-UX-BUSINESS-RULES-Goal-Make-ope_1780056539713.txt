@@ -1,0 +1,275 @@
+OPEN NEW POSITION – FINAL UX & BUSINESS RULES
+
+Goal:
+Make opening a new position fast, intuitive, and consistent with portfolio accounting rules while eliminating duplicate workflows and data integrity issues.
+
+--------------------------------------------------
+1) SINGLE ENTRY POINT
+--------------------------------------------------
+
+Remove all standalone "Add Holding" forms.
+
+The Holdings table is the primary control center.
+
+Under the holdings table, display a single:
+
++ Add New Position
+
+button.
+
+This button is only for opening a completely new position.
+
+--------------------------------------------------
+2) EXISTING POSITIONS
+--------------------------------------------------
+
+If a holding already exists and remains open:
+
+Do NOT allow creating another holding record.
+
+All actions must be performed from the row itself:
+
+- Buy
+- Sell / Close
+- Edit
+- Correction
+
+Only if a position was fully closed may the same ticker be opened again as a new position.
+
+--------------------------------------------------
+3) DUPLICATE PREVENTION
+--------------------------------------------------
+
+Do not allow duplicate open positions for:
+
+- Same normalized ticker
+- Same account
+
+Display a clear message:
+
+"Position already exists. Use Buy/Edit from the holding row."
+
+--------------------------------------------------
+4) TICKER VALIDATION
+--------------------------------------------------
+
+User enters ticker.
+
+Clicks:
+
+Validate & Fill
+
+System automatically:
+
+- Validates ticker through yfinance
+- Normalizes ticker format
+- Retrieves company information
+- Populates form automatically
+
+No additional "Use" button.
+No manual re-entry.
+
+--------------------------------------------------
+5) AUTO-POPULATE FIELDS
+--------------------------------------------------
+
+After successful validation automatically fill:
+
+- Ticker
+- Company name
+- Asset type
+- Market
+- Currency
+- Sector (if available)
+- Current market price
+
+Display validation confirmation only.
+
+--------------------------------------------------
+6) DEFAULT VALUES
+--------------------------------------------------
+
+After successful validation:
+
+Opening Quantity:
+Default = 1
+Editable
+
+Opening Price:
+Default = latest market price retrieved from yfinance
+Editable
+
+Example:
+
+Current Market Price = 426.99
+
+Opening Price = 426.99
+
+Opening Date:
+Default = today's date
+Editable
+
+Transaction Fees:
+Default = 0
+
+--------------------------------------------------
+7) ACCOUNT FILTERING BY CURRENCY
+--------------------------------------------------
+
+When Currency = USD
+
+Only USD accounts should appear.
+
+When Currency = SAR
+
+Only SAR accounts should appear.
+
+Do not allow linking assets to accounts with different currencies.
+
+Future FX conversion support can be added later.
+
+--------------------------------------------------
+8) REAL-TIME CALCULATIONS
+--------------------------------------------------
+
+Whenever user changes:
+
+- Quantity
+- Opening price
+- Fees
+- Account
+- Correction status
+
+Recalculate immediately:
+
+- Opening cost
+- Available cash
+- Remaining cash
+
+without requiring button clicks.
+
+--------------------------------------------------
+9) CASH VALIDATION
+--------------------------------------------------
+
+Actual Position:
+
+Opening Cost =
+Quantity × Opening Price + Fees
+
+Must be less than or equal to available account cash.
+
+If insufficient cash:
+
+Block transaction.
+
+Display:
+
+"Insufficient cash balance."
+
+--------------------------------------------------
+10) CORRECTION MODE
+--------------------------------------------------
+
+Checkbox:
+
+Opening Correction (Skip Cash Debit)
+
+When enabled:
+
+- No cash validation
+- No cash deduction
+- Create correction transaction only
+- Update holdings
+
+Used for historical entries and record fixes.
+
+--------------------------------------------------
+11) TRANSACTION CREATION
+--------------------------------------------------
+
+Every new position must automatically create an opening BUY transaction.
+
+Never create holdings directly.
+
+This ensures:
+
+- FIFO integrity
+- Cost basis history
+- Sell functionality
+- Transaction traceability
+
+If correction mode is selected:
+
+Create opening BUY transaction flagged as correction.
+
+--------------------------------------------------
+12) DATA INTEGRITY
+--------------------------------------------------
+
+Holdings must always be derived from transactions.
+
+Never maintain holdings independently.
+
+Recalculate after every action:
+
+- Quantity
+- Average cost
+- Market value
+- Realized P&L
+- Unrealized P&L
+
+--------------------------------------------------
+13) MOBILE UX
+--------------------------------------------------
+
+Optimize for mobile.
+
+Reduce scrolling.
+
+Keep form compact.
+
+Use:
+- Sticky action buttons
+- Compact spacing
+- Mobile-friendly controls
+
+--------------------------------------------------
+14) EXPECTED USER FLOW
+--------------------------------------------------
+
+User clicks:
+
++ Add New Position
+
+Enter ticker
+
+Click:
+
+Validate & Fill
+
+System auto-populates:
+
+- Company
+- Market
+- Currency
+- Sector
+- Current price
+
+System defaults:
+
+- Quantity = 1
+- Opening Price = Latest Market Price
+- Opening Date = Today
+
+User selects account.
+
+User edits quantity or price if desired.
+
+System calculates cost instantly.
+
+User saves.
+
+Opening BUY transaction created automatically.
+
+Holding appears in portfolio with complete transaction history.

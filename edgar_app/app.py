@@ -2029,14 +2029,26 @@ def render_holdings_tab() -> None:
                         if _vr.company_name:
                             st.session_state["ahn_name"] = _vr.company_name
                         if _vr.current_price and _vr.current_price > 0:
-                            st.session_state["ahn_price"] = float(_vr.current_price)
+                            _live_p = float(_vr.current_price)
+                            st.session_state["ahn_price"] = _live_p
+                            # Default opening price = latest market price (spec §6)
+                            st.session_state["ahn_cost"]  = _live_p
                         if _vr.currency and _vr.currency in CURRENCIES:
                             st.session_state["ahn_ccy"] = _vr.currency
+                            # Reset account selection when currency changes
+                            st.session_state.pop("ahn_acct_id", None)
                         if _vr.asset_type and _vr.asset_type in ASSET_TYPES:
                             st.session_state["ahn_type"] = _vr.asset_type
                         _mkt = _guess_market(_vr)
                         if _mkt in MARKETS:
                             st.session_state["ahn_market"] = _mkt
+                        # Sector — populated from yfinance info dict (spec §5)
+                        _vr_sector = getattr(_vr, "sector", "")
+                        if _vr_sector and _vr_sector in DEFAULT_SECTORS:
+                            st.session_state["ahn_sector"] = _vr_sector
+                        # Quantity default = 1 on fresh validation
+                        if "ahn_qty" not in st.session_state:
+                            st.session_state["ahn_qty"] = 1.0
 
             # ── Compact validation badge (shown once fields are populated) ────
             _val = st.session_state.get("ahn_validation")
@@ -2064,56 +2076,57 @@ def render_holdings_tab() -> None:
         st.divider()
 
         # ── Core fields — driven entirely by session state keys ───────────────
-        # (No value= / index= overrides; session state set above takes precedence)
         _fc1, _fc2 = st.columns(2)
         with _fc1:
-            _ad_tk = st.text_input(
-                "Ticker / Asset ID",
-                key="ahn_tk_confirm",
-                help="Auto-filled after Validate. Edit if needed.",
-            )
+            _ad_tk     = st.text_input("Ticker / Asset ID", key="ahn_tk_confirm",
+                                       help="Auto-filled after Validate. Edit if needed.")
             _ad_name   = st.text_input("Company / Asset name", key="ahn_name")
-            _ad_type   = st.selectbox("Asset type",  ASSET_TYPES,    key="ahn_type")
-            _ad_market = st.selectbox("Market",       MARKETS,        key="ahn_market")
+            _ad_type   = st.selectbox("Asset type",  ASSET_TYPES,     key="ahn_type")
+            _ad_market = st.selectbox("Market",       MARKETS,         key="ahn_market")
             _ad_sector = st.selectbox("Sector",       DEFAULT_SECTORS, key="ahn_sector")
         with _fc2:
-            _ad_ccy   = st.selectbox("Currency", CURRENCIES, key="ahn_ccy")
-            _ad_qty   = st.number_input(
-                "Opening quantity",
-                min_value=0.0001, step=1.0, format="%.4f", key="ahn_qty",
-            )
-            _ad_cost  = st.number_input(
-                "Opening price / avg cost per unit",
-                min_value=0.0, step=0.01, format="%.4f", key="ahn_cost",
-                help="The price you actually paid.",
-            )
-            _ad_price = st.number_input(
-                "Current market price per unit",
-                min_value=0.0, step=0.01, format="%.4f", key="ahn_price",
-                help="Auto-filled from Yahoo Finance after Validate.",
-            )
+            _ad_ccy  = st.selectbox("Currency", CURRENCIES, key="ahn_ccy")
+            _ad_qty  = st.number_input("Opening quantity",
+                                       min_value=0.0001, step=1.0, format="%.4f", key="ahn_qty")
+            _ad_cost = st.number_input("Opening price per unit",
+                                       min_value=0.0, step=0.01, format="%.4f", key="ahn_cost",
+                                       help="Price you paid — defaults to latest market price after Validate.")
+            _ad_price = st.number_input("Current market price",
+                                        min_value=0.0, step=0.01, format="%.4f", key="ahn_price",
+                                        help="Live price from Yahoo Finance — auto-filled after Validate.")
 
-        # ── Account, fees, date ───────────────────────────────────────────────
-        _pairs  = _acct_pairs_for()
-        _labels = ["— no account —"] + [_acct_dn(a) for _, a in _pairs]
-        _ids    = [""] + [aid for aid, _ in _pairs]
-        _ad_acct_i = st.selectbox("Link to account", options=range(len(_labels)),
-                                  format_func=lambda i: _labels[i], key="ahn_acct")
-        _af1, _af2 = st.columns(2)
-        with _af1:
+        # ── Account (filtered by selected currency) ───────────────────────────
+        _pairs_ccy = _acct_pairs_for(currency=_ad_ccy)
+        _pairs_all = _acct_pairs_for()
+        _use_pairs = _pairs_ccy if _pairs_ccy else _pairs_all
+        _acct_opts = {"": f"— no account —"}
+        for _aid_k, _a_v in _use_pairs:
+            _acct_opts[_aid_k] = _acct_dn(_a_v)
+        if not _pairs_ccy and _pairs_all:
+            st.caption(f"ℹ️ No {_ad_ccy} accounts — showing all currencies.")
+        _ad_aid = st.selectbox(
+            f"Link to account ({_ad_ccy})",
+            options=list(_acct_opts.keys()),
+            format_func=lambda k: _acct_opts[k],
+            key="ahn_acct_id",
+        )
+
+        # ── Fees / Date / Notes / Correction ─────────────────────────────────
+        _tf1, _tf2 = st.columns(2)
+        with _tf1:
             _ad_fees = st.number_input("Transaction fees", min_value=0.0, value=0.0,
                                        step=0.01, format="%.2f", key="ahn_fees")
-        with _af2:
-            _ad_date = st.date_input("Opening date (optional)", value=None, key="ahn_date")
-        _ad_notes = st.text_input("Notes", max_chars=200, key="ahn_notes",
+        with _tf2:
+            _ad_date = st.date_input("Opening date", value=date.today(), key="ahn_date")
+        _ad_notes = st.text_input("Notes (optional)", max_chars=200, key="ahn_notes",
                                   placeholder="e.g. bought via Tadawul, rights issue…")
         _ad_corr  = st.checkbox(
             "Opening correction — skip cash debit",
             key="ahn_corr",
             help=(
-                "Tick this when recording a pre-existing position. "
-                "The opening BUY transaction is still created (for FIFO history) "
-                "but no cash is deducted from the linked account."
+                "For historical entries and record fixes. "
+                "A BUY transaction is still created for FIFO history "
+                "but no cash is deducted from the account."
             ),
         )
 
@@ -2125,100 +2138,111 @@ def render_holdings_tab() -> None:
 
         if _is_dup:
             st.error(
-                f"**{_ad_tk_clean}** already has an open position. "
-                "Use that row's **Buy / Edit / Sell** actions to modify it.  \n"
-                "You can only open a new position once the existing one is fully closed.",
+                f"**{_ad_tk_clean}** already has an open position.  \n"
+                "Use that row's **Buy / Edit / Sell** actions to modify it. "
+                "A new position can only be opened once the existing one is fully closed.",
                 icon="🚫",
             )
 
-        # ── Cash preview ──────────────────────────────────────────────────────
-        _ad_aid       = _ids[_ad_acct_i]
+        # ── Real-time cost / cash calculation (spec §8) ───────────────────────
         _ad_total_cost = float(_ad_qty) * float(_ad_cost) + float(_ad_fees)
-        if not _ad_corr and _ad_aid:
+        _cash_ok       = True
+        _acct_bal      = None
+
+        if _ad_aid:
             try:
-                _ck_accts = _load_accts_raw()
-                _ck_bal   = _ck_accts[_ad_aid].cash_balance if _ad_aid in _ck_accts else None
-                if _ck_bal is not None:
-                    _ck_icon = "🟢" if _ck_bal >= _ad_total_cost else "🔴"
-                    st.caption(
-                        f"{_ck_icon} Account cash: **{_ck_bal:,.2f} {_ad_ccy}**  "
-                        f"· Opening cost: **{_ad_total_cost:,.2f} {_ad_ccy}**"
-                    )
+                _ck_accts  = _load_accts_raw()
+                _acct_bal  = _ck_accts[_ad_aid].cash_balance if _ad_aid in _ck_accts else None
             except Exception:
                 pass
+
+        # Always show the cost calc row; add cash columns when account is linked
+        if _acct_bal is not None and not _ad_corr:
+            _remaining  = _acct_bal - _ad_total_cost
+            _cash_ok    = _remaining >= 0
+            _rc1, _rc2, _rc3 = st.columns(3)
+            _rc1.metric("Opening Cost",    f"{_ad_total_cost:,.2f} {_ad_ccy}")
+            _rc2.metric("Account Cash",    f"{_acct_bal:,.2f} {_ad_ccy}")
+            _rc3.metric(
+                "Remaining Cash",
+                f"{_remaining:,.2f} {_ad_ccy}",
+                delta=f"{_remaining:+,.2f}",
+                delta_color="normal" if _cash_ok else "inverse",
+            )
+            if not _cash_ok:
+                st.error("Insufficient cash balance.", icon="🚫")
+        else:
+            st.caption(f"Opening cost: **{_ad_total_cost:,.2f} {_ad_ccy}**"
+                       + ("  ·  correction mode — no cash deducted" if _ad_corr else ""))
 
         # ── Submit ────────────────────────────────────────────────────────────
         _xb1, _xb2 = st.columns(2)
         with _xb1:
-            _cash_ok = True
-            if not _ad_corr and _ad_aid:
-                try:
-                    _ck2 = _load_accts_raw()
-                    _bal2 = _ck2[_ad_aid].cash_balance if _ad_aid in _ck2 else None
-                    if _bal2 is not None and _bal2 < _ad_total_cost:
-                        _cash_ok = False
-                except Exception:
-                    pass
-
             if st.button(
                 "✅ Open Position", type="primary", use_container_width=True,
-                disabled=(not _ad_tk_clean or _is_dup or not _cash_ok),
+                disabled=(not _ad_tk_clean or _is_dup or (not _ad_corr and not _cash_ok)),
                 key="ahn_submit",
             ):
-                if _cash_ok is False:
-                    st.error("Insufficient account cash. Tick 'Opening correction' to bypass.")
-                elif _ad_qty <= 0:
-                    st.error("Quantity must be > 0.")
-                else:
-                    try:
-                        _t, _h2, _e = record_transaction(
-                            ticker=_ad_tk_clean, side="BUY",
-                            quantity=float(_ad_qty),
-                            price=float(_ad_cost),
-                            txn_date=str(_ad_date) if _ad_date else None,
-                            notes=_ad_notes,
-                            company_name=_ad_name.strip() or _ad_tk_clean,
-                            market=_ad_market, sector=_ad_sector,
-                            asset_type=_ad_type, currency=_ad_ccy,
-                            has_ticker=_has_tk,
-                            account_id=_ad_aid, fees=float(_ad_fees),
+                try:
+                    _t, _h2, _e = record_transaction(
+                        ticker=_ad_tk_clean, side="BUY",
+                        quantity=float(_ad_qty),
+                        price=float(_ad_cost),
+                        txn_date=str(_ad_date) if _ad_date else None,
+                        notes=_ad_notes,
+                        company_name=_ad_name.strip() or _ad_tk_clean,
+                        market=_ad_market, sector=_ad_sector,
+                        asset_type=_ad_type, currency=_ad_ccy,
+                        has_ticker=_has_tk,
+                        account_id=_ad_aid, fees=float(_ad_fees),
+                    )
+                    if _e:
+                        st.error(_e)
+                    else:
+                        # Persist metadata not carried by record_transaction
+                        _sec_linked = bool(
+                            _yahoo_ok and _ad_market == "US"
+                            and _ad_type in ("Stock", "ETF")
                         )
-                        if _e:
-                            st.error(_e)
-                        else:
-                            # Persist extra metadata not carried by record_transaction
-                            _sec_linked = bool(_yahoo_ok and _ad_market == "US" and _ad_type in ("Stock", "ETF"))
-                            upsert_holding(
-                                ticker=_ad_tk_clean,
-                                sec_linked=_sec_linked,
-                                price_source="yfinance" if _yahoo_ok else "manual",
-                                price_date=date.today().isoformat(),
+                        upsert_holding(
+                            ticker=_ad_tk_clean,
+                            sec_linked=_sec_linked,
+                            price_source="yfinance" if _yahoo_ok else "manual",
+                            price_date=date.today().isoformat(),
+                        )
+                        # Apply live price if it differs from the opening cost
+                        if _ad_price > 0 and abs(_ad_price - float(_ad_cost)) > 1e-9:
+                            update_current_price(
+                                _ad_tk_clean, _ad_price,
+                                source="yfinance" if _yahoo_ok else "manual",
                             )
-                            # Apply live price if different from opening cost
-                            if _ad_price > 0 and abs(_ad_price - float(_ad_cost)) > 1e-9:
-                                update_current_price(
-                                    _ad_tk_clean, _ad_price,
-                                    source="yfinance" if _yahoo_ok else "manual",
-                                )
-                            # Debit cash (actual buy only)
-                            if not _ad_corr and _ad_aid:
-                                try:
-                                    _upd_cash(_ad_aid, -_ad_total_cost)
-                                except Exception:
-                                    pass
-                            # Clear validation
-                            for _k in ("ahn_validation", "ahn_ticker_input", "ahn_tk_confirm"):
-                                st.session_state.pop(_k, None)
-                            st.toast(
-                                f"Position opened: **{_ad_tk_clean}** · {_ad_qty:.4f} shares @ {_ad_cost:.4f}",
-                                icon="✅",
-                            )
-                            st.rerun()
-                    except Exception as _ex:
-                        st.error(f"Failed to open position — {_ex}")
+                        # Debit cash (actual buy only)
+                        if not _ad_corr and _ad_aid:
+                            try:
+                                _upd_cash(_ad_aid, -_ad_total_cost)
+                            except Exception:
+                                pass
+                        # Clear dialog state
+                        _keys_to_clear = [
+                            "ahn_validation", "ahn_ticker_input", "ahn_tk_confirm",
+                            "ahn_name", "ahn_cost", "ahn_price", "ahn_qty",
+                            "ahn_ccy", "ahn_type", "ahn_market", "ahn_sector",
+                            "ahn_acct_id", "ahn_has_tk",
+                        ]
+                        for _k in _keys_to_clear:
+                            st.session_state.pop(_k, None)
+                        st.toast(
+                            f"Position opened: **{_ad_tk_clean}** · "
+                            f"{_ad_qty:.4f} shares @ {_ad_cost:.4f} {_ad_ccy}",
+                            icon="✅",
+                        )
+                        st.rerun()
+                except Exception as _ex:
+                    st.error(f"Failed to open position — {_ex}")
         with _xb2:
             if st.button("Cancel", key="ahn_cancel", use_container_width=True):
-                st.session_state.pop("ahn_validation", None)
+                for _k in ("ahn_validation", "ahn_ticker_input"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
 
     # ── Dialogs + action bar ─────────────────────────────────────────────────

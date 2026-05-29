@@ -51,6 +51,7 @@ class TickerValidation:
     currency:         str  = ""      # e.g. "USD", "SAR"
     exchange:         str  = ""      # e.g. "NMS", "SAU", "CME"
     asset_type:       str  = ""      # normalised: Stock / ETF / Fund / Commodity / Cash / Other
+    sector:           str  = ""      # e.g. "Technology", "Financial Services"
     current_price:    float = 0.0
     price_source:     str  = ""      # "fast_info" | "info" | "history" | "unavailable"
     suggested_ticker: str  = ""      # non-empty when a Saudi shorthand was detected
@@ -121,6 +122,7 @@ def validate_yahoo_ticker(ticker: str) -> TickerValidation:
                 result.asset_type = _normalise_asset_type(
                     str(info.get("quoteType", ""))
                 )
+                result.sector = str(info.get("sector", "") or "")
                 # Use info price only as fallback if fast_info gave nothing
                 if not result.current_price:
                     for key in (
