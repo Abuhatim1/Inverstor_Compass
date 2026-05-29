@@ -1,15 +1,19 @@
-# [Project name]
+# بوصلة (Bousala) — Investment Research & Portfolio Compass
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Beginner-friendly SEC EDGAR investment research app with portfolio tracking, FX valuation, allocation charts, and AI-powered thesis analysis.
+
+## Stable Versions
+
+| Label | Commit ID | Date | What it includes |
+|---|---|---|---|
+| **Stable rev 0.1** | `4c99e7b10faa47dce53755c2fe94b04769e46c72` | 2026-05-29 | Multi-select allocation filters, PDF export, Developer Mode, warnings moved to bottom of Holdings page |
+
+To roll back: open Version History (clock icon, left sidebar) → find the checkpoint whose description matches → click **Rollback here**.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `streamlit run edgar_app/app.py --server.address=0.0.0.0 --server.port=5000` — start the app
+- Required env: `SESSION_SECRET`
 
 ## Stack
 
