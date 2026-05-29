@@ -1,0 +1,152 @@
+HEADER REDESIGN REQUIRED
+
+The current implementation is not what was intended.
+
+The Holdings page still starts with a large dashboard section that pushes the holdings table down.
+
+The objective is different:
+
+The holdings table must remain the primary visual focus when the page opens.
+
+--------------------------------------------------
+
+DESIGN PRINCIPLE
+
+The holdings table is the main content.
+
+Portfolio summary information is secondary supporting information.
+
+Therefore:
+
+Users should see the holdings table immediately after opening the page without scrolling.
+
+--------------------------------------------------
+
+GLOBAL HEADER
+
+Create a compact global header shown consistently across all application tabs.
+
+Examples:
+- Holdings
+- Accounts
+- Transactions
+- Watchlist
+- Analytics
+- Settings
+
+The same header component should be reused everywhere.
+
+--------------------------------------------------
+
+HEADER LAYOUT
+
+Use a horizontal responsive header.
+
+Do not stack information vertically.
+
+Bad:
+Base Currency
+Cash
+Total
+P&L
+Last Refresh
+
+each on separate rows.
+
+Good:
+
+[SAR]   [638.8K]
+Portfolio
+
+[+53.2K]
+Unrealized P&L
+
+[0]
+Cash
+
+[13:10]
+Refresh
+
+--------------------------------------------------
+
+FONT PRIORITY
+
+Use visual hierarchy.
+
+Most important information:
+Portfolio Value
+
+Largest font.
+
+Second:
+Portfolio P&L
+
+Medium-large font.
+
+Third:
+Cash
+
+Medium font.
+
+Fourth:
+Refresh time and base currency
+
+Small font.
+
+--------------------------------------------------
+
+MOBILE DESIGN
+
+On mobile:
+
+Use compact KPI cards in a single horizontal row.
+
+Allow horizontal swipe if required.
+
+Do not increase page height.
+
+The header should occupy roughly 10-15% of screen height maximum.
+
+--------------------------------------------------
+
+TABLE PRIORITY
+
+Immediately below the global header:
+
+Display Holdings Table.
+
+No large summary blocks.
+
+No dashboard section.
+
+No oversized metrics.
+
+The table must remain the first major visual object.
+
+--------------------------------------------------
+
+CONSISTENCY
+
+The same compact global header should appear across all tabs.
+
+This gives users immediate awareness of:
+
+- Portfolio value
+- P&L
+- Cash
+- Base currency
+- Last refresh
+
+without sacrificing screen space.
+
+--------------------------------------------------
+
+SUCCESS CRITERIA
+
+When opening any tab:
+
+1. Compact global header visible.
+2. Main tab content visible immediately.
+3. No scrolling required to reach the primary content.
+4. Portfolio information available at a glance.
+5. Holdings table remains the focal point of the Holdings page.

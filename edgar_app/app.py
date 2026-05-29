@@ -1580,7 +1580,7 @@ def render_portfolio_risk_tab() -> None:
     from portfolio.valuation import calculate_portfolio_valuation
     from portfolio.accounts import load_accounts as _load_accts_risk
     from fx_rates import get_rates_for_holdings as _gfx_risk
-    _base_ccy_risk = st.session_state.get("holdings_base_ccy", "SAR")
+    _base_ccy_risk = st.session_state.get("global_base_ccy", "SAR")
     _ccys_risk = list({getattr(h, "currency", "USD") for h in holdings.values()})
     _fx_risk   = _gfx_risk(_ccys_risk, _base_ccy_risk) if _ccys_risk else {}
     _val_risk  = calculate_portfolio_valuation(
@@ -1692,7 +1692,8 @@ def render_holdings_tab() -> None:
     import pandas as pd
     from datetime import date
 
-    st.header("💼 Holdings")
+    # Base currency comes from the global header selector above all tabs
+    _base_ccy = st.session_state.get("global_base_ccy", "SAR")
 
     holdings  = load_holdings()
     watchlist = load_portfolio()
@@ -1701,42 +1702,10 @@ def render_holdings_tab() -> None:
     from portfolio.valuation import calculate_portfolio_valuation
     from portfolio.accounts import load_accounts as _load_accts
 
-    # ── Compact global header ─────────────────────────────────────────────────
-    _h1, _h2, _h3, _h4, _h5, _h6, _h7 = st.columns([1.2, 1.4, 1.4, 1.4, 1.4, 1.2, 0.6])
-    with _h1:
-        _base_ccy = st.selectbox(
-            "Base currency",
-            options=["SAR", "USD", "EUR", "GBP"],
-            index=0,
-            key="holdings_base_ccy",
-            help="All totals shown in this currency.",
-        )
-
     _all_ccys  = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
     _fx        = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
     _manual_fx = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
     _val       = calculate_portfolio_valuation(holdings, _load_accts(), _base_ccy, fx_rates=_fx)
-    _last_ref  = st.session_state.get("mp_last_refresh") or "—"
-
-    if holdings:
-        _h2.metric("Holdings",  f"{_val.holdings_value_base:,.0f} {_base_ccy}")
-        _h3.metric("Cash",      f"{_val.cash_value_base:,.0f} {_base_ccy}")
-        _h4.metric("Total",     f"{_val.total_portfolio_value_base:,.0f} {_base_ccy}")
-        _h5.metric(
-            "Unrealized P&L",
-            f"{_val.unrealized_pnl_base:,.0f} {_base_ccy}",
-            delta=f"{_val.unrealized_pnl_pct:+.2f}%",
-        )
-        _h6.metric("Last Refresh", _last_ref)
-    with _h7:
-        st.write("")
-        if st.button("💱", key="refresh_fx_btn", use_container_width=True,
-                     help="Refresh FX rates from Yahoo Finance."):
-            if holdings:
-                with st.spinner("Fetching FX rates…"):
-                    refresh_fx_rates(_all_ccys, _base_ccy)
-                st.toast("FX rates updated", icon="💱")
-                st.rerun()
 
     def _mv_base(h) -> float:
         ccy  = getattr(h, "currency", "USD")
@@ -2947,7 +2916,7 @@ def render_accounts_tab() -> None:
     active   = {aid: a for aid, a in accounts.items() if a.active}
 
     # ── Summary ───────────────────────────────────────────────────────────────
-    _ab_ccy = st.session_state.get("holdings_base_ccy", "SAR")
+    _ab_ccy = st.session_state.get("global_base_ccy", "SAR")
     _ab_ccys = list({a.base_currency for a in active.values()})
     _ab_fx   = get_rates_for_holdings(_ab_ccys, _ab_ccy) if _ab_ccys else {}
     _total_cash = sum(
@@ -5130,6 +5099,108 @@ def render_upload_tab() -> None:
 """)
 
 
+# ── Global compact header (shown above every tab) ─────────────────────────────
+def render_global_header() -> str:
+    """Compact KPI bar: base-ccy selector + portfolio value + P&L + cash + refresh."""
+    from portfolio import load_holdings
+    from portfolio.accounts import load_accounts as _gh_accts
+    from fx_rates import get_rates_for_holdings, refresh_fx_rates
+    from portfolio.valuation import calculate_portfolio_valuation
+
+    _c1, _c2, _c3, _c4, _c5, _c6 = st.columns([0.55, 1.9, 1.35, 0.9, 1.05, 0.35])
+
+    with _c1:
+        _base_ccy = st.selectbox(
+            "CCY",
+            options=["SAR", "USD", "EUR", "GBP"],
+            key="global_base_ccy",
+            label_visibility="collapsed",
+            help="Base currency for all portfolio totals.",
+        )
+
+    _gh_hld    = load_holdings()
+    _gh_ccys   = list({getattr(h, "currency", "USD") for h in _gh_hld.values()}) if _gh_hld else []
+    _gh_fx     = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
+    _gh_val    = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
+    _gh_ref    = st.session_state.get("mp_last_refresh") or "—"
+    _has_data  = bool(_gh_hld)
+    _pnl_col   = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
+    _pnl_sign  = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
+
+    _lbl  = ("<div style='font-size:0.6rem;color:#9ca3af;text-transform:uppercase;"
+             "letter-spacing:0.06em;line-height:1.4'>{}</div>")
+    _big  = "<div style='font-size:1.42rem;font-weight:700;line-height:1.15;margin-top:1px'>{}</div>"
+    _med  = "<div style='font-size:1.1rem;font-weight:600;line-height:1.15;margin-top:1px;color:{c}'>{v}</div>"
+    _sm   = "<div style='font-size:1.0rem;font-weight:600;line-height:1.15;margin-top:1px'>{}</div>"
+    _xs   = "<div style='font-size:0.78rem;color:#6b7280;line-height:1.4;margin-top:1px'>{}</div>"
+
+    with _c2:
+        if _has_data:
+            st.markdown(
+                f"<div style='padding-top:3px'>"
+                + _lbl.format(f"Portfolio ({_base_ccy})")
+                + _big.format(f"{_gh_val.total_portfolio_value_base:,.0f}")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"<div style='padding-top:3px'>"
+                + _lbl.format(f"Portfolio ({_base_ccy})")
+                + _xs.format("No holdings")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+
+    with _c3:
+        if _has_data:
+            st.markdown(
+                f"<div style='padding-top:3px'>"
+                + _lbl.format("Unrealized P&L")
+                + _med.format(
+                    c=_pnl_col,
+                    v=(f"{_pnl_sign}{_gh_val.unrealized_pnl_base:,.0f} "
+                       f"<span style='font-size:0.76rem'>"
+                       f"({_pnl_sign}{_gh_val.unrealized_pnl_pct:.1f}%)</span>"),
+                )
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+
+    with _c4:
+        if _has_data:
+            st.markdown(
+                f"<div style='padding-top:3px'>"
+                + _lbl.format("Cash")
+                + _sm.format(f"{_gh_val.cash_value_base:,.0f}")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+
+    with _c5:
+        st.markdown(
+            f"<div style='padding-top:3px'>"
+            + _lbl.format("Last Refresh")
+            + _xs.format(_gh_ref)
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+    with _c6:
+        st.markdown("<div style='padding-top:18px'>", unsafe_allow_html=True)
+        if st.button("💱", key="global_refresh_fx_btn", use_container_width=True,
+                     help="Refresh FX rates from Yahoo Finance."):
+            if _gh_hld:
+                with st.spinner("…"):
+                    refresh_fx_rates(_gh_ccys, _base_ccy)
+                st.toast("FX rates updated", icon="💱")
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.divider()
+    return _base_ccy
+
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.markdown(
     """
@@ -5146,6 +5217,8 @@ st.markdown(
 st.caption(
     "SEC filings · AI analysis · Portfolio state · Delta intelligence · Market prices"
 )
+
+render_global_header()
 
 (tab_holdings, tab_closed, tab_accounts, tab_transactions, tab_cash,
  tab_decisions, tab_risk, tab_command,
