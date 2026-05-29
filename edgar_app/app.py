@@ -83,7 +83,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Global CSS — brand bar, KPI strip, sticky header ──────────────────────────
+# ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
@@ -92,25 +92,27 @@ st.markdown(
     [data-testid="stMarkdownContainer"] div,
     [data-testid="stMarkdownContainer"] span { unicode-bidi: plaintext; }
 
+    /* ── Hide Replit deploy badge (overlaps content on mobile) ──────────── */
+    [data-testid="stDecoration"] { display: none !important; }
+
     /* ── Page chrome ────────────────────────────────────────────────────── */
-    /* Reduce default Streamlit top padding — our header sits right at top  */
     .block-container {
-        padding-top: 0.4rem !important;
-        padding-left: 2rem   !important;
-        padding-right: 2rem  !important;
+        padding-top:   0.4rem !important;
+        padding-left:  2rem   !important;
+        padding-right: 2rem   !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important;
     }
 
     /* ── Sticky global header ───────────────────────────────────────────── */
-    /* Targets the st.columns row that contains .bousala-appbar            */
     [data-testid="stHorizontalBlock"]:has(.bousala-appbar) {
         position: sticky !important;
-        top: 2.875rem !important;          /* sit below Streamlit toolbar   */
+        top: 2.875rem !important;
         z-index: 999  !important;
         background-color: #ffffff !important;
         border-bottom: 1px solid #e2e8f0 !important;
-        padding-bottom: 6px  !important;
-        padding-top:    4px  !important;
-        /* Stretch edge-to-edge within the block-container  */
+        padding-bottom: 6px !important;
+        padding-top:    4px !important;
         margin-left:  -2rem !important;
         margin-right: -2rem !important;
         padding-left:  2rem !important;
@@ -133,19 +135,13 @@ st.markdown(
         letter-spacing: 0.01em;
         line-height: 1.2;
     }
-    .bousala-appbar .ba-sub {
-        font-size: 0.62rem;
-        color: #94a3b8;
-        letter-spacing: 0.04em;
-        line-height: 1.4;
-    }
 
     /* ── KPI strip ──────────────────────────────────────────────────────── */
     .gh-kpi-row {
         display: flex;
         gap: 2.2rem;
         align-items: flex-start;
-        flex-wrap: nowrap;          /* landscape: always one row            */
+        flex-wrap: nowrap;
         padding: 4px 0;
     }
     .gh-kpi { min-width: 0; }
@@ -157,35 +153,145 @@ st.markdown(
         line-height: 1.6;
         white-space: nowrap;
     }
-    /* Font hierarchy ── portfolio → P&L → cash → refresh */
-    .gh-val-big { font-size: 2rem;   font-weight: 700; line-height: 1.1; white-space: nowrap; }
-    .gh-val-med { font-size: 1.5rem; font-weight: 600; line-height: 1.1; white-space: nowrap; }
-    .gh-val-sm  { font-size: 1.25rem;font-weight: 600; line-height: 1.1; }
-    .gh-val-xs  { font-size: 1rem;   color: #6b7280;   line-height: 1.4; }
+    .gh-val-big { font-size: 2rem;    font-weight: 700; line-height: 1.1; white-space: nowrap; }
+    .gh-val-med { font-size: 1.5rem;  font-weight: 600; line-height: 1.1; white-space: nowrap; }
+    .gh-val-sm  { font-size: 1.25rem; font-weight: 600; line-height: 1.1; }
+    .gh-val-xs  { font-size: 1rem;    color: #6b7280;   line-height: 1.4; }
     .gh-pct     { font-size: 0.82rem; font-weight: 500; }
 
-    /* Portrait / narrow screens: wrap KPIs into 2 rows max               */
-    @media (max-width: 700px) {
-        .gh-kpi-row {
-            flex-wrap: wrap;
-            gap: 0.9rem 1.8rem;
-        }
-        /* Row 1: Portfolio + P&L */
-        .gh-kpi:nth-child(1),
-        .gh-kpi:nth-child(2) { flex: 1 1 42%; }
-        /* Row 2: Cash + Refresh */
-        .gh-kpi:nth-child(3),
-        .gh-kpi:nth-child(4) { flex: 1 1 42%; }
-        /* Shrink font sizes proportionally */
-        .gh-val-big { font-size: 1.35rem; }
-        .gh-val-med { font-size: 1.05rem; }
-        .gh-val-sm  { font-size: 0.9rem; }
-        .gh-val-xs  { font-size: 0.82rem; }
+    /* ── Tab bar — always horizontally scrollable, never wraps ──────────── */
+    [data-testid="stTabs"] > div:first-child {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        flex-wrap: nowrap !important;
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+    }
+    [data-testid="stTabs"] > div:first-child::-webkit-scrollbar { display: none; }
+    [data-testid="stTabs"] button[role="tab"] { white-space: nowrap !important; }
+
+    /* ── Accounts summary strip ─────────────────────────────────────────── */
+    .acct-summary-row {
+        display: flex;
+        gap: 1.5rem;
+        align-items: flex-start;
+        padding: 6px 0 10px 0;
+    }
+    .acct-kpi-lbl {
+        font-size: 0.65rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        line-height: 1.6;
+    }
+    .acct-kpi-val {
+        font-size: 1.15rem;
+        font-weight: 700;
+        line-height: 1.1;
+        color: #0f172a;
     }
 
-    /* Compact selectbox — remove extra bottom margin inside header        */
+    /* ══════════════════════════════════════════════════════════════════════
+       PORTRAIT / MOBILE  ≤ 700 px
+       ══════════════════════════════════════════════════════════════════════ */
+    @media (max-width: 700px) {
+        /* Tighter page margins */
+        .block-container {
+            padding-left:  0.6rem !important;
+            padding-right: 0.6rem !important;
+            padding-top:   0.2rem !important;
+        }
+        /* Push sticky header flush to toolbar */
+        [data-testid="stHorizontalBlock"]:has(.bousala-appbar) {
+            margin-left:  -0.6rem !important;
+            margin-right: -0.6rem !important;
+            padding-left:  0.6rem !important;
+            padding-right: 0.6rem !important;
+        }
+        /* Shrink logo */
+        .bousala-appbar svg { width: 30px !important; height: 30px !important; }
+        .bousala-appbar .ba-name { font-size: 0.85rem !important; }
+
+        /* KPI 2 × 2 compact grid */
+        .gh-kpi-row {
+            flex-wrap: wrap !important;
+            gap: 0.4rem 0.8rem !important;
+        }
+        .gh-kpi {
+            flex: 1 1 calc(50% - 0.4rem) !important;
+            min-width: calc(50% - 0.4rem) !important;
+        }
+        .gh-val-big { font-size: 1.1rem  !important; }
+        .gh-val-med { font-size: 0.92rem !important; }
+        .gh-val-sm  { font-size: 0.8rem  !important; }
+        .gh-val-xs  { font-size: 0.72rem !important; }
+        .gh-lbl     { font-size: 0.55rem !important; }
+        .gh-pct     { font-size: 0.68rem !important; }
+
+        /* Compact tab bar buttons */
+        [data-testid="stTabs"] button[role="tab"] {
+            padding: 0.3rem 0.55rem !important;
+            font-size: 0.72rem !important;
+        }
+
+        /* Smaller page headings */
+        h1 { font-size: 1.3rem !important; margin-bottom: 0.3rem !important; }
+        h2 { font-size: 1.1rem !important; margin-bottom: 0.2rem !important; }
+        h3 { font-size: 0.95rem !important; }
+
+        /* Compact st.metric tiles */
+        [data-testid="stMetric"] { padding: 0.2rem 0 !important; }
+        [data-testid="stMetricLabel"] p { font-size: 0.7rem !important; }
+        [data-testid="stMetricValue"]   { font-size: 1.05rem !important; }
+
+        /* Smaller buttons */
+        [data-testid="stButton"] > button {
+            font-size: 0.78rem !important;
+            padding: 0.3rem 0.5rem !important;
+        }
+
+        /* Compact accounts summary strip */
+        .acct-summary-row { gap: 1rem; padding-bottom: 6px; }
+        .acct-kpi-val { font-size: 1rem !important; }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       LANDSCAPE PHONES / SMALL TABLETS  ≤ 1024 px + landscape orientation
+       ══════════════════════════════════════════════════════════════════════ */
+    @media (max-width: 1024px) and (orientation: landscape) {
+        .block-container { padding-top: 0.15rem !important; }
+        [data-testid="stHorizontalBlock"]:has(.bousala-appbar) {
+            padding-top:    2px !important;
+            padding-bottom: 2px !important;
+        }
+        .bousala-appbar svg { width: 32px !important; height: 32px !important; }
+        .gh-kpi-row { gap: 1.4rem !important; flex-wrap: nowrap !important; }
+        .gh-val-big { font-size: 1.4rem !important; }
+        .gh-val-med { font-size: 1.1rem !important; }
+        .gh-val-sm  { font-size: 0.95rem !important; }
+        .gh-val-xs  { font-size: 0.82rem !important; }
+    }
+
+    /* ── Compact selectbox inside header ────────────────────────────────── */
     [data-testid="stHorizontalBlock"]:has(.bousala-appbar)
     [data-testid="stSelectbox"] { margin-bottom: 0 !important; }
+
+    /* ── Compact expander inside header ─────────────────────────────────── */
+    [data-testid="stHorizontalBlock"]:has(.bousala-appbar)
+    [data-testid="stExpander"] {
+        border: none !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    [data-testid="stHorizontalBlock"]:has(.bousala-appbar)
+    [data-testid="stExpander"] summary {
+        padding: 2px 4px !important;
+        font-size: 0.78rem !important;
+        font-weight: 600 !important;
+        color: #475569 !important;
+        min-height: unset !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -3011,10 +3117,24 @@ def render_accounts_tab() -> None:
     )
 
     if accounts:
-        acm1, acm2, acm3 = st.columns(3)
-        acm1.metric("Active Accounts", len(active))
-        acm2.metric(f"Total Cash ({_ab_ccy})", f"{_total_cash:,.2f}")
-        acm3.metric("Currencies", len({a.base_currency for a in active.values()}))
+        _n_ccy = len({a.base_currency for a in active.values()})
+        st.markdown(
+            f'<div class="acct-summary-row">'
+            f'  <div class="acct-kpi">'
+            f'    <div class="acct-kpi-lbl">Accounts</div>'
+            f'    <div class="acct-kpi-val">{len(active)}</div>'
+            f'  </div>'
+            f'  <div class="acct-kpi">'
+            f'    <div class="acct-kpi-lbl">Total Cash ({_ab_ccy})</div>'
+            f'    <div class="acct-kpi-val">{_total_cash:,.0f}</div>'
+            f'  </div>'
+            f'  <div class="acct-kpi">'
+            f'    <div class="acct-kpi-lbl">Currencies</div>'
+            f'    <div class="acct-kpi-val">{_n_ccy}</div>'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # ── Account cards ─────────────────────────────────────────────────────────
     if active:
@@ -5245,15 +5365,24 @@ def render_global_header() -> str:
     with _cL:
         st.markdown(_BRAND, unsafe_allow_html=True)
 
-    # RIGHT — CCY selector first so its value is ready for valuation below
+    # RIGHT — CCY + FX inside a collapsible.
+    # Streamlit renders expander contents even when collapsed, so the
+    # selectbox always returns its value for the valuation below.
     with _cR:
-        _base_ccy = st.selectbox(
-            "Currency",
-            options=["SAR", "USD", "EUR", "GBP"],
-            key="global_base_ccy",
-            label_visibility="collapsed",
-            help="Base currency for all portfolio totals.",
-        )
+        _cur_ccy_lbl = st.session_state.get("global_base_ccy", "SAR")
+        with st.expander(f"⚙️ {_cur_ccy_lbl}", expanded=False):
+            _base_ccy = st.selectbox(
+                "Base currency",
+                options=["SAR", "USD", "EUR", "GBP"],
+                key="global_base_ccy",
+                help="All portfolio totals shown in this currency.",
+            )
+            _do_fx = st.button(
+                "💱 Refresh FX rates",
+                key="global_refresh_fx_btn",
+                use_container_width=True,
+                help="Refresh FX rates from Yahoo Finance.",
+            )
 
     # ── Compute portfolio valuation ────────────────────────────────────────
     _gh_hld  = load_holdings()
@@ -5308,19 +5437,13 @@ def render_global_header() -> str:
                 unsafe_allow_html=True,
             )
 
-    # RIGHT — FX refresh button (below the CCY selector)
-    with _cR:
-        if st.button("💱 Refresh FX", key="global_refresh_fx_btn",
-                     use_container_width=True,
-                     help="Refresh FX rates from Yahoo Finance."):
-            if _gh_hld:
-                with st.spinner("Fetching rates…"):
-                    refresh_fx_rates(_gh_ccys, _base_ccy)
-                st.toast("FX rates updated", icon="💱")
-                st.rerun()
+    # Handle FX refresh (after valuation so _gh_ccys is available)
+    if _do_fx and _gh_hld:
+        with st.spinner("Fetching rates…"):
+            refresh_fx_rates(_gh_ccys, _base_ccy)
+        st.toast("FX rates updated", icon="💱")
+        st.rerun()
 
-    # Divider replaces the one previously rendered by st.divider() —
-    # the sticky CSS already draws border-bottom on the header block.
     return _base_ccy
 
 
