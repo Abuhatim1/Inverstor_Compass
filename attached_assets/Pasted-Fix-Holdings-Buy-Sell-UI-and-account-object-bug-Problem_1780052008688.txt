@@ -1,0 +1,71 @@
+Fix Holdings Buy/Sell UI and account object bug.
+
+Problems:
+1. Position Actions are not integrated properly into the Holdings table.
+2. Buy/Sell should be available directly from each holding row.
+3. Current account list causes:
+AttributeError: 'str' object has no attribute 'deleted'
+
+Required design:
+
+1. Holdings table must include an Actions column for each holding:
+   - ➕ Buy
+   - ➖ Sell / Close
+   - ✏️ Edit
+   - 🗑️ Delete
+
+2. When user clicks Buy on a row:
+   - open Buy dialog for that exact ticker
+   - prefill ticker, company name, currency, linked account, current price
+   - user enters quantity, price, fees, date
+   - option: "Record update only / correction"
+   - if not correction, create BUY transaction and update cash/account/holding
+
+3. When user clicks Sell / Close on a row:
+   - open Sell dialog for that exact ticker
+   - prefill ticker, company name, currency, linked/default account, current price
+   - user enters quantity to sell
+   - if quantity equals full position, close full position
+   - if partial, reduce open holding and move sold quantity to Closed Holdings
+   - calculate realized P&L
+   - option: "Record update only / correction"
+
+4. Do not use a separate Position Actions selector as the primary workflow.
+   It can be removed or placed below as optional advanced workflow.
+
+5. Fix account bug:
+   - account objects may currently be dicts or strings
+   - normalize accounts before rendering:
+     if account is string, convert to dict with account_name and default fields
+   - never call account.deleted directly unless account is a proper object
+   - use safe access:
+     account.get("deleted", False)
+   - or getattr(account, "deleted", False)
+
+6. Account dropdown:
+   - show only active accounts
+   - only accounts matching holding currency
+   - if no account exists, show clear message and allow record update only
+
+7. Use unique Streamlit keys per row/ticker:
+   buy_btn_{ticker}
+   sell_btn_{ticker}
+   edit_btn_{ticker}
+   delete_btn_{ticker}
+
+8. Prevent stale session_state:
+   - when clicking Buy/Sell for a ticker, set selected_action_ticker
+   - load that holding only
+   - do not default to first holding
+
+9. Keep UI mobile-friendly.
+   If Streamlit table buttons are difficult, show each holding as a card with:
+   - ticker + company
+   - quantity
+   - current price
+   - market value
+   - P&L
+   - Buy / Sell / Edit / Delete buttons
+
+10. Remove technical traceback from UI.
+   Show friendly error if action fails.

@@ -1922,177 +1922,259 @@ def render_holdings_tab() -> None:
                                 st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
 
-    # ── Buy More / Sell actions ───────────────────────────────────────────────
+    # ── Per-holding action cards ──────────────────────────────────────────────
     if holdings:
-        active_holdings = {t: h for t, h in holdings.items() if h.quantity > 1e-9}
-        if active_holdings:
-            st.divider()
-            st.markdown("#### 📊 Position Actions")
-            _action_ticker = st.selectbox(
-                "Select holding to act on",
-                options=sorted(active_holdings.keys()),
-                format_func=lambda t: f"{t}  ·  {active_holdings[t].company_name}  "
-                                      f"·  {active_holdings[t].quantity:.4f} shares",
-                key="action_ticker_select",
-            )
-            if _action_ticker:
-                _ah = active_holdings[_action_ticker]
-                _act_c1, _act_c2 = st.columns(2)
+        from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
 
-                # ── BUY MORE ────────────────────────────────────────────────
-                with _act_c1:
-                    with st.expander(f"➕ Buy More  {_action_ticker}", expanded=False):
-                        from portfolio import load_accounts, account_display_name
-                        _accts = load_accounts()
-                        _acct_opts = ["— none —"] + [account_display_name(a) for a in _accts if not a.deleted]
-                        _acct_ids  = [""] + [a.account_id for a in _accts if not a.deleted]
-                        with st.form(f"buy_more_{_action_ticker}", clear_on_submit=True):
-                            _bm_qty = st.number_input(
-                                "Quantity to buy",
-                                min_value=0.001, step=1.0, format="%.4f",
-                                key=f"bm_qty_{_action_ticker}",
+        def _acct_pairs_for(currency: str | None = None):
+            """Return [(account_id, Account)] for active accounts. Never raises."""
+            try:
+                return list(_active_accts_fn(currency).items())
+            except Exception:
+                return []
+
+        st.divider()
+        st.markdown("#### 🎛️ Position Actions")
+        st.caption("Click a button on any row to Buy, Sell, Edit or Delete that position.")
+
+        for _card_ticker in sorted(holdings.keys()):
+            _ch = holdings[_card_ticker]
+            _ccy   = getattr(_ch, "currency", "USD")
+            _fx_r  = _fx.get(_ccy)
+            _rate  = _fx_r.rate if _fx_r else 1.0
+            _mv_b  = round(_ch.market_value * _rate, 2)
+            _pnl_s = "🟢" if _ch.unrealized_pnl_pct >= 0 else "🔴"
+
+            with st.container(border=True):
+                # ── Info row + buttons ─────────────────────────────────────
+                _i1, _i2, _i3, _i4, _i5, _i6 = st.columns([2, 1, 1, 1, 1, 2])
+                with _i1:
+                    st.markdown(f"**{_card_ticker}**")
+                    st.caption(_ch.company_name or "")
+                with _i2:
+                    _qty_fmt = f"{_ch.quantity:,.4f}" if _ch.quantity < 1_000 else f"{_ch.quantity:,.2f}"
+                    st.metric("Qty", _qty_fmt)
+                with _i3:
+                    st.metric("Price", f"{_ch.current_price:,.4f}")
+                with _i4:
+                    st.metric(f"MV ({_base_ccy})", f"{_mv_b:,.0f}")
+                with _i5:
+                    st.metric(
+                        "P&L",
+                        f"{_pnl_s} {_ch.unrealized_pnl_pct:+.1f}%",
+                        delta=f"{_ch.unrealized_pnl:+,.0f} {_ccy}",
+                        delta_color="off",
+                    )
+                with _i6:
+                    _b1, _b2, _b3, _b4 = st.columns(4)
+                    with _b1:
+                        if st.button("➕", key=f"buy_btn_{_card_ticker}",
+                                     help="Buy more", use_container_width=True):
+                            st.session_state["pa_ticker"] = _card_ticker
+                            st.session_state["pa_mode"]   = "buy"
+                            st.rerun()
+                    with _b2:
+                        if st.button("📤", key=f"sell_btn_{_card_ticker}",
+                                     help="Sell / Close",
+                                     use_container_width=True,
+                                     disabled=(_ch.quantity <= 1e-9)):
+                            st.session_state["pa_ticker"] = _card_ticker
+                            st.session_state["pa_mode"]   = "sell"
+                            st.rerun()
+                    with _b3:
+                        if st.button("✏️", key=f"edit_btn_{_card_ticker}",
+                                     help="Edit holding details",
+                                     use_container_width=True):
+                            st.session_state["pa_ticker"] = _card_ticker
+                            st.session_state["pa_mode"]   = "edit"
+                            st.rerun()
+                    with _b4:
+                        if st.button("🗑️", key=f"del_btn_{_card_ticker}",
+                                     help="Delete holding",
+                                     use_container_width=True):
+                            st.session_state["pa_ticker"] = _card_ticker
+                            st.session_state["pa_mode"]   = "delete"
+                            st.rerun()
+
+                # ── Inline action panel (only for the active card) ─────────
+                _pa_ticker = st.session_state.get("pa_ticker")
+                _pa_mode   = st.session_state.get("pa_mode")
+
+                if _pa_ticker != _card_ticker or not _pa_mode:
+                    continue
+
+                st.divider()
+                _close_col, _ = st.columns([1, 5])
+                with _close_col:
+                    if st.button("✖ Close", key=f"close_pa_{_card_ticker}"):
+                        st.session_state.pop("pa_ticker", None)
+                        st.session_state.pop("pa_mode", None)
+                        st.rerun()
+
+                # ── BUY ───────────────────────────────────────────────────
+                if _pa_mode == "buy":
+                    st.markdown(f"**➕ Buy More — {_card_ticker}** · {_ch.company_name}")
+                    _pairs = _acct_pairs_for()
+                    _labels = ["— no account —"] + [_acct_dn(a) for _, a in _pairs]
+                    _ids    = [""] + [aid for aid, _ in _pairs]
+                    with st.form(f"buy_form_{_card_ticker}", clear_on_submit=True):
+                        _fc1, _fc2 = st.columns(2)
+                        with _fc1:
+                            _bm_qty   = st.number_input("Quantity to buy", min_value=0.0001, step=1.0, format="%.4f")
+                            _bm_price = st.number_input("Price per share",
+                                                         value=float(_ch.current_price or _ch.avg_cost or 0.0),
+                                                         min_value=0.0, step=0.01, format="%.4f")
+                            _bm_fees  = st.number_input("Fees / commission", min_value=0.0, value=0.0, step=0.01, format="%.4f")
+                        with _fc2:
+                            _bm_date  = st.date_input("Trade date", value=None)
+                            _bm_acct  = st.selectbox("Account", options=range(len(_labels)),
+                                                      format_func=lambda i: _labels[i])
+                            _bm_notes = st.text_input("Notes", max_chars=200)
+                        _bm_sub = st.form_submit_button("✅ Confirm Buy", type="primary", use_container_width=True)
+                    if _bm_sub:
+                        try:
+                            _t, _h2, _e = record_transaction(
+                                ticker=_card_ticker, side="BUY",
+                                quantity=float(_bm_qty), price=float(_bm_price),
+                                txn_date=_bm_date.isoformat() if _bm_date else None,
+                                notes=_bm_notes,
+                                company_name=_ch.company_name, market=_ch.market,
+                                sector=_ch.sector,
+                                asset_type=getattr(_ch, "asset_type", "Stock"),
+                                currency=getattr(_ch, "currency", "USD"),
+                                has_ticker=getattr(_ch, "has_ticker", True),
+                                account_id=_ids[_bm_acct], fees=float(_bm_fees),
                             )
-                            _bm_price = st.number_input(
-                                "Price per share",
-                                value=float(_ah.current_price or _ah.avg_cost or 0.0),
-                                min_value=0.0, step=0.01, format="%.4f",
-                                key=f"bm_price_{_action_ticker}",
-                            )
-                            _bm_fees = st.number_input(
-                                "Fees / commission",
-                                min_value=0.0, value=0.0, step=0.01, format="%.4f",
-                                key=f"bm_fees_{_action_ticker}",
-                            )
-                            _bm_date = st.date_input(
-                                "Trade date",
-                                value=None,
-                                key=f"bm_date_{_action_ticker}",
-                            )
-                            _bm_acct_idx = st.selectbox(
-                                "Account (optional)",
-                                options=range(len(_acct_opts)),
-                                format_func=lambda i: _acct_opts[i],
-                                key=f"bm_acct_{_action_ticker}",
-                            )
-                            _bm_notes = st.text_input(
-                                "Notes (optional)",
-                                key=f"bm_notes_{_action_ticker}",
-                                max_chars=200,
-                            )
-                            _bm_submitted = st.form_submit_button(
-                                "✅ Confirm Buy",
-                                use_container_width=True,
-                                type="primary",
-                            )
-                        if _bm_submitted:
-                            _bm_date_str = _bm_date.isoformat() if _bm_date else None
-                            _bm_aid = _acct_ids[_bm_acct_idx]
-                            _bm_txn, _bm_h, _bm_err = record_transaction(
-                                ticker       = _action_ticker,
-                                side         = "BUY",
-                                quantity     = float(_bm_qty),
-                                price        = float(_bm_price),
-                                txn_date     = _bm_date_str,
-                                notes        = _bm_notes,
-                                company_name = _ah.company_name,
-                                market       = _ah.market,
-                                sector       = _ah.sector,
-                                asset_type   = getattr(_ah, "asset_type", "Stock"),
-                                currency     = getattr(_ah, "currency", "USD"),
-                                has_ticker   = getattr(_ah, "has_ticker", True),
-                                account_id   = _bm_aid,
-                                fees         = float(_bm_fees),
-                            )
-                            if _bm_err:
-                                st.error(_bm_err)
+                            if _e:
+                                st.error(_e)
                             else:
-                                st.success(
-                                    f"Bought {_bm_qty:.4f} × {_action_ticker} "
-                                    f"@ {_bm_price:.4f}. "
-                                    f"New avg cost: {_bm_h.avg_cost:.4f}"
+                                st.toast(
+                                    f"Bought {_bm_qty:.4f} × {_card_ticker} @ {_bm_price:.4f} · "
+                                    f"New avg cost: {_h2.avg_cost:.4f}",
+                                    icon="✅",
                                 )
+                                st.session_state.pop("pa_ticker", None)
+                                st.session_state.pop("pa_mode", None)
                                 st.rerun()
+                        except Exception as _ex:
+                            st.error(f"Buy failed — {_ex}")
 
-                # ── SELL ─────────────────────────────────────────────────────
-                with _act_c2:
-                    with st.expander(f"📤 Sell  {_action_ticker}", expanded=False):
-                        from portfolio import load_accounts, account_display_name
-                        _accts2 = load_accounts()
-                        _acct_opts2 = ["— none —"] + [account_display_name(a) for a in _accts2 if not a.deleted]
-                        _acct_ids2  = [""] + [a.account_id for a in _accts2 if not a.deleted]
-                        with st.form(f"sell_{_action_ticker}", clear_on_submit=True):
-                            _sl_max = float(_ah.quantity)
+                # ── SELL ──────────────────────────────────────────────────
+                elif _pa_mode == "sell":
+                    _is_full = _ch.quantity > 1e-9
+                    _close_label = "Close Full Position" if True else ""
+                    st.markdown(f"**📤 Sell — {_card_ticker}** · {_ch.company_name} · "
+                                f"{_ch.quantity:.4f} shares available")
+                    _pairs2  = _acct_pairs_for()
+                    _labels2 = ["— no account —"] + [_acct_dn(a) for _, a in _pairs2]
+                    _ids2    = [""] + [aid for aid, _ in _pairs2]
+                    with st.form(f"sell_form_{_card_ticker}", clear_on_submit=True):
+                        _fc1, _fc2 = st.columns(2)
+                        with _fc1:
                             _sl_qty = st.number_input(
-                                f"Quantity to sell  (max {_sl_max:.4f})",
-                                min_value=0.001,
-                                max_value=float(_ah.quantity) + 0.001,
+                                f"Quantity to sell (max {_ch.quantity:.4f})",
+                                min_value=0.0001,
+                                max_value=float(_ch.quantity) + 0.0001,
+                                value=float(_ch.quantity),
                                 step=1.0, format="%.4f",
-                                key=f"sl_qty_{_action_ticker}",
                             )
-                            _sl_price = st.number_input(
-                                "Sale price per share",
-                                value=float(_ah.current_price or _ah.avg_cost or 0.0),
-                                min_value=0.0, step=0.01, format="%.4f",
-                                key=f"sl_price_{_action_ticker}",
+                            _sl_price = st.number_input("Sale price per share",
+                                                         value=float(_ch.current_price or _ch.avg_cost or 0.0),
+                                                         min_value=0.0, step=0.01, format="%.4f")
+                            _sl_fees = st.number_input("Fees / commission", min_value=0.0, value=0.0, step=0.01, format="%.4f")
+                        with _fc2:
+                            _sl_date  = st.date_input("Trade date", value=None)
+                            _sl_acct  = st.selectbox("Account", options=range(len(_labels2)),
+                                                      format_func=lambda i: _labels2[i])
+                            _sl_notes = st.text_input("Notes", max_chars=200)
+                            # P&L preview
+                            _prev_pnl = (_sl_price - _ch.avg_cost) * _sl_qty if _ch.avg_cost else 0.0
+                            _prev_pct = (_prev_pnl / (_ch.avg_cost * _sl_qty) * 100.0) if _ch.avg_cost and _sl_qty else 0.0
+                            st.caption(f"Est. P&L: **{_prev_pnl:+,.2f} {_ccy}** ({_prev_pct:+.2f}%)")
+                        _sl_sub = st.form_submit_button("✅ Confirm Sell", type="primary", use_container_width=True)
+                    if _sl_sub:
+                        try:
+                            _t, _h2, _e = record_transaction(
+                                ticker=_card_ticker, side="SELL",
+                                quantity=float(_sl_qty), price=float(_sl_price),
+                                txn_date=_sl_date.isoformat() if _sl_date else None,
+                                notes=_sl_notes,
+                                account_id=_ids2[_sl_acct], fees=float(_sl_fees),
                             )
-                            _sl_fees = st.number_input(
-                                "Fees / commission",
-                                min_value=0.0, value=0.0, step=0.01, format="%.4f",
-                                key=f"sl_fees_{_action_ticker}",
-                            )
-                            _sl_date = st.date_input(
-                                "Trade date",
-                                value=None,
-                                key=f"sl_date_{_action_ticker}",
-                            )
-                            _sl_acct_idx = st.selectbox(
-                                "Account (optional)",
-                                options=range(len(_acct_opts2)),
-                                format_func=lambda i: _acct_opts2[i],
-                                key=f"sl_acct_{_action_ticker}",
-                            )
-                            _sl_notes = st.text_input(
-                                "Notes (optional)",
-                                key=f"sl_notes_{_action_ticker}",
-                                max_chars=200,
-                            )
-                            # Show P&L preview
-                            _preview_rpnl = (float(_sl_price) - float(_ah.avg_cost)) * float(_sl_qty) if _sl_price and _sl_qty else 0.0
-                            _preview_pct  = (_preview_rpnl / (float(_ah.avg_cost) * float(_sl_qty)) * 100.0) if _ah.avg_cost and _sl_qty else 0.0
-                            st.caption(
-                                f"Est. realized P&L: "
-                                f"**{_preview_rpnl:+,.2f}** {getattr(_ah, 'currency', '')}  "
-                                f"({_preview_pct:+.2f}%)"
-                            )
-                            _sl_submitted = st.form_submit_button(
-                                "✅ Confirm Sell",
-                                use_container_width=True,
-                                type="primary",
-                            )
-                        if _sl_submitted:
-                            _sl_date_str = _sl_date.isoformat() if _sl_date else None
-                            _sl_aid = _acct_ids2[_sl_acct_idx]
-                            _sl_txn, _sl_h, _sl_err = record_transaction(
-                                ticker       = _action_ticker,
-                                side         = "SELL",
-                                quantity     = float(_sl_qty),
-                                price        = float(_sl_price),
-                                txn_date     = _sl_date_str,
-                                notes        = _sl_notes,
-                                account_id   = _sl_aid,
-                                fees         = float(_sl_fees),
-                            )
-                            if _sl_err:
-                                st.error(_sl_err)
+                            if _e:
+                                st.error(_e)
                             else:
-                                _rpnl = (_sl_price - _ah.avg_cost) * _sl_qty
-                                st.success(
-                                    f"Sold {_sl_qty:.4f} × {_action_ticker} "
-                                    f"@ {_sl_price:.4f}. "
-                                    f"Realized P&L: {_rpnl:+,.2f} "
-                                    f"{getattr(_ah, 'currency', '')}"
+                                _rpnl = (_sl_price - _ch.avg_cost) * _sl_qty
+                                _fully = _h2.quantity <= 1e-9
+                                st.toast(
+                                    f"{'Closed' if _fully else 'Sold'} {_sl_qty:.4f} × {_card_ticker} @ {_sl_price:.4f} · "
+                                    f"P&L: {_rpnl:+,.2f} {_ccy}",
+                                    icon="✅",
                                 )
+                                st.session_state.pop("pa_ticker", None)
+                                st.session_state.pop("pa_mode", None)
                                 st.rerun()
+                        except Exception as _ex:
+                            st.error(f"Sell failed — {_ex}")
+
+                # ── EDIT ──────────────────────────────────────────────────
+                elif _pa_mode == "edit":
+                    st.markdown(f"**✏️ Edit — {_card_ticker}**")
+                    with st.form(f"edit_form_{_card_ticker}", clear_on_submit=False):
+                        _ef1, _ef2 = st.columns(2)
+                        with _ef1:
+                            _e_name  = st.text_input("Company name", value=_ch.company_name)
+                            _e_qty   = st.number_input("Quantity (correction)", value=float(_ch.quantity),
+                                                        min_value=0.0, step=1.0, format="%.4f")
+                            _e_avg   = st.number_input("Avg cost (correction)", value=float(_ch.avg_cost),
+                                                        min_value=0.0, step=0.01, format="%.4f")
+                        with _ef2:
+                            _e_price = st.number_input("Current price", value=float(_ch.current_price),
+                                                        min_value=0.0, step=0.01, format="%.4f")
+                            _e_notes = st.text_input("Notes", value=_ch.notes or "", max_chars=200)
+                        _e_sub = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                    if _e_sub:
+                        try:
+                            upsert_holding(
+                                ticker=_card_ticker,
+                                company_name=_e_name or None,
+                                quantity=float(_e_qty),
+                                avg_cost=float(_e_avg),
+                                current_price=float(_e_price),
+                                notes=_e_notes or None,
+                            )
+                            st.toast(f"{_card_ticker} updated", icon="💾")
+                            st.session_state.pop("pa_ticker", None)
+                            st.session_state.pop("pa_mode", None)
+                            st.rerun()
+                        except Exception as _ex:
+                            st.error(f"Edit failed — {_ex}")
+
+                # ── DELETE ────────────────────────────────────────────────
+                elif _pa_mode == "delete":
+                    st.warning(
+                        f"Delete **{_card_ticker}** ({_ch.company_name})? "
+                        "Transaction history is kept. This only removes the active holding.",
+                        icon="⚠️",
+                    )
+                    _dc1, _dc2, _ = st.columns([1, 1, 3])
+                    with _dc1:
+                        if st.button("🗑️ Yes, Delete", key=f"del_confirm_{_card_ticker}",
+                                     type="primary", use_container_width=True):
+                            try:
+                                soft_delete_holding(_card_ticker)
+                                st.toast(f"{_card_ticker} removed from holdings", icon="🗑️")
+                                st.session_state.pop("pa_ticker", None)
+                                st.session_state.pop("pa_mode", None)
+                                st.rerun()
+                            except Exception as _ex:
+                                st.error(f"Delete failed — {_ex}")
+                    with _dc2:
+                        if st.button("Cancel", key=f"del_cancel_{_card_ticker}",
+                                     use_container_width=True):
+                            st.session_state.pop("pa_ticker", None)
+                            st.session_state.pop("pa_mode", None)
+                            st.rerun()
 
     # ── Add Holding form ──────────────────────────────────────────────────────
     st.divider()
