@@ -1577,6 +1577,72 @@ def _cat_l() -> list[TestResult]:
         CAT, "portfolio.valuation", "P1", False, l05,
     ))
 
+    # ── L06: Base currency propagation — SAR / USD / AED ─────────────────────
+    # Calls the engine three times with SAR, USD, and AED as base_ccy using
+    # pinned synthetic FX rates.  For each call verifies:
+    #   (a) holdings_value_base + cash_value_base == total_portfolio_value_base
+    #   (b) Cross-currency ratio SAR/USD ≈ 3.75 (the pinned peg)
+    # This mirrors what each UI tab would see when the user switches base_ccy.
+    def l06():
+        SAR_RATE   = 3.75                   # 1 USD = 3.75 SAR (pegged)
+        AED_RATE   = 3.6725                 # 1 USD = 3.6725 AED (pegged)
+        AED_IN_SAR = AED_RATE / SAR_RATE    # 1 AED ≈ 0.9793 SAR
+
+        fx_sar = {"SAR": _fx("SAR","SAR",1.0),          "USD": _fx("USD","SAR",SAR_RATE),
+                  "AED": _fx("AED","SAR",AED_IN_SAR)}
+        fx_usd = {"SAR": _fx("SAR","USD",1/SAR_RATE),   "USD": _fx("USD","USD",1.0),
+                  "AED": _fx("AED","USD",1/AED_RATE)}
+        fx_aed = {"SAR": _fx("SAR","AED",SAR_RATE/AED_RATE), "USD": _fx("USD","AED",AED_RATE),
+                  "AED": _fx("AED","AED",1.0)}
+
+        hld  = {"AAPL":   _holding("AAPL",   10.0, 150.0, 180.0, ccy="USD"),
+                "ARAMCO": _holding("ARAMCO", 100.0,  30.0,  35.0, ccy="SAR")}
+        acct = {"acc1": _account("acc1", 5_000.0, "SAR"),
+                "acc2": _account("acc2", 2_000.0, "USD")}
+
+        eng_sar = _val(hld, acct, "SAR", fx_sar)
+        eng_usd = _val(hld, acct, "USD", fx_usd)
+        eng_aed = _val(hld, acct, "AED", fx_aed)
+
+        findings: list[str] = []
+        all_ok = True
+
+        for label, eng in [("SAR", eng_sar), ("USD", eng_usd), ("AED", eng_aed)]:
+            hv   = round(eng.holdings_value_base, 4)
+            cv   = round(eng.cash_value_base, 4)
+            tv   = round(eng.total_portfolio_value_base, 4)
+            calc = round(hv + cv, 4)
+            ok_i = _near(calc, tv, tol=0.02)
+            if not ok_i:
+                all_ok = False
+            findings.append(
+                f"{label}: hv={hv:,.2f} cv={cv:,.2f} total={tv:,.2f} "
+                f"{'✓' if ok_i else '⚠️ MISMATCH'}"
+            )
+
+        # Cross-currency ratio: SAR total / USD total must ≈ 3.75
+        if eng_usd.total_portfolio_value_base > 0:
+            ratio    = eng_sar.total_portfolio_value_base / eng_usd.total_portfolio_value_base
+            ratio_ok = _near(ratio, SAR_RATE, tol=0.01)
+            if not ratio_ok:
+                all_ok = False
+            findings.append(
+                f"SAR/USD ratio={ratio:.4f} (expected {SAR_RATE}) "
+                f"{'✓' if ratio_ok else '⚠️ MISMATCH'}"
+            )
+
+        return (
+            "Engine consistent for SAR, USD, AED; holdings+cash==total each; SAR/USD≈3.75",
+            " | ".join(findings),
+            all_ok,
+        )
+
+    results.append(_run(
+        "L06",
+        "Base Currency Propagation: engine consistent for SAR / USD / AED base currencies",
+        CAT, "portfolio.valuation", "P0", True, l06,
+    ))
+
     return results
 
 
