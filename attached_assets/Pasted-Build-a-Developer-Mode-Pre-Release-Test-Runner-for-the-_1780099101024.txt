@@ -1,0 +1,105 @@
+Build a Developer Mode Pre-Release Test Runner for the Investor Compass application.
+
+Requirements:
+
+1. Developer Mode Only
+- Accessible only when Developer Mode is enabled.
+- Hidden from normal users.
+
+2. Sandbox Testing Environment
+- Create a temporary test portfolio.
+- Never modify real portfolio data.
+- Automatically generate test accounts, cash balances, holdings, FX rates, and transactions.
+
+3. Automated Financial Integrity Tests
+
+Run the following tests automatically:
+
+A. Portfolio Accounting
+- Buy transaction
+- Sell transaction
+- Partial position close
+- Full position close
+- Average cost calculation
+- Cash balance update
+- Realized P&L
+- Unrealized P&L
+
+B. Currency Conversion
+- USD base currency
+- SAR base currency
+- AED base currency
+- Mixed-currency portfolio
+- FX conversion accuracy
+
+C. Valuation Consistency
+Verify that identical portfolio values appear across:
+- Dashboard
+- Holdings
+- Command Center
+- Allocation
+- Risk
+- Reports
+
+Any valuation mismatch must be marked as a Release Blocker.
+
+D. Data Validation
+- Invalid ticker
+- Missing price
+- Missing FX rate
+- Negative quantity
+- Empty quantity
+- Duplicate transaction
+- Sell more shares than owned
+
+4. Automated Test Report
+
+Generate a report containing:
+- Test Name
+- Status (Pass/Fail)
+- Expected Result
+- Actual Result
+- Affected Module
+- Severity
+- Release Blocker (Yes/No)
+
+5. Automatic Punch List Generation
+
+For every failed test automatically create a Punch List item containing:
+- Bug Title
+- Description
+- Reproduction Steps
+- Expected Result
+- Actual Result
+- Severity
+- Status (Open)
+
+Severity Levels:
+P0 = Data integrity issue
+P1 = Workflow issue
+P2 = Usability issue
+P3 = Cosmetic issue
+
+6. Release Readiness Summary
+
+Display:
+- Total Tests
+- Passed
+- Failed
+- Release Blockers
+- Release Ready (Yes/No)
+
+Rules:
+- Data integrity failures automatically set Release Ready = No.
+- Valuation mismatches automatically set Release Ready = No.
+- Currency conversion mismatches automatically set Release Ready = No.
+
+7. Architecture Requirements
+
+- Use the same valuation engine used by the live application.
+- Use the same portfolio accounting engine used by the live application.
+- Do not duplicate financial calculations inside the test module.
+- All tests must execute automatically with a single "Run Pre-Release Tests" button.
+
+Goal:
+Provide institutional-grade pre-release validation and automatically generate a developer punch list before every production release.

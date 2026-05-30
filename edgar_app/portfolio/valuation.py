@@ -118,24 +118,49 @@ def calculate_portfolio_valuation(
     _warnings: list[str] = []
     now = datetime.now().isoformat()
 
-    # ── Empty portfolio shortcut ───────────────────────────────────────────────
+    # ── Empty holdings shortcut (still compute cash if accounts exist) ────────
     if not holdings:
+        # Resolve FX rates for account currencies so cash converts correctly.
+        _acct_ccys = list({a.base_currency for a in _accounts.values()})
+        if fx_rates is not None:
+            _fx_empty: dict = dict(fx_rates)
+            for _c in _acct_ccys:
+                if _c not in _fx_empty:
+                    _fx_empty[_c] = get_rate(_c, base_ccy)
+        else:
+            try:
+                _fx_empty = get_rates_for_holdings(_acct_ccys, base_ccy) if _acct_ccys else {}
+            except Exception:
+                _fx_empty = {_c: get_rate(_c, base_ccy) for _c in _acct_ccys}
+
+        _cash_base = 0.0
+        _n_active  = 0
+        for _a in _accounts.values():
+            if not _a.active:
+                continue
+            _n_active += 1
+            _r = _fx_empty.get(_a.base_currency)
+            _rate_val = _r.rate if _r else 1.0
+            _cash_base += _a.cash_balance * _rate_val
+        _cash_base = round(_cash_base, 4)
+        _total     = _cash_base
+
         return PortfolioValuation(
             base_currency              = base_ccy,
             holdings_value_base        = 0.0,
-            cash_value_base            = 0.0,
-            total_portfolio_value_base = 0.0,
+            cash_value_base            = _cash_base,
+            total_portfolio_value_base = _total,
             invested_allocation_pct    = 0.0,
-            cash_allocation_pct        = 0.0,
+            cash_allocation_pct        = 100.0 if _total > 0 else 0.0,
             total_cost_basis_base      = 0.0,
             unrealized_pnl_base        = 0.0,
             unrealized_pnl_pct         = 0.0,
             per_holding                = [],
-            fx_rates_used              = {},
+            fx_rates_used              = _fx_empty,
             valuation_timestamp        = now,
             warnings                   = [],
             n_holdings                 = 0,
-            n_accounts                 = sum(1 for a in _accounts.values() if a.active),
+            n_accounts                 = _n_active,
         )
 
     # ── Collect all needed currencies ─────────────────────────────────────────

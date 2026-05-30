@@ -5936,6 +5936,200 @@ def render_global_header() -> str:
     return _base_ccy
 
 
+# ── Developer Mode: Pre-Release Test Runner ──────────────────────────────────
+
+def render_test_runner_tab() -> None:
+    """Developer Mode — Pre-Release Test Runner tab."""
+    import io
+    import pandas as pd
+
+    if not st.session_state.get("dev_mode", False):
+        st.info(
+            "🔒 **Test Runner is only available in Developer Mode.**  \n"
+            "Enable **🔧 Developer Mode** in the sidebar to access pre-release testing.",
+            icon="🔧",
+        )
+        return
+
+    st.header("🧪 Pre-Release Test Runner")
+    st.caption(
+        "Executes automated financial integrity, currency conversion, valuation "
+        "consistency, and data validation tests against the live calculation engines "
+        "using **synthetic sandbox data only** — never reads or writes real portfolio files."
+    )
+
+    col_btn, col_ts = st.columns([2, 3])
+    with col_btn:
+        run_clicked = st.button(
+            "▶️ Run Pre-Release Tests",
+            type="primary",
+            key="run_tests_btn",
+            use_container_width=True,
+        )
+
+    if run_clicked:
+        import sys, os
+        _ea = os.path.join(os.path.dirname(__file__))
+        if _ea not in sys.path:
+            sys.path.insert(0, _ea)
+        with st.spinner("Running tests across 4 categories…"):
+            from dev_test_runner import run_all_tests
+            report = run_all_tests()
+        st.session_state["_test_report"] = report
+
+    report = st.session_state.get("_test_report")
+
+    if not report:
+        st.info("Click **▶️ Run Pre-Release Tests** to begin.", icon="🧪")
+        return
+
+    with col_ts:
+        st.caption(f"Last run: {report.timestamp[:19].replace('T', ' ')}")
+
+    # ── Release Readiness Summary ─────────────────────────────────────────────
+    st.divider()
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Total Tests",        report.total)
+    m2.metric("✅ Passed",           report.passed)
+    m3.metric(
+        "❌ Failed",
+        report.failed,
+        delta=f"-{report.failed}" if report.failed else None,
+        delta_color="inverse" if report.failed else "off",
+    )
+    m4.metric("🚨 Release Blockers", report.release_blockers)
+    with m5:
+        if report.release_ready:
+            st.success("✅ Release Ready", icon="🚀")
+        else:
+            st.error("❌ Not Release Ready", icon="🚨")
+
+    # ── Severity legend ───────────────────────────────────────────────────────
+    with st.expander("Severity guide", expanded=False):
+        st.markdown(
+            "| Code | Meaning |\n"
+            "|------|---------|\n"
+            "| **P0** | Data integrity issue — Release Blocker |\n"
+            "| **P1** | Workflow issue |\n"
+            "| **P2** | Usability issue |\n"
+            "| **P3** | Cosmetic issue |"
+        )
+
+    # ── Test Results Table ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("📋 Test Results")
+
+    _status_filter = st.selectbox(
+        "Filter by status",
+        ["All", "FAIL / ERROR", "PASS"],
+        key="test_filter_sel",
+    )
+
+    _STATUS_EMOJI = {"PASS": "✅", "FAIL": "❌", "ERROR": "⚠️"}
+
+    rows = []
+    for r in report.results:
+        if _status_filter == "FAIL / ERROR" and r.status not in ("FAIL", "ERROR"):
+            continue
+        if _status_filter == "PASS" and r.status != "PASS":
+            continue
+        rows.append({
+            "ID":              r.test_id,
+            "Test Name":       r.test_name,
+            "Category":        r.category,
+            "Status":          f"{_STATUS_EMOJI.get(r.status, '')} {r.status}",
+            "Expected":        r.expected,
+            "Actual":          r.actual,
+            "Module":          r.module,
+            "Severity":        r.severity,
+            "Blocker":         "🚨 Yes" if r.is_release_blocker else "No",
+        })
+
+    if rows:
+        st.dataframe(
+            pd.DataFrame(rows),
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Status":   st.column_config.TextColumn("Status",   width="small"),
+                "Severity": st.column_config.TextColumn("Severity", width="small"),
+                "Blocker":  st.column_config.TextColumn("Blocker",  width="small"),
+            },
+        )
+    else:
+        st.info("No results match the selected filter.")
+
+    # ── Punch List ────────────────────────────────────────────────────────────
+    st.divider()
+    if report.punch_list:
+        st.subheader(f"🔴 Punch List — {len(report.punch_list)} open item(s)")
+        for item in report.punch_list:
+            with st.expander(f"{item.item_id} · {item.bug_title}", expanded=False):
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    st.markdown(f"**Status:** `{item.status}`")
+                    st.markdown(f"**Severity:** `{item.severity}`")
+                with _c2:
+                    st.markdown(f"**Expected:** {item.expected}")
+                    st.markdown(f"**Actual:** {item.actual}")
+                st.markdown(f"**Description:**  \n{item.description}")
+                st.markdown(f"**Reproduction Steps:**")
+                st.code(item.repro_steps, language=None)
+    else:
+        st.success("🎉 All tests passed — punch list is empty.", icon="✅")
+
+    # ── Export ────────────────────────────────────────────────────────────────
+    st.divider()
+    _dl1, _dl2 = st.columns(2)
+
+    with _dl1:
+        _rpt_csv = io.StringIO()
+        pd.DataFrame([{
+            "Test ID":        r.test_id,
+            "Test Name":      r.test_name,
+            "Category":       r.category,
+            "Status":         r.status,
+            "Expected":       r.expected,
+            "Actual":         r.actual,
+            "Module":         r.module,
+            "Severity":       r.severity,
+            "Release Blocker": "Yes" if r.is_release_blocker else "No",
+        } for r in report.results]).to_csv(_rpt_csv, index=False)
+        st.download_button(
+            "⬇️ Export Test Report (CSV)",
+            data=_rpt_csv.getvalue(),
+            file_name=f"test_report_{report.timestamp[:10]}.csv",
+            mime="text/csv",
+            key="dl_test_report_csv",
+            use_container_width=True,
+        )
+
+    with _dl2:
+        if report.punch_list:
+            _pl_csv = io.StringIO()
+            pd.DataFrame([{
+                "Item ID":    p.item_id,
+                "Bug Title":  p.bug_title,
+                "Severity":   p.severity,
+                "Status":     p.status,
+                "Expected":   p.expected,
+                "Actual":     p.actual,
+                "Description": p.description,
+                "Repro Steps": p.repro_steps,
+            } for p in report.punch_list]).to_csv(_pl_csv, index=False)
+            st.download_button(
+                "⬇️ Export Punch List (CSV)",
+                data=_pl_csv.getvalue(),
+                file_name=f"punch_list_{report.timestamp[:10]}.csv",
+                mime="text/csv",
+                key="dl_punch_list_csv",
+                use_container_width=True,
+            )
+        else:
+            st.button("⬇️ Export Punch List (CSV)", disabled=True,
+                      key="dl_punch_list_empty", use_container_width=True)
+
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ App Settings")
@@ -5950,7 +6144,8 @@ render_global_header()
 
 (tab_holdings, tab_closed, tab_accounts, tab_transactions, tab_cash,
  tab_decisions, tab_risk, tab_command,
- tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload) = st.tabs([
+ tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
+ tab_test) = st.tabs([
     "💼 Holdings",
     "📁 Closed Holdings",
     "💳 Accounts",
@@ -5964,6 +6159,7 @@ render_global_header()
     "📄 Filing Search",
     "🔬 Research Watchlist",
     "📂 Upload Filing",
+    "🧪 Test Runner",
 ])
 
 with tab_holdings:
@@ -6072,3 +6268,6 @@ with tab_search:
 | **10-Q** | Quarterly Report | Unaudited financial report filed each quarter |
 | **8-K** | Current Report | Material events (earnings, mergers, leadership changes) |
             """)
+
+with tab_test:
+    render_test_runner_tab()
