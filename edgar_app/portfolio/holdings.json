@@ -16,7 +16,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "DOCS": {
@@ -36,7 +36,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "CSAI": {
@@ -56,7 +56,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "EXEL": {
@@ -76,7 +76,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "CPRX": {
@@ -96,7 +96,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "2222.SE": {
@@ -116,7 +116,7 @@
     "purchase_date": "2020-05-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "4164.SR": {
@@ -136,7 +136,7 @@
     "purchase_date": "2023-05-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "7010.SR": {
@@ -156,7 +156,7 @@
     "purchase_date": "2020-05-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   },
   "AAPL": {
@@ -176,7 +176,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-05-29",
+    "price_date": "2026-05-30",
     "default_account_id": ""
   }
 }
