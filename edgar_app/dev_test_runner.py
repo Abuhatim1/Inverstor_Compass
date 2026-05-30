@@ -584,13 +584,12 @@ def _cat_e() -> list[TestResult]:
         v = _val(holdings, {}, "SAR", _std_fx_sar)
 
         # (a) weight sum ≈ 100 %
-        # Each weight is rounded to 2 d.p., so over 200 holdings the
-        # worst-case accumulated rounding error is 200 × 0.005 = 1.0 %.
-        # We assert within 0.1 % — 10× stricter than worst case, still
-        # catches any real float corruption or summation bug.
+        # Weights are stored as full-precision floats (no intermediate rounding),
+        # so sum(invested_weight_pct) should equal 100.0 within float epsilon.
+        # Tolerance of 0.01 pp confirms there is no accumulation bug.
         wt_sum = sum(r.invested_weight_pct for r in v.per_holding
                      if not r.missing_price and not r.missing_fx)
-        wt_ok = _near(wt_sum, 100.0, 0.10)
+        wt_ok = _near(wt_sum, 100.0, 0.01)
 
         # (b) n_holdings == 200
         n_ok = v.n_holdings == 200

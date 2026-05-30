@@ -5972,7 +5972,7 @@ def render_test_runner_tab() -> None:
         _ea = os.path.join(os.path.dirname(__file__))
         if _ea not in sys.path:
             sys.path.insert(0, _ea)
-        with st.spinner("Running tests across 4 categories…"):
+        with st.spinner("Running tests across 5 categories…"):
             from dev_test_runner import run_all_tests
             report = run_all_tests()
         st.session_state["_test_report"] = report

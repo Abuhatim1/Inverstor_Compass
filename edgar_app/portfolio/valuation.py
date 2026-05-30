@@ -266,12 +266,15 @@ def calculate_portfolio_valuation(
     )
 
     # ── Back-fill per-holding weights ─────────────────────────────────────────
+    # Store full-precision floats so that sum(invested_weight_pct) == 100.0
+    # exactly within floating-point arithmetic.  Formatting/rounding for
+    # display is left to the UI layer.
     for r in rows:
-        r.invested_weight_pct = round(
-            (r.base_market_value / sum_base_mv    * 100.0) if sum_base_mv    > 0 else 0.0, 2
+        r.invested_weight_pct = (
+            (r.base_market_value / sum_base_mv    * 100.0) if sum_base_mv    > 0 else 0.0
         )
-        r.total_weight_pct = round(
-            (r.base_market_value / total_portfolio * 100.0) if total_portfolio > 0 else 0.0, 2
+        r.total_weight_pct = (
+            (r.base_market_value / total_portfolio * 100.0) if total_portfolio > 0 else 0.0
         )
 
     # ── Sanity checks ─────────────────────────────────────────────────────────
