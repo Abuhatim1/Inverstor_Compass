@@ -2043,16 +2043,7 @@ def render_portfolio_risk_tab() -> None:
             "Detail":   c.detail,
         })
     cat_df = pd.DataFrame(cat_rows)
-    st.dataframe(
-        cat_df,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Score", min_value=0, max_value=100, format="%d",
-            ),
-        },
-    )
+    st.table(cat_df.set_index("Category"))
 
     with st.expander("🔎 Per-category contributors", expanded=False):
         for c in result.categories:
@@ -2093,10 +2084,8 @@ def render_portfolio_risk_tab() -> None:
                 "Uncertainty": p.uncertainty_level,
                 "Mkt Align":   mi_score,
             })
-        st.dataframe(
-            pd.DataFrame(detail_rows).astype(str),
-            hide_index=True, use_container_width=True,
-        )
+        _detail_df = pd.DataFrame(detail_rows).astype(str)
+        st.table(_detail_df.set_index("Ticker"))
 
     st.caption(f"Computed at {result.computed_at}")
 
@@ -4070,7 +4059,9 @@ def render_transactions_tab() -> None:
             "Account":  _acct_names.get(getattr(t, "account_id", ""), "—") or "—",
             "Notes":    t.notes,
         } for t in _sorted]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        _txn_df = pd.DataFrame(rows)
+        _txn_df.index = range(1, len(_txn_df) + 1)
+        st.table(_txn_df)
         st.caption(f"{len(txns)} transaction(s) total.")
     else:
         st.info("No transactions recorded yet.", icon="ℹ️")
@@ -5634,7 +5625,7 @@ def render_decision_queue_tab() -> None:
                     "Weight":  s.weight,
                     "Detail":  s.detail,
                 } for s in rows])
-                st.dataframe(df, hide_index=True, use_container_width=True)
+                st.table(df.set_index("Signal"))
 
     st.caption(f"Computed at {result.computed_at}")
 
