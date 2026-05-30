@@ -1,0 +1,269 @@
+Enhance the portfolio application by integrating Saudi market data through SAHMK while preserving the existing architecture.
+
+IMPORTANT:
+Do not refactor, redesign, rename, replace, or restructure the existing holdings table, portfolio calculations, forms, tabs, workflows, layouts, or business logic unless explicitly required below. The objective is to add functionality with minimal impact to the current system and avoid regressions.
+
+1. Holdings Table Enhancement
+
+Add one new optional editable field:
+
+exchange_symbol
+
+Purpose:
+
+* Store the local exchange symbol used by market-specific data providers.
+* Examples:
+    * Saudi Aramco → 2222
+    * Al Rajhi Bank → 1120
+    * STC → 7010
+
+Rules:
+
+* Existing ticker/symbol field must remain unchanged.
+* Existing ticker continues to support yfinance and other global providers.
+* exchange_symbol is independent from ticker.
+* Existing records must continue to work without modification.
+* No migration should be required for existing users.
+
+2. Create Market Data Provider Layer
+
+Create a dedicated service layer:
+
+sahmk_client.py
+
+This service must be completely independent from the existing yfinance implementation.
+
+Implement functions for:
+
+* Quote retrieval
+* Market summary
+* Historical prices
+* Company information
+* Financial statements
+* Financial ratios
+* Dividends
+* Market events (if available in subscription plan)
+
+Store API credentials securely using environment variables:
+
+SAHMK_API_KEY
+
+Never hardcode API keys.
+
+3. Pricing Provider Selection Logic
+
+Implement the following priority sequence:
+
+Step 1:
+If exchange_symbol exists, attempt to retrieve the latest price from SAHMK.
+
+Step 2:
+If SAHMK returns a valid price:
+
+* Use SAHMK price.
+* Record provider as “SAHMK”.
+
+Step 3:
+If SAHMK fails, returns no data, or exchange_symbol is blank:
+
+* Fall back to existing yfinance logic.
+* Record provider as “yfinance”.
+
+Step 4:
+If both providers fail:
+
+* Retain last cached successful price.
+* Record provider as “cached”.
+* Display a warning indicator.
+
+Step 5:
+If no cached value exists:
+
+* Use manual value if available.
+* Record provider as “manual”.
+
+4. Data Source Transparency
+
+For every holding, maintain a calculated field:
+
+price_provider
+
+Possible values:
+
+* SAHMK
+* yfinance
+* cached
+* manual
+
+This field may be hidden from editing but must be available for diagnostics and troubleshooting.
+
+5. Caching Strategy
+
+Implement caching to reduce API calls:
+
+Quotes:
+
+* Cache for 5 minutes
+
+Market summaries:
+
+* Cache for 5 minutes
+
+Historical prices:
+
+* Cache for 24 hours
+
+Financial statements:
+
+* Cache for 24 hours
+
+Financial ratios:
+
+* Cache for 24 hours
+
+Dividends:
+
+* Cache for 24 hours
+
+6. Future Scalability
+
+Design the solution so that additional market providers can be added later without modifying the holdings table.
+
+Examples:
+
+* Saudi Arabia → SAHMK
+* UAE → Future Provider
+* Qatar → Future Provider
+* Kuwait → Future Provider
+
+The exchange_symbol field must remain provider-agnostic and reusable across all future market integrations.
+
+Use a provider architecture that allows future providers to be added through separate service modules without changing portfolio logic.
+
+7. UI Requirements
+
+Do not redesign the current UI.
+
+Only:
+
+* Add exchange_symbol as an editable field where holdings are maintained.
+* Preserve all existing layouts and workflows.
+* Preserve existing calculations and reports.
+* Preserve existing watchlist functionality.
+* Preserve mobile and desktop responsiveness.
+
+8. Reliability Requirements
+
+The application must continue functioning even if:
+
+* SAHMK API is unavailable
+* API limits are exceeded
+* API returns invalid data
+* Network connectivity is interrupted
+
+All failures must gracefully fall back to the next available pricing source without breaking portfolio calculations or causing application crashes.
+
+9. Developer Mode Test Runner Update
+
+After implementation is completed, update the Developer Mode Test Runner and validation suite to include the new SAHMK integration.
+
+Add automated test cases covering:
+
+A. Holdings Data Structure
+
+* Verify existing holdings records continue working without exchange_symbol.
+* Verify exchange_symbol can be added, edited, saved, and loaded correctly.
+* Verify backward compatibility with existing portfolio data.
+
+B. Pricing Provider Logic
+
+* Test holding with exchange_symbol and valid SAHMK response.
+* Test holding with exchange_symbol and failed SAHMK response.
+* Test holding without exchange_symbol.
+* Test fallback from SAHMK to yfinance.
+* Test fallback from yfinance to cached price.
+* Test fallback from cached price to manual price.
+
+C. API Failure Handling
+
+* Simulate SAHMK API timeout.
+* Simulate invalid API key.
+* Simulate rate limit exceeded.
+* Simulate network failure.
+* Verify application remains operational in all scenarios.
+
+D. Cache Validation
+
+* Verify quote cache expiration after 5 minutes.
+* Verify historical data cache expiration after 24 hours.
+* Verify financial data cache expiration after 24 hours.
+* Verify cache is used before making unnecessary API calls.
+
+E. Portfolio Calculations
+
+* Verify portfolio value calculations remain unchanged.
+* Verify unrealized gain/loss calculations remain unchanged.
+* Verify performance metrics remain unchanged.
+* Verify dashboard totals remain unchanged.
+
+F. UI Regression Tests
+
+* Verify holdings table remains functional.
+* Verify watchlist remains functional.
+* Verify dashboard loads correctly.
+* Verify all tabs continue working.
+* Verify mobile portrait layout remains functional.
+* Verify mobile landscape layout remains functional.
+
+G. Multi-Provider Validation
+
+* Verify SAHMK prices are used when available.
+* Verify yfinance prices are used when SAHMK is unavailable.
+* Verify displayed price_provider matches actual source used.
+
+10. Acceptance Criteria
+
+The implementation is not considered complete unless:
+
+* All existing tests pass.
+* All new tests pass.
+* No regression failures exist.
+* No UI breakage exists.
+* No portfolio data is lost.
+* No existing workflows are broken.
+* Portfolio calculations remain consistent before and after implementation.
+* Mobile portrait mode passes validation.
+* Mobile landscape mode passes validation.
+
+11. Final Validation Report
+
+Upon completion, generate a structured implementation validation report containing:
+
+* Features implemented
+* Files modified
+* New files created
+* Tests executed
+* Tests passed
+* Tests failed
+* Warnings
+* Known limitations
+* Remaining technical debt
+* Performance observations
+* Recommendations for future GCC market integrations
+
+12. Protection Against Unintended Refactoring
+
+Before modifying any existing file:
+
+* Review dependencies.
+* Identify affected components.
+* Minimize code changes.
+* Avoid unnecessary UI redesigns.
+* Avoid replacing working components.
+* Preserve existing user experience.
+
+If a proposed change risks breaking existing functionality, implement the new feature through extension rather than replacement.
+
+Primary Goal:
+
+Create a robust, production-ready, multi-provider market data architecture that supports Saudi market integration through SAHMK today while remaining scalable for future GCC market integrations, without disrupting existing portfolio functionality.

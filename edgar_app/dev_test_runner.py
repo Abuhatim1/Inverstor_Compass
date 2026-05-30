@@ -779,6 +779,449 @@ def _cat_e() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category F — SAHMK: Holdings Data Structure
+# ════════════════════════════════════════════════════════════════════════════════
+# NOTE: _run(id, name, category, module, severity, blocker, fn)
+#       fn() must return (expected_str, actual_str, passed_bool)
+
+def _cat_f() -> list[TestResult]:
+    """
+    F01–F05: exchange_symbol field — backward-compatibility and round-trip tests.
+    All tests operate on in-memory Holding objects; no file I/O.
+    """
+    CAT = "SAHMK — Holdings Data Structure"
+    results: list[TestResult] = []
+
+    def _make(ticker="TEST", **kw):
+        from portfolio.holdings import Holding
+        return Holding(ticker=ticker, company_name="Test Co", **kw)
+
+    # ── F01: Holding without exchange_symbol loads with default "" ────────────
+    def f01():
+        h = _make()
+        exsym = getattr(h, "exchange_symbol", "__MISSING__")
+        return ('""', repr(exsym), exsym == "")
+
+    results.append(_run(
+        "F01",
+        "exchange_symbol defaults to empty string on old holdings",
+        CAT, "portfolio.holdings", "P0", True, f01,
+    ))
+
+    # ── F02: exchange_symbol set and retrieved correctly ──────────────────────
+    def f02():
+        h = _make(exchange_symbol="2222")
+        act = getattr(h, "exchange_symbol", None)
+        return ('"2222"', repr(act), act == "2222")
+
+    results.append(_run(
+        "F02",
+        "exchange_symbol stores and retrieves 4-digit Saudi symbol",
+        CAT, "portfolio.holdings", "P0", True, f02,
+    ))
+
+    # ── F03: exchange_symbol is independent of ticker ─────────────────────────
+    def f03():
+        h = _make(ticker="2222.SR", exchange_symbol="2222")
+        ok = (h.ticker == "2222.SR") and (h.exchange_symbol == "2222")
+        return (
+            "ticker='2222.SR', exchange_symbol='2222'",
+            f"ticker={h.ticker!r}, exchange_symbol={h.exchange_symbol!r}",
+            ok,
+        )
+
+    results.append(_run(
+        "F03",
+        "exchange_symbol is independent from ticker — both coexist",
+        CAT, "portfolio.holdings", "P0", True, f03,
+    ))
+
+    # ── F04: Holding serialises/deserialises exchange_symbol via asdict ────────
+    def f04():
+        from dataclasses import asdict
+        h = _make(exchange_symbol="1120")
+        d = asdict(h)
+        act = d.get("exchange_symbol")
+        return ('"exchange_symbol": "1120"', repr(act), act == "1120")
+
+    results.append(_run(
+        "F04",
+        "exchange_symbol survives asdict() round-trip (JSON serialisation)",
+        CAT, "portfolio.holdings", "P0", True, f04,
+    ))
+
+    # ── F05: load_holdings() ignores unknown extra keys (future-proofing) ──────
+    def f05():
+        import dataclasses
+        from portfolio.holdings import Holding
+        valid_keys = {fld.name for fld in dataclasses.fields(Holding)}
+        raw = {
+            "ticker": "F05", "company_name": "Future Co",
+            "exchange_symbol": "7010",
+            "future_unknown_field": "ignored",
+        }
+        filtered = {k: v for k, v in raw.items() if k in valid_keys}
+        h = Holding(**filtered)
+        ok = h.exchange_symbol == "7010" and not hasattr(h, "future_unknown_field")
+        return (
+            "exchange_symbol='7010', no unknown fields",
+            f"exchange_symbol={h.exchange_symbol!r}",
+            ok,
+        )
+
+    results.append(_run(
+        "F05",
+        "Unknown JSON fields ignored; exchange_symbol loads correctly",
+        CAT, "portfolio.holdings", "P1", False, f05,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category G — SAHMK: Pricing Provider Logic
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_g() -> list[TestResult]:
+    """
+    G01–G06: Provider routing logic tested without live network calls.
+    """
+    CAT = "SAHMK — Pricing Provider Logic"
+    results: list[TestResult] = []
+
+    # ── G01: Blank exchange_symbol skips SAHMK entirely ──────────────────────
+    def g01():
+        from market_data_router import get_routed_price, PROVIDER_SAHMK
+        rp = get_routed_price(
+            ticker="", exchange_symbol="",
+            last_known_price=123.45, last_known_source="manual",
+        )
+        ok = rp.provider != PROVIDER_SAHMK
+        return (
+            "provider != SAHMK (blank exchange_symbol)",
+            repr(rp.provider),
+            ok,
+        )
+
+    results.append(_run(
+        "G01",
+        "Blank exchange_symbol skips SAHMK; falls to yfinance or manual",
+        CAT, "market_data_router", "P0", True, g01,
+    ))
+
+    # ── G02: exchange_symbol set, SAHMK unconfigured → no crash, fall through ─
+    def g02():
+        import sahmk_client
+        from market_data_router import get_routed_price, PROVIDER_SAHMK
+        configured = sahmk_client.is_configured()
+        rp = get_routed_price(
+            ticker="", exchange_symbol="2222",
+            last_known_price=50.0, last_known_source="manual",
+        )
+        if configured:
+            ok = rp.provider in (PROVIDER_SAHMK, "yfinance", "cached", "manual")
+            exp = "provider in {SAHMK, yfinance, cached, manual}"
+        else:
+            ok = rp.provider != PROVIDER_SAHMK
+            exp = "provider != SAHMK (key absent)"
+        return (exp, repr(rp.provider), ok)
+
+    results.append(_run(
+        "G02",
+        "SAHMK unconfigured → router falls through without crashing",
+        CAT, "market_data_router", "P0", True, g02,
+    ))
+
+    # ── G03: Both providers fail → cached price retained ─────────────────────
+    def g03():
+        from market_data_router import get_routed_price, PROVIDER_CACHED
+        rp = get_routed_price(
+            ticker="", exchange_symbol="",
+            last_known_price=99.99, last_known_source="yfinance",
+        )
+        ok = rp.provider == PROVIDER_CACHED and abs(rp.price - 99.99) < 0.001
+        return (
+            "provider=cached, price=99.99",
+            f"provider={rp.provider!r}, price={rp.price}",
+            ok,
+        )
+
+    results.append(_run(
+        "G03",
+        "Both providers fail → last cached price retained (provider='cached')",
+        CAT, "market_data_router", "P0", True, g03,
+    ))
+
+    # ── G04: price_source='manual' → manual fallback label ───────────────────
+    def g04():
+        from market_data_router import get_routed_price, PROVIDER_MANUAL
+        rp = get_routed_price(
+            ticker="", exchange_symbol="",
+            last_known_price=42.00, last_known_source="manual",
+        )
+        ok = rp.provider == PROVIDER_MANUAL and abs(rp.price - 42.00) < 0.001
+        return (
+            "provider=manual, price=42.00",
+            f"provider={rp.provider!r}, price={rp.price}",
+            ok,
+        )
+
+    results.append(_run(
+        "G04",
+        "All providers fail → manual price retained (provider='manual')",
+        CAT, "market_data_router", "P0", True, g04,
+    ))
+
+    # ── G05: RoutedPrice.is_ok is False when price is None ───────────────────
+    def g05():
+        from market_data_router import RoutedPrice, PROVIDER_MANUAL
+        rp = RoutedPrice(price=None, provider=PROVIDER_MANUAL)
+        return ("is_ok=False", repr(rp.is_ok), rp.is_ok is False)
+
+    results.append(_run(
+        "G05",
+        "RoutedPrice.is_ok is False when no price is available",
+        CAT, "market_data_router", "P1", False, g05,
+    ))
+
+    # ── G06: refresh_holdings_prices({}) returns empty dict safely ────────────
+    def g06():
+        from market_data_router import refresh_holdings_prices
+        result = refresh_holdings_prices({})
+        ok = isinstance(result, dict) and len(result) == 0
+        return ("empty dict", repr(result), ok)
+
+    results.append(_run(
+        "G06",
+        "refresh_holdings_prices({}) returns empty dict — no crash",
+        CAT, "market_data_router", "P0", True, g06,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category H — SAHMK: API Resilience
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_h() -> list[TestResult]:
+    """
+    H01–H05: SAHMK client graceful-failure guarantees — no live network calls.
+    """
+    CAT = "SAHMK — API Resilience"
+    results: list[TestResult] = []
+
+    # ── H01: get_quote() returns None when API key is absent ─────────────────
+    def h01():
+        import os, sahmk_client
+        old_env = os.environ.get("SAHMK_API_KEY")
+        os.environ.pop("SAHMK_API_KEY", None)
+        try:
+            result = sahmk_client.get_quote("2222")
+            ok = result is None
+        finally:
+            if old_env is not None:
+                os.environ["SAHMK_API_KEY"] = old_env
+        return ("None (no API key)", repr(result), ok)
+
+    results.append(_run(
+        "H01",
+        "get_quote() returns None gracefully when SAHMK_API_KEY is absent",
+        CAT, "sahmk_client", "P0", True, h01,
+    ))
+
+    # ── H02: get_historical() returns None for blank symbol ──────────────────
+    def h02():
+        import sahmk_client
+        result = sahmk_client.get_historical("")
+        return ("None", repr(result), result is None)
+
+    results.append(_run(
+        "H02",
+        "get_historical('') returns None — no crash on blank symbol",
+        CAT, "sahmk_client", "P0", True, h02,
+    ))
+
+    # ── H03: get_company_info() returns None for blank symbol ────────────────
+    def h03():
+        import sahmk_client
+        result = sahmk_client.get_company_info("")
+        return ("None", repr(result), result is None)
+
+    results.append(_run(
+        "H03",
+        "get_company_info('') returns None — no crash on blank symbol",
+        CAT, "sahmk_client", "P0", True, h03,
+    ))
+
+    # ── H04: All public functions are exception-free without an API key ───────
+    def h04():
+        import sahmk_client
+        raised = False
+        try:
+            sahmk_client.get_quote("9999")
+            sahmk_client.get_market_summary()
+            sahmk_client.get_historical("9999")
+            sahmk_client.get_company_info("9999")
+            sahmk_client.get_financial_statements("9999")
+            sahmk_client.get_financial_ratios("9999")
+            sahmk_client.get_dividends("9999")
+            sahmk_client.get_market_events()
+        except Exception:
+            raised = True
+        return (
+            "no exception raised",
+            "exception raised" if raised else "no exception",
+            not raised,
+        )
+
+    results.append(_run(
+        "H04",
+        "All SAHMK functions survive without API key — zero exceptions",
+        CAT, "sahmk_client", "P0", True, h04,
+    ))
+
+    # ── H05: cache_stats() returns valid diagnostic dict ─────────────────────
+    def h05():
+        import sahmk_client
+        stats = sahmk_client.cache_stats()
+        ok = (
+            isinstance(stats, dict)
+            and "entries" in stats
+            and "keys" in stats
+            and isinstance(stats["entries"], int)
+        )
+        return ("dict with 'entries' and 'keys'", repr(type(stats)), ok)
+
+    results.append(_run(
+        "H05",
+        "cache_stats() returns valid diagnostic dict",
+        CAT, "sahmk_client", "P2", False, h05,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category I — SAHMK: Portfolio Calculation Preservation
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_i() -> list[TestResult]:
+    """
+    I01–I05: Verify exchange_symbol addition doesn't change any portfolio arithmetic.
+    """
+    CAT = "SAHMK — Portfolio Calc Preservation"
+    results: list[TestResult] = []
+
+    def _std_fx():
+        return {"USD": _fx("USD", "USD", 1.0)}
+
+    def _val(holdings, prices, base_ccy, fx):
+        from portfolio.valuation import calculate_portfolio_valuation
+        return calculate_portfolio_valuation(holdings, prices, base_ccy, fx)
+
+    def _h(ticker, qty, cost, price, exchange_symbol=""):
+        from portfolio.holdings import Holding
+        return Holding(
+            ticker=ticker, company_name=ticker,
+            quantity=qty, avg_cost=cost, current_price=price,
+            currency="USD", has_ticker=True,
+            exchange_symbol=exchange_symbol,
+        )
+
+    # ── I01: exchange_symbol does not affect market value ────────────────────
+    def i01():
+        h_w = _h("A", 10, 100, 150, exchange_symbol="2222")
+        h_n = _h("A", 10, 100, 150)
+        ok  = abs(h_w.market_value - h_n.market_value) < 0.001
+        return (
+            "1500.0 == 1500.0",
+            f"with={h_w.market_value}, without={h_n.market_value}",
+            ok,
+        )
+
+    results.append(_run(
+        "I01",
+        "exchange_symbol does not change market_value calculation",
+        CAT, "portfolio.holdings", "P0", True, i01,
+    ))
+
+    # ── I02: exchange_symbol does not affect cost basis ──────────────────────
+    def i02():
+        h_w = _h("A", 10, 100, 150, exchange_symbol="2222")
+        h_n = _h("A", 10, 100, 150)
+        ok  = abs(h_w.cost_basis - h_n.cost_basis) < 0.001
+        return (
+            "1000.0 == 1000.0",
+            f"with={h_w.cost_basis}, without={h_n.cost_basis}",
+            ok,
+        )
+
+    results.append(_run(
+        "I02",
+        "exchange_symbol does not change cost_basis calculation",
+        CAT, "portfolio.holdings", "P0", True, i02,
+    ))
+
+    # ── I03: Valuation engine totals are identical regardless of exchange_symbol
+    def i03():
+        hw = {"A": _h("A", 10, 50, 100, exchange_symbol="1120"),
+              "B": _h("B", 20, 30, 60,  exchange_symbol="")}
+        hn = {"A": _h("A", 10, 50, 100), "B": _h("B", 20, 30, 60)}
+        v1 = _val(hw, {}, "USD", _std_fx())
+        v2 = _val(hn, {}, "USD", _std_fx())
+        ok = abs(v1.total_portfolio_value_base - v2.total_portfolio_value_base) < 0.01
+        return (
+            "total_portfolio_value_base identical",
+            f"with={v1.total_portfolio_value_base:.2f}, without={v2.total_portfolio_value_base:.2f}",
+            ok,
+        )
+
+    results.append(_run(
+        "I03",
+        "Valuation engine totals identical regardless of exchange_symbol",
+        CAT, "portfolio.valuation", "P0", True, i03,
+    ))
+
+    # ── I04: Weight sum still 100% with exchange_symbol-enabled holdings ──────
+    def i04():
+        h = {
+            "A": _h("A", 10, 50, 100, exchange_symbol="2222"),
+            "B": _h("B", 20, 30, 60,  exchange_symbol="1120"),
+            "C": _h("C", 5,  80, 120, exchange_symbol=""),
+        }
+        v      = _val(h, {}, "USD", _std_fx())
+        wt_sum = sum(r.invested_weight_pct for r in v.per_holding)
+        ok     = abs(wt_sum - 100.0) < 0.01
+        return ("weight_sum ≈ 100.0%", f"weight_sum={wt_sum:.6f}%", ok)
+
+    results.append(_run(
+        "I04",
+        "Invested weights sum to 100% with exchange_symbol holdings",
+        CAT, "portfolio.valuation", "P0", True, i04,
+    ))
+
+    # ── I05: Unrealized P&L is unchanged when exchange_symbol is set ──────────
+    def i05():
+        h   = _h("A", 10, 100, 130, exchange_symbol="7010")
+        exp = (130 - 100) * 10   # 300.0
+        ok  = abs(h.unrealized_pnl - exp) < 0.001
+        return (
+            f"unrealized_pnl={exp:.2f}",
+            f"unrealized_pnl={h.unrealized_pnl:.2f}",
+            ok,
+        )
+
+    results.append(_run(
+        "I05",
+        "unrealized_pnl unchanged when exchange_symbol is set",
+        CAT, "portfolio.holdings", "P0", True, i05,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -789,6 +1232,7 @@ def run_all_tests() -> TestReport:
     """
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
+        + _cat_f() + _cat_g() + _cat_h() + _cat_i()
     )
 
     punch_list: list[PunchListItem] = []

@@ -505,27 +505,62 @@ def _apply_prices_to_holdings(
     return ok_list, fail_list
 
 
+def _apply_routed_prices(
+    routed: dict,
+    holdings: dict | None = None,
+) -> tuple[list[str], list[str]]:
+    """
+    Write routed price results (from market_data_router) to holdings storage.
+    Records the actual provider ("SAHMK", "yfinance", "cached", "manual").
+    Returns (ok_list, fail_list).
+    """
+    from portfolio import update_current_price, load_holdings as _lh
+    _h = holdings if holdings is not None else _lh()
+    ok_list:   list[str] = []
+    fail_list: list[str] = []
+    for ticker, rp in routed.items():
+        if ticker not in _h:
+            continue
+        try:
+            if rp.is_ok and rp.price:
+                update_current_price(ticker, float(rp.price), source=rp.provider)
+                ok_list.append(ticker)
+            else:
+                fail_list.append(ticker)
+        except Exception:
+            fail_list.append(ticker)
+    return ok_list, fail_list
+
+
 def _run_price_refresh(*, force: bool = True) -> int:
     """
-    Refresh market prices for every known ticker.
-    Safe to call on every rerun — never triggers AI analysis.
-    Applies successful prices to holdings immediately (no second step needed).
-    Saudi Exchange tickers with .SE suffix are normalized to .SR before fetching.
-    Returns the count of tickers fetched successfully.
+    Refresh market prices for every known ticker using the multi-provider router.
+
+    Holdings with an exchange_symbol go through SAHMK first; all others fall
+    through to yfinance then cached/manual.  Watchlist-only tickers are still
+    fetched via yfinance and stored in the session cache for UI display.
+    Returns the count of tickers successfully updated.
     """
     from market_prices import refresh_all_prices, save_to_session
+    from market_data_router import refresh_holdings_prices
+    from portfolio import load_holdings as _lh_inner
     try:
+        # ── Routed refresh for actual holdings ────────────────────────────────
+        _holdings_inner = _lh_inner()
+        ok_count = 0
+        if _holdings_inner:
+            routed = refresh_holdings_prices(_holdings_inner, force=force)
+            ok_list, _ = _apply_routed_prices(routed, _holdings_inner)
+            ok_count = len(ok_list)
+
+        # ── yfinance session cache for watchlist / price-debug UI ─────────────
         raw_tickers = _collect_all_tickers()
-        if not raw_tickers:
-            return 0
-        # Build normalized-ticker → original-ticker map for .SE → .SR fix
-        ticker_map = {_normalize_ticker(t): t for t in raw_tickers}
-        results = refresh_all_prices(list(ticker_map.keys()), force=force)
-        save_to_session(results)
-        # Remap normalized keys back to original for holdings storage
-        results_orig = {ticker_map.get(k, k): v for k, v in results.items()}
-        _apply_prices_to_holdings(results_orig)
-        return sum(1 for d in results.values() if d.is_ok)
+        if raw_tickers:
+            ticker_map = {_normalize_ticker(t): t for t in raw_tickers}
+            results = refresh_all_prices(list(ticker_map.keys()), force=force)
+            save_to_session(results)
+
+        return ok_count
     except Exception:
         return 0
 
@@ -2469,24 +2504,22 @@ def render_holdings_tab() -> None:
         # ── Table action buttons ───────────────────────────────────────────────
         _tab1, _tab2, _tab3, _tab4 = st.columns(4)
         with _tab1:
-            # Refresh prices
+            # Refresh prices via multi-provider router (SAHMK → yfinance → cached)
             if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
                          use_container_width=True,
-                         help="Fetch live prices from Yahoo Finance."):
-                _ticker_map = {
-                    _normalize_ticker(t): t
-                    for t, h in holdings.items()
+                         help="Fetch live prices (SAHMK → Yahoo Finance → cached)."):
+                from market_data_router import refresh_holdings_prices as _rr
+                _has_tk_holdings = {
+                    t: h for t, h in holdings.items()
                     if getattr(h, "has_ticker", True)
                 }
-                with st.spinner(f"Fetching {len(_ticker_map)} price(s)…"):
-                    _fetched_norm = refresh_all_prices(list(_ticker_map.keys()), force=True)
+                with st.spinner(f"Fetching {len(_has_tk_holdings)} price(s)…"):
+                    _routed = _rr(_has_tk_holdings, force=True)
+                # Also update yfinance session cache for the debug tab
+                _ticker_map = {_normalize_ticker(t): t for t in _has_tk_holdings}
+                _fetched_norm = refresh_all_prices(list(_ticker_map.keys()), force=False)
                 save_to_session(_fetched_norm)
-                _fetched_orig = {
-                    _ticker_map[k]: v
-                    for k, v in _fetched_norm.items()
-                    if k in _ticker_map
-                }
-                _ok_list, _fail_list = _apply_prices_to_holdings(_fetched_orig, holdings)
+                _ok_list, _fail_list = _apply_routed_prices(_routed, holdings)
                 _s_lbl = market_session_label()[1]
                 st.toast(
                     f"Updated {len(_ok_list)} · Failed {len(_fail_list)} · {_s_lbl}",
@@ -2809,6 +2842,16 @@ def render_holdings_tab() -> None:
             _ad_date = st.date_input("Opening date", value=date.today(), key="ahn_date")
         _ad_notes = st.text_input("Notes (optional)", max_chars=200, key="ahn_notes",
                                   placeholder="e.g. bought via Tadawul, rights issue…")
+        _ad_exsym = st.text_input(
+            "Exchange symbol (optional)",
+            max_chars=20, key="ahn_exsym",
+            placeholder="e.g. 2222 · 1120 · 7010",
+            help=(
+                "Local exchange symbol used by regional market data providers (SAHMK).  "
+                "Leave blank for US/global holdings — the main ticker is used instead.  "
+                "Example: Saudi Aramco → 2222, Al Rajhi Bank → 1120"
+            ),
+        )
 
         # ── Duplicate guard ───────────────────────────────────────────────────
         _ad_tk_clean = _ad_tk.strip().replace(" ", "_").upper()
@@ -2888,6 +2931,7 @@ def render_holdings_tab() -> None:
                             sec_linked=_sec_linked,
                             price_source="yfinance" if _yahoo_ok else "manual",
                             price_date=date.today().isoformat(),
+                            exchange_symbol=_ad_exsym.strip() or None,
                         )
                         # Apply live price if it differs from the opening cost
                         if _ad_price > 0 and abs(_ad_price - float(_ad_cost)) > 1e-9:
@@ -2906,7 +2950,7 @@ def render_holdings_tab() -> None:
                             "ahn_validation", "ahn_ticker_input", "ahn_tk_confirm",
                             "ahn_name", "ahn_cost", "ahn_price", "ahn_qty",
                             "ahn_ccy", "ahn_type", "ahn_market", "ahn_sector",
-                            "ahn_acct_id", "ahn_has_tk",
+                            "ahn_acct_id", "ahn_has_tk", "ahn_exsym",
                         ]
                         for _k in _keys_to_clear:
                             st.session_state.pop(_k, None)
@@ -3134,7 +3178,18 @@ def render_holdings_tab() -> None:
                 "Current price", value=float(dlg_h.current_price),
                 min_value=0.0, step=0.01, format="%.4f",
             )
-            _e_notes = st.text_input("Notes", value=dlg_h.notes or "", max_chars=200)
+            _e_notes  = st.text_input("Notes", value=dlg_h.notes or "", max_chars=200)
+            _e_exsym  = st.text_input(
+                "Exchange symbol",
+                value=getattr(dlg_h, "exchange_symbol", "") or "",
+                max_chars=20,
+                placeholder="e.g. 2222 · 1120 · 7010",
+                help=(
+                    "Local exchange symbol for regional data providers (SAHMK).  "
+                    "Leave blank for US/global holdings.  "
+                    "Example: Saudi Aramco → 2222, Al Rajhi Bank → 1120"
+                ),
+            )
             _eb1, _eb2 = st.columns(2)
             with _eb1:
                 if st.button("💾 Save Changes", type="primary", use_container_width=True):
@@ -3146,6 +3201,7 @@ def render_holdings_tab() -> None:
                             avg_cost=float(_e_avg),
                             current_price=float(_e_price),
                             notes=_e_notes or None,
+                            exchange_symbol=_e_exsym.strip() or None,
                         )
                         st.toast(f"{dlg_ticker} updated", icon="💾")
                         st.rerun()

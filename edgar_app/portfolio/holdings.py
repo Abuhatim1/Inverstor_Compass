@@ -116,9 +116,14 @@ class Holding:
     cik:           str   = ""          # SEC CIK when sec_linked
     purchase_date: str   = ""          # ISO date, optional
     notes:         str   = ""          # free-text notes
-    price_source:       str   = "manual"    # "manual" | "yfinance" | "live"
+    price_source:       str   = "manual"    # "manual" | "yfinance" | "SAHMK" | "cached"
     price_date:         str   = ""          # ISO date of last price update
     default_account_id: str   = ""          # linked investment account (optional)
+
+    # ── Market-provider fields (v3 — backward-compatible defaults) ─────────
+    exchange_symbol: str  = ""          # Local exchange symbol for regional providers
+                                        # e.g. Saudi Aramco → "2222", Al Rajhi → "1120"
+                                        # Provider-agnostic: reused across SAHMK, future GCC
 
     # ── Derived metrics ───────────────────────────────────────────────────────
     @property
@@ -189,23 +194,25 @@ def save_holdings(holdings: dict[str, "Holding"]) -> None:
 
 
 def upsert_holding(
-    ticker:        str,
-    company_name:  str | None = None,
-    market:        str | None = None,
-    sector:        str | None = None,
-    quantity:      float | None = None,
-    avg_cost:      float | None = None,
-    current_price: float | None = None,
+    ticker:          str,
+    company_name:    str | None = None,
+    market:          str | None = None,
+    sector:          str | None = None,
+    quantity:        float | None = None,
+    avg_cost:        float | None = None,
+    current_price:   float | None = None,
     # Extended fields
-    asset_type:    str | None = None,
-    currency:      str | None = None,
-    has_ticker:    bool | None = None,
-    sec_linked:    bool | None = None,
-    cik:           str | None = None,
-    purchase_date: str | None = None,
-    notes:         str | None = None,
-    price_source:  str | None = None,
-    price_date:    str | None = None,
+    asset_type:      str | None = None,
+    currency:        str | None = None,
+    has_ticker:      bool | None = None,
+    sec_linked:      bool | None = None,
+    cik:             str | None = None,
+    purchase_date:   str | None = None,
+    notes:           str | None = None,
+    price_source:    str | None = None,
+    price_date:      str | None = None,
+    # v3 market-provider fields
+    exchange_symbol: str | None = None,
 ) -> "Holding":
     """Insert or update one holding's fields. None means 'don't change'."""
     holdings = load_holdings()
@@ -235,6 +242,7 @@ def upsert_holding(
         notes=_pick(notes, "notes", ""),
         price_source=_pick(price_source, "price_source", "manual"),
         price_date=_pick(price_date, "price_date", ""),
+        exchange_symbol=_pick(exchange_symbol, "exchange_symbol", ""),
     )
     holdings[ticker] = new_holding
     save_holdings(holdings)
