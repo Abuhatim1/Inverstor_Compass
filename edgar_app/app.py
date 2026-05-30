@@ -2679,10 +2679,32 @@ def render_holdings_tab() -> None:
         from ticker_validator import validate_yahoo_ticker, suggest_saudi_ticker
         from portfolio.holdings import normalize_ticker as _ntk
 
-        st.caption(
-            "Opens a brand-new position. An opening BUY transaction is recorded "
-            "automatically — so this holding has a full cost-basis history from day one."
+        # ── Mode selector ─────────────────────────────────────────────────────
+        _ad_mode = st.radio(
+            "Entry mode",
+            options=["Record Existing Holding", "Record New Buy Transaction"],
+            index=0,
+            horizontal=True,
+            key="ahn_mode",
+            help=(
+                "**Record Existing Holding** — enter a position you already own "
+                "(legacy import, transfer, gift). No cash is deducted.  \n"
+                "**Record New Buy Transaction** — log a fresh purchase from your "
+                "account cash. Cash is deducted and a BUY transaction is recorded."
+            ),
         )
+        _is_buy_mode = (_ad_mode == "Record New Buy Transaction")
+
+        if _is_buy_mode:
+            st.caption(
+                "A BUY transaction will be recorded and cash deducted from the "
+                "selected account."
+            )
+        else:
+            st.caption(
+                "The holding is created/updated as-is. No transaction is recorded "
+                "and no cash is deducted."
+            )
 
         # ── Pre-render: flush pending ticker (watchlist / Saudi suggestion) ──
         # Must run before ANY widget renders to avoid the "set after render" crash.
@@ -2896,9 +2918,9 @@ def render_holdings_tab() -> None:
                 icon="🚫",
             )
 
-        # ── Real-time cost / cash calculation (spec §8) ───────────────────────
+        # ── Real-time cost / cash calculation ─────────────────────────────────
         _ad_total_cost = float(_ad_qty) * float(_ad_cost) + float(_ad_fees)
-        _cash_ok       = True
+        _cash_ok       = True   # always OK for Mode A; checked below for Mode B
         _acct_bal      = None
 
         if _ad_aid:
@@ -2908,8 +2930,8 @@ def render_holdings_tab() -> None:
             except Exception:
                 pass
 
-        # Always show the cost calc row; add cash columns when account is linked
-        if _acct_bal is not None:
+        # Show cost row; add cash columns only for Mode B (buy transaction)
+        if _is_buy_mode and _acct_bal is not None:
             _remaining  = _acct_bal - _ad_total_cost
             _cash_ok    = _remaining >= 0
             _rc1, _rc2, _rc3 = st.columns(3)
@@ -2929,68 +2951,105 @@ def render_holdings_tab() -> None:
         # ── Submit ────────────────────────────────────────────────────────────
         _xb1, _xb2 = st.columns(2)
         with _xb1:
+            _btn_label = "✅ Record Buy Transaction" if _is_buy_mode else "✅ Record Holding"
+            # Cash check blocks only Mode B; Mode A is always allowed
+            _submit_disabled = (
+                not _ad_tk_clean
+                or _is_dup
+                or not _ad_aid
+                or (_is_buy_mode and not _cash_ok)
+            )
             if st.button(
-                "✅ Open Position", type="primary", use_container_width=True,
-                disabled=(not _ad_tk_clean or _is_dup or not _cash_ok or not _ad_aid),
+                _btn_label, type="primary", use_container_width=True,
+                disabled=_submit_disabled,
                 key="ahn_submit",
             ):
                 try:
-                    _t, _h2, _e = record_transaction(
-                        ticker=_ad_tk_clean, side="BUY",
-                        quantity=float(_ad_qty),
-                        price=float(_ad_cost),
-                        txn_date=str(_ad_date) if _ad_date else None,
-                        notes=_ad_notes,
-                        company_name=_ad_name.strip() or _ad_tk_clean,
-                        market=_ad_market, sector=_ad_sector,
-                        asset_type=_ad_type, currency=_ad_ccy,
-                        has_ticker=_has_tk,
-                        account_id=_ad_aid, fees=float(_ad_fees),
+                    _sec_linked = bool(
+                        _yahoo_ok and _ad_market == "US"
+                        and _ad_type in ("Stock", "ETF")
                     )
-                    if _e:
-                        st.error(_e)
-                    else:
-                        # Persist metadata not carried by record_transaction
-                        _sec_linked = bool(
-                            _yahoo_ok and _ad_market == "US"
-                            and _ad_type in ("Stock", "ETF")
+                    _err = None
+
+                    if _is_buy_mode:
+                        # ── Mode B: BUY transaction + cash debit ──────────────
+                        _t, _h2, _err = record_transaction(
+                            ticker=_ad_tk_clean, side="BUY",
+                            quantity=float(_ad_qty),
+                            price=float(_ad_cost),
+                            txn_date=str(_ad_date) if _ad_date else None,
+                            notes=_ad_notes,
+                            company_name=_ad_name.strip() or _ad_tk_clean,
+                            market=_ad_market, sector=_ad_sector,
+                            asset_type=_ad_type, currency=_ad_ccy,
+                            has_ticker=_has_tk,
+                            account_id=_ad_aid, fees=float(_ad_fees),
                         )
+                        if not _err:
+                            # Persist extra metadata
+                            upsert_holding(
+                                ticker=_ad_tk_clean,
+                                sec_linked=_sec_linked,
+                                price_source="yfinance" if _yahoo_ok else "manual",
+                                price_date=date.today().isoformat(),
+                                exchange_symbol=_ad_exsym.strip() or None,
+                            )
+                            # Debit cash
+                            if _ad_aid:
+                                try:
+                                    _upd_cash(_ad_aid, -_ad_total_cost)
+                                except Exception:
+                                    pass
+                    else:
+                        # ── Mode A: Record existing holding — no transaction,
+                        #           no cash debit ─────────────────────────────
                         upsert_holding(
                             ticker=_ad_tk_clean,
+                            company_name=_ad_name.strip() or _ad_tk_clean,
+                            market=_ad_market,
+                            sector=_ad_sector,
+                            quantity=float(_ad_qty),
+                            avg_cost=float(_ad_cost),
+                            current_price=float(_ad_price) if _ad_price > 0 else float(_ad_cost),
+                            asset_type=_ad_type,
+                            currency=_ad_ccy,
+                            has_ticker=_has_tk,
+                            purchase_date=str(_ad_date) if _ad_date else None,
+                            notes=_ad_notes,
                             sec_linked=_sec_linked,
                             price_source="yfinance" if _yahoo_ok else "manual",
                             price_date=date.today().isoformat(),
                             exchange_symbol=_ad_exsym.strip() or None,
+                            default_account_id=_ad_aid,
                         )
-                        # Apply live price if it differs from the opening cost
+
+                    if _err:
+                        st.error(_err)
+                    else:
+                        # Apply live price if it differs from the cost basis
                         if _ad_price > 0 and abs(_ad_price - float(_ad_cost)) > 1e-9:
                             update_current_price(
                                 _ad_tk_clean, _ad_price,
                                 source="yfinance" if _yahoo_ok else "manual",
                             )
-                        # Debit cash
-                        if _ad_aid:
-                            try:
-                                _upd_cash(_ad_aid, -_ad_total_cost)
-                            except Exception:
-                                pass
                         # Clear dialog state
                         _keys_to_clear = [
                             "ahn_validation", "ahn_ticker_input", "ahn_tk_confirm",
                             "ahn_name", "ahn_cost", "ahn_price", "ahn_qty",
                             "ahn_ccy", "ahn_type", "ahn_market", "ahn_sector",
-                            "ahn_acct_id", "ahn_has_tk", "ahn_exsym",
+                            "ahn_acct_id", "ahn_has_tk", "ahn_exsym", "ahn_mode",
                         ]
                         for _k in _keys_to_clear:
                             st.session_state.pop(_k, None)
+                        _mode_label = "Buy recorded" if _is_buy_mode else "Holding recorded"
                         st.toast(
-                            f"Position opened: **{_ad_tk_clean}** · "
+                            f"{_mode_label}: **{_ad_tk_clean}** · "
                             f"{_ad_qty:.4f} shares @ {_ad_cost:.4f} {_ad_ccy}",
                             icon="✅",
                         )
                         st.rerun()
                 except Exception as _ex:
-                    st.error(f"Failed to open position — {_ex}")
+                    st.error(f"Failed to save — {_ex}")
         with _xb2:
             if st.button("Cancel", key="ahn_cancel", use_container_width=True):
                 for _k in ("ahn_validation", "ahn_ticker_input"):

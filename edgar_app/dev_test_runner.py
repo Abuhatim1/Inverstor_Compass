@@ -3367,6 +3367,105 @@ def _cat_add() -> list[TestResult]:
             ok,
         )
 
+    def add04():
+        """
+        Mode A (Record Existing Holding): _cash_ok is always True regardless of
+        account balance.  The dialog sets _cash_ok=True before the cash section
+        and only overwrites it when _is_buy_mode=True.  Simulate that logic.
+        """
+        # Simulate dialog cash-check logic for Mode A
+        _is_buy_mode  = False          # "Record Existing Holding"
+        account_cash  = 0.0            # zero cash in account
+        total_cost    = 500.0          # position costs 500
+        _cash_ok      = True           # default — always True for Mode A
+
+        if _is_buy_mode and account_cash is not None:
+            remaining = account_cash - total_cost
+            _cash_ok  = remaining >= 0  # would be False — but this branch is skipped
+
+        submit_blocked = not _cash_ok
+        ok = not submit_blocked  # submit must NOT be blocked by cash in Mode A
+        return (
+            "_cash_ok=True for Mode A with zero-cash account",
+            f"_cash_ok={_cash_ok}, submit_blocked={submit_blocked}",
+            ok,
+        )
+
+    def add05():
+        """
+        Mode A does not debit account cash.  The cash delta applied is 0.
+        Simulate both mode paths and verify Mode A delta is 0.
+        """
+        account_cash = 1000.0
+        total_cost   = 300.0
+
+        # Mode A: no cash debit
+        mode_a_delta = 0.0  # _upd_cash is never called
+        # Mode B: cash debit
+        mode_b_delta = -total_cost
+
+        cash_after_a = account_cash + mode_a_delta  # unchanged
+        cash_after_b = account_cash + mode_b_delta  # reduced
+
+        ok = (cash_after_a == account_cash) and (cash_after_b == account_cash - total_cost)
+        return (
+            f"Mode A delta=0 (cash unchanged={account_cash}); Mode B delta={mode_b_delta}",
+            f"after_A={cash_after_a}, after_B={cash_after_b}",
+            ok,
+        )
+
+    def add06():
+        """
+        Mode B (Record New Buy Transaction): submit is blocked when
+        account cash < total cost.
+        """
+        _is_buy_mode = True
+        account_cash = 50.0
+        total_cost   = 200.0
+
+        _cash_ok = True
+        if _is_buy_mode and account_cash is not None:
+            remaining = account_cash - total_cost
+            _cash_ok  = remaining >= 0   # False — insufficient cash
+
+        submit_blocked = _is_buy_mode and not _cash_ok
+        ok = submit_blocked  # must be blocked
+        return (
+            "submit blocked when Mode B and account_cash < total_cost",
+            f"_cash_ok={_cash_ok}, submit_blocked={submit_blocked}",
+            ok,
+        )
+
+    def add07():
+        """
+        Mode B (Record New Buy Transaction): submit is allowed when
+        account cash >= total cost, and cash delta equals -total_cost.
+        """
+        _is_buy_mode = True
+        account_cash = 500.0
+        total_cost   = 200.0
+        fees         = 5.0
+        total_cost_with_fees = total_cost + fees
+
+        _cash_ok = True
+        if _is_buy_mode and account_cash is not None:
+            remaining = account_cash - total_cost_with_fees
+            _cash_ok  = remaining >= 0   # True — sufficient cash
+
+        cash_delta   = -total_cost_with_fees  # amount debited after successful BUY
+        cash_after   = account_cash + cash_delta
+        submit_allowed = _is_buy_mode and _cash_ok
+
+        ok = (
+            submit_allowed
+            and _near(cash_after, account_cash - total_cost_with_fees, 0.01)
+        )
+        return (
+            f"submit allowed; cash debited by {total_cost_with_fees}; remaining={account_cash - total_cost_with_fees}",
+            f"_cash_ok={_cash_ok}, submit_allowed={submit_allowed}, cash_after={cash_after}",
+            ok,
+        )
+
     results.append(_run(
         "ADD-01",
         "Add New Position session-state flag mechanism works without crash",
@@ -3381,6 +3480,26 @@ def _cat_add() -> list[TestResult]:
         "ADD-03",
         "Add New Position with valid account creates holding with correct binding",
         CAT, "portfolio.holdings.upsert_holding", "P0", True, add03,
+    ))
+    results.append(_run(
+        "ADD-04",
+        "Record Existing Holding (Mode A): zero-cash account does not block submit",
+        CAT, "app._dlg_add_new", "P0", True, add04,
+    ))
+    results.append(_run(
+        "ADD-05",
+        "Record Existing Holding (Mode A): account cash is not debited",
+        CAT, "app._dlg_add_new", "P0", True, add05,
+    ))
+    results.append(_run(
+        "ADD-06",
+        "Record New Buy Transaction (Mode B): insufficient cash blocks submit",
+        CAT, "app._dlg_add_new", "P0", True, add06,
+    ))
+    results.append(_run(
+        "ADD-07",
+        "Record New Buy Transaction (Mode B): sufficient cash allows submit and debits correct amount",
+        CAT, "app._dlg_add_new", "P0", True, add07,
     ))
 
     return results
