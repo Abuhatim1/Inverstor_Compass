@@ -83,24 +83,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── iOS scroll-prime ──────────────────────────────────────────────────────────
-# On iOS WKWebView the scroll chain isn't settled until a first gesture
-# completes, so the very first swipe is swallowed. Programmatically nudging
-# the Streamlit main container by 1 px (then back) on every rerun primes the
-# scroll mechanism before the user touches the screen.
-import streamlit.components.v1 as _components
-_components.html(
-    """<script>
-    try {
-        var el = window.parent.document.querySelector('[data-testid="stMain"]')
-              || window.parent.document.documentElement;
-        el.scrollTop = 1;
-        setTimeout(function() { el.scrollTop = 0; }, 80);
-    } catch(e) {}
-    </script>""",
-    height=0,
-)
-
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(
     """
