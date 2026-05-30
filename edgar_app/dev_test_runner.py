@@ -2799,6 +2799,290 @@ def _cat_acc_ui() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category A11 — Per-Account Valuation Consistency
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_a11() -> list[TestResult]:
+    """
+    Verify that account-level holdings valuation reconciles exactly to the
+    portfolio-level valuation produced by the centralised engine.
+
+    Approach (read-only, no disk writes for A11-01..A11-04):
+      1. Construct synthetic Holding/Account objects in memory.
+      2. Pass them directly into calculate_portfolio_valuation().
+      3. Group the engine's per_holding rows by default_account_id.
+      4. Compare sum(account_totals) vs holdings_value_base — tolerance 0.01.
+
+    A11-05..A11-07 run against live on-disk data.
+    """
+    CAT     = "Per-Account Valuation Consistency"
+    TOLE    = 0.01
+    results: list[TestResult] = []
+
+    from dataclasses import dataclass, field
+    from portfolio.holdings  import Holding
+    from portfolio.accounts  import Account
+    from portfolio.valuation import calculate_portfolio_valuation
+
+    # ── Shared helpers ────────────────────────────────────────────────────────
+
+    @dataclass
+    class _FxRate:
+        """Minimal stand-in for FxRate used in sandbox tests."""
+        rate:   float
+        source: str = "same"
+
+    def _per_account_values(val, holdings_map: dict) -> dict:
+        """
+        Group the engine's per_holding output by default_account_id.
+        Returns {account_id: sum_of_base_market_value}.
+        Uses no arithmetic of its own — all figures come from the engine.
+        """
+        totals: dict[str, float] = {}
+        for ph in val.per_holding:
+            aid = getattr(holdings_map.get(ph.ticker), "default_account_id", "") or ""
+            totals[aid] = round(totals.get(aid, 0.0) + ph.base_market_value, 6)
+        return totals
+
+    def _make_fx(base_ccy: str, extras: dict | None = None) -> dict:
+        """Return a minimal fx_rates dict: base→1.0, plus any extras supplied."""
+        fx = {base_ccy: _FxRate(rate=1.0, source="same")}
+        if extras:
+            fx.update(extras)
+        return fx
+
+    def _sb_acct(aid: str, name: str, ccy: str = "USD") -> Account:
+        return Account(
+            account_id=aid, account_name=name,
+            institution="Test", account_type="Brokerage",
+            base_currency=ccy, cash_balance=0.0,
+        )
+
+    def _sb_hold(ticker: str, qty: float, price: float,
+                 aid: str, ccy: str = "USD") -> Holding:
+        return Holding(
+            ticker=ticker, company_name=f"Sandbox {ticker}",
+            quantity=qty, avg_cost=price * 0.8, current_price=price,
+            currency=ccy, default_account_id=aid,
+        )
+
+    # ── A11-01: single account, two holdings ─────────────────────────────────
+    def a11_01():
+        h1 = _sb_hold("SB11A", qty=10.0, price=5.0,  aid="acct1")
+        h2 = _sb_hold("SB11B", qty=20.0, price=3.0,  aid="acct1")
+        hmap   = {"SB11A": h1, "SB11B": h2}
+        amap   = {"acct1": _sb_acct("acct1", "Single Acct")}
+        fx     = _make_fx("USD")
+        val    = calculate_portfolio_valuation(hmap, amap, "USD", fx_rates=fx)
+        totals = _per_account_values(val, hmap)
+
+        acc_sum = sum(totals.values())
+        ok      = _near(acc_sum, val.holdings_value_base, TOLE)
+        return (
+            f"sum(account_values) ≈ holdings_value_base (±{TOLE})",
+            f"sum={acc_sum:.4f}  engine={val.holdings_value_base:.4f}  "
+            f"diff={abs(acc_sum - val.holdings_value_base):.6f}",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-01", "Single-account: account total == holdings_value_base",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_01,
+    ))
+
+    # ── A11-02: multiple accounts ─────────────────────────────────────────────
+    def a11_02():
+        hmap = {
+            "SB12A": _sb_hold("SB12A", qty=10.0, price=10.0, aid="acct_x"),
+            "SB12B": _sb_hold("SB12B", qty= 5.0, price=20.0, aid="acct_y"),
+            "SB12C": _sb_hold("SB12C", qty=15.0, price= 4.0, aid="acct_x"),
+        }
+        amap = {
+            "acct_x": _sb_acct("acct_x", "Alpha"),
+            "acct_y": _sb_acct("acct_y", "Beta"),
+        }
+        fx     = _make_fx("USD")
+        val    = calculate_portfolio_valuation(hmap, amap, "USD", fx_rates=fx)
+        totals = _per_account_values(val, hmap)
+
+        # Two accounts present
+        accts_found = set(totals.keys()) == {"acct_x", "acct_y"}
+        acc_sum     = sum(totals.values())
+        ok = accts_found and _near(acc_sum, val.holdings_value_base, TOLE)
+        return (
+            f"two distinct account buckets; sum ≈ holdings_value_base (±{TOLE})",
+            f"buckets={sorted(totals.keys())}  sum={acc_sum:.4f}  "
+            f"engine={val.holdings_value_base:.4f}  "
+            f"diff={abs(acc_sum - val.holdings_value_base):.6f}",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-02", "Multiple accounts: each holding assigned to exactly one account; totals reconcile",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_02,
+    ))
+
+    # ── A11-03: multiple currencies ───────────────────────────────────────────
+    def a11_03():
+        hmap = {
+            "SB13U": _sb_hold("SB13U", qty=100.0, price=10.0,  aid="acct_usd", ccy="USD"),
+            "SB13S": _sb_hold("SB13S", qty=200.0, price= 5.0,  aid="acct_sar", ccy="SAR"),
+        }
+        amap = {
+            "acct_usd": _sb_acct("acct_usd", "USD Acct", "USD"),
+            "acct_sar": _sb_acct("acct_sar", "SAR Acct", "SAR"),
+        }
+        USD_SAR = 3.75
+        fx = _make_fx("SAR", {"USD": _FxRate(rate=USD_SAR, source="test")})
+        val    = calculate_portfolio_valuation(hmap, amap, "SAR", fx_rates=fx)
+        totals = _per_account_values(val, hmap)
+
+        expected_usd_acct = 100.0 * 10.0 * USD_SAR   # 3,750 SAR
+        expected_sar_acct = 200.0 * 5.0               # 1,000 SAR
+        expected_total    = expected_usd_acct + expected_sar_acct
+
+        acc_sum = sum(totals.values())
+        ok = (
+            _near(acc_sum,   val.holdings_value_base, TOLE) and
+            _near(acc_sum,   expected_total, TOLE)
+        )
+        return (
+            f"multi-ccy FX applied; sum ≈ {expected_total:.2f} SAR (±{TOLE})",
+            f"sum={acc_sum:.4f}  engine={val.holdings_value_base:.4f}  "
+            f"expected={expected_total:.4f}  diff={abs(acc_sum - expected_total):.6f}",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-03", "Multiple currencies: FX-converted account totals reconcile to engine total",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_03,
+    ))
+
+    # ── A11-04: holding reassigned → account totals shift, global total same ──
+    def a11_04():
+        BASE_CCY = "USD"
+        hmap_before = {
+            "SB14A": _sb_hold("SB14A", qty=10.0, price=10.0, aid="acct_p"),
+            "SB14B": _sb_hold("SB14B", qty= 5.0, price=20.0, aid="acct_p"),
+        }
+        # Reassign SB14B from acct_p to acct_q
+        h14b_new = _sb_hold("SB14B", qty=5.0, price=20.0, aid="acct_q")
+        hmap_after = {"SB14A": hmap_before["SB14A"], "SB14B": h14b_new}
+
+        amap = {
+            "acct_p": _sb_acct("acct_p", "Parent"),
+            "acct_q": _sb_acct("acct_q", "Child"),
+        }
+        fx = _make_fx(BASE_CCY)
+
+        val_b   = calculate_portfolio_valuation(hmap_before, amap, BASE_CCY, fx_rates=fx)
+        val_a   = calculate_portfolio_valuation(hmap_after,  amap, BASE_CCY, fx_rates=fx)
+        tot_b   = _per_account_values(val_b, hmap_before)
+        tot_a   = _per_account_values(val_a, hmap_after)
+
+        b14b_mv = hmap_before["SB14B"].quantity * hmap_before["SB14B"].current_price  # 100
+        # After: acct_p should drop by b14b_mv, acct_q should gain b14b_mv
+        p_before  = tot_b.get("acct_p", 0.0)
+        p_after   = tot_a.get("acct_p", 0.0)
+        q_after   = tot_a.get("acct_q", 0.0)
+
+        global_before = sum(tot_b.values())
+        global_after  = sum(tot_a.values())
+
+        ok = (
+            _near(p_after,    p_before - b14b_mv,  TOLE) and   # acct_p shrank
+            _near(q_after,    b14b_mv,              TOLE) and   # acct_q gained
+            _near(global_before, global_after,      TOLE)       # total unchanged
+        )
+        return (
+            f"acct_p −{b14b_mv:.0f}, acct_q +{b14b_mv:.0f}, global total unchanged (±{TOLE})",
+            f"acct_p: {p_before:.2f}→{p_after:.2f}  "
+            f"acct_q: 0.00→{q_after:.2f}  "
+            f"global: {global_before:.4f}→{global_after:.4f}",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-04", "Reassignment: account totals shift by holding MV; portfolio total unchanged",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_04,
+    ))
+
+    # ── A11-05 / A11-06 / A11-07: live on-disk data ───────────────────────────
+    from portfolio.holdings import load_holdings
+    from portfolio.accounts import load_accounts
+    from fx_rates           import get_rates_for_holdings
+
+    live_holdings = load_holdings()
+    live_accounts = load_accounts()
+    live_active   = {t: h for t, h in live_holdings.items() if h.quantity > 1e-9}
+
+    all_ccys = list({getattr(h, "currency", "USD") for h in live_active.values()})
+    live_fx  = get_rates_for_holdings(all_ccys, "SAR") if all_ccys else {}
+    live_val = calculate_portfolio_valuation(
+        live_holdings, live_accounts, "SAR", fx_rates=live_fx
+    )
+    live_totals = _per_account_values(live_val, live_holdings)
+
+    # ── A11-05: portfolio total == sum of account totals ─────────────────────
+    def a11_05():
+        acc_sum = sum(live_totals.values())
+        diff    = abs(acc_sum - live_val.holdings_value_base)
+        ok      = diff <= TOLE
+        return (
+            f"sum(account_holdings_values) ≈ portfolio holdings_value_base (±{TOLE})",
+            f"sum={acc_sum:,.4f} SAR  engine={live_val.holdings_value_base:,.4f} SAR  "
+            f"diff={diff:.6f}",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-05", "Live portfolio: sum(account_holdings_values) == holdings_value_base",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_05,
+    ))
+
+    # ── A11-06: no holding counted twice ─────────────────────────────────────
+    def a11_06():
+        """Each per_holding row contributes to exactly one account bucket."""
+        tickers_seen: list[str] = [ph.ticker for ph in live_val.per_holding]
+        dupes = [t for t in tickers_seen if tickers_seen.count(t) > 1]
+        ok    = len(dupes) == 0
+        return (
+            "every ticker appears exactly once in per_holding list",
+            f"duplicates={dupes}" if dupes else f"no duplicates in {len(tickers_seen)} rows",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-06", "No holding counted twice in per_holding output",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_06,
+    ))
+
+    # ── A11-07: no active holding omitted ────────────────────────────────────
+    def a11_07():
+        """Every active holding (qty > 1e-9) appears in per_holding."""
+        engine_tickers = {ph.ticker for ph in live_val.per_holding}
+        missing = sorted(
+            t for t, h in live_active.items()
+            if t not in engine_tickers
+        )
+        ok = len(missing) == 0
+        return (
+            "every active holding appears in per_holding",
+            f"missing from engine output: {missing}"
+            if missing else
+            f"all {len(live_active)} active holdings present in per_holding",
+            ok,
+        )
+
+    results.append(_run(
+        "A11-07", "No active holding omitted from per_holding output",
+        CAT, "portfolio.valuation.calculate_portfolio_valuation", "P0", True, a11_07,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Category A10 — Account Deletion Guard Regression
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -3024,7 +3308,7 @@ def run_all_tests() -> TestReport:
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
-        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a10() + _cat_ch()
+        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
     )
 
     punch_list: list[PunchListItem] = []
