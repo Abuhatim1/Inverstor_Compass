@@ -1,0 +1,91 @@
+Perform a Tier-1 Account Architecture Audit.
+
+Do NOT add any new features.
+Do NOT modify UI.
+Do NOT change existing logic.
+
+Objective:
+Verify that the accounting foundation is institution-grade and safe for future scaling.
+
+Audit and report PASS / FAIL with evidence for each item:
+
+A01 - Multiple investment accounts supported
+
+Verify:
+- User can create more than one investment account
+- Holdings remain linked to the correct account
+
+A02 - Multiple bank accounts supported
+
+Verify:
+- User can create more than one bank account
+- Cash balances remain separated
+
+A03 - Account cash isolation
+
+Verify:
+- Cash in Account A never affects Account B
+- Portfolio calculations do not mix account balances incorrectly
+
+A04 - Buy transaction account linkage
+
+Verify:
+- Every BUY is linked to a specific account
+- Cash is deducted from the correct account only
+
+A05 - Sell transaction account linkage
+
+Verify:
+- Every SELL is linked to a specific account
+- Cash returns to the correct account only
+
+A06 - Closed position account integrity
+
+Verify:
+- Closed Holdings preserve original account ownership
+- Realized P&L remains traceable to originating account
+
+A07 - Transaction audit trail
+
+Verify:
+- Every BUY and SELL can be traced back through transaction history
+- No orphan records
+
+A08 - Portfolio valuation consistency
+
+Verify:
+- Holdings
+- Accounts
+- Closed Holdings
+- Portfolio totals
+
+all reconcile to the same valuation engine
+
+A09 - Multi-currency account integrity
+
+Verify:
+- Different account currencies are supported
+- Base currency conversion remains correct
+- No currency mixing before FX conversion
+
+A10 - Account deletion / corruption risk review
+
+Inspect code only.
+
+Report:
+- What happens if an account with holdings is deleted
+- What happens if an account with cash is deleted
+- Any data integrity risks
+
+Output:
+
+1. PASS / FAIL table
+2. Critical findings only
+3. Recommended fixes ranked:
+   - P0 Critical
+   - P1 Important
+   - P2 Later
+
+Do not implement anything.
+Audit only.
+Return evidence from actual code paths and data structures.
