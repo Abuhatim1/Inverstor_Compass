@@ -83,6 +83,17 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Global scroll-focus fix ────────────────────────────────────────────────────
+# Streamlit renders interactive components (dataframes, charts) inside iframes.
+# After a rerun, browser focus can land inside one of those iframes, trapping
+# scroll events. This snippet runs on every rerun and immediately returns focus
+# to the parent document so scrolling always works on the main page.
+import streamlit.components.v1 as _components
+_components.html(
+    "<script>window.parent.document.body.focus();</script>",
+    height=0,
+)
+
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(
     """
