@@ -2413,10 +2413,11 @@ def render_holdings_tab() -> None:
     from portfolio.valuation import calculate_portfolio_valuation
     from portfolio.accounts import load_accounts as _load_accts
 
-    _all_ccys  = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
-    _fx        = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
-    _manual_fx = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
-    _val       = calculate_portfolio_valuation(holdings, _load_accts(), _base_ccy, fx_rates=_fx)
+    _all_ccys    = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
+    _fx          = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
+    _manual_fx   = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
+    _all_accounts = _load_accts()          # kept for table display + edit dialog
+    _val         = calculate_portfolio_valuation(holdings, _all_accounts, _base_ccy, fx_rates=_fx)
     # Per-holding weight map (invested weight, not including cash)
     _wt_map    = {r.ticker: r.invested_weight_pct for r in _val.per_holding}
 
@@ -2473,6 +2474,10 @@ def render_holdings_tab() -> None:
                           "cached": "Cached", "manual": "Manual"}.get(
                 _src_raw, _src_raw.capitalize())
 
+            _aid       = getattr(h, "default_account_id", "") or ""
+            _acct_obj  = _all_accounts.get(_aid)
+            _acct_name = _acct_obj.account_name if _acct_obj else ("Unassigned" if not _aid else "Unknown")
+
             _ticker_order.append(ticker)
             rows.append({
                 " ":        status,
@@ -2486,6 +2491,7 @@ def render_holdings_tab() -> None:
                 "Wt %":     round(_wt_map.get(ticker, 0.0), 1),
                 "CCY":      ccy,
                 "Src":      _src_label,
+                "Account":  _acct_name,
             })
 
         _tbl_sel = st.dataframe(
@@ -2506,6 +2512,7 @@ def render_holdings_tab() -> None:
                 "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
                 "CCY":      st.column_config.TextColumn("CCY", width="small"),
                 "Src":      st.column_config.TextColumn("Src", width="small"),
+                "Account":  st.column_config.TextColumn("Account"),
             },
         )
         st.caption("👆 Tap a row to select it, then use the action bar below  ·  🟢 profit  🔴 loss  ⚪ flat")
@@ -3172,6 +3179,7 @@ def render_holdings_tab() -> None:
         # ── Dialog: Edit ─────────────────────────────────────────────────────
         @st.dialog("✏️ Edit Holding")
         def _dlg_edit(dlg_ticker: str, dlg_h):
+            from portfolio.accounts import load_accounts as _ed_load_accts, account_display_name as _ed_acct_dn
             st.caption(
                 f"**{dlg_ticker}** — direct field correction.  "
                 "Transaction history is not affected."
@@ -3201,9 +3209,35 @@ def render_holdings_tab() -> None:
                     "Example: Saudi Aramco → 2222, Al Rajhi Bank → 1120"
                 ),
             )
+
+            # ── Account selector ──────────────────────────────────────────────
+            _ed_accts   = {aid: a for aid, a in _ed_load_accts().items() if a.active}
+            _cur_aid    = getattr(dlg_h, "default_account_id", "") or ""
+            # Build options: "" sentinel first (placeholder), then real IDs
+            _ed_opts    = [""] + list(_ed_accts.keys())
+            _ed_labels  = {
+                "": "— Select account —",
+                **{aid: _ed_acct_dn(a) for aid, a in _ed_accts.items()},
+            }
+            _ed_default = _cur_aid if _cur_aid in _ed_accts else ""
+            _e_aid      = st.selectbox(
+                "Account *",
+                options=_ed_opts,
+                format_func=lambda k: _ed_labels[k],
+                index=_ed_opts.index(_ed_default),
+                key=f"dlg_edit_acct_{dlg_ticker}",
+                help="Every holding must be linked to an account.",
+            )
+            if not _e_aid:
+                st.warning("Account is required for every holding.", icon="⚠️")
+
             _eb1, _eb2 = st.columns(2)
             with _eb1:
-                if st.button("💾 Save Changes", type="primary", use_container_width=True):
+                if st.button(
+                    "💾 Save Changes", type="primary",
+                    use_container_width=True,
+                    disabled=not _e_aid,
+                ):
                     try:
                         upsert_holding(
                             ticker=dlg_ticker,
@@ -3213,6 +3247,7 @@ def render_holdings_tab() -> None:
                             current_price=float(_e_price),
                             notes=_e_notes or None,
                             exchange_symbol=_e_exsym.strip() or None,
+                            default_account_id=_e_aid,
                         )
                         st.toast(f"{dlg_ticker} updated", icon="💾")
                         st.rerun()
