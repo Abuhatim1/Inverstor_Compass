@@ -83,21 +83,20 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Global scroll-focus fix ────────────────────────────────────────────────────
-# Streamlit renders interactive components (dataframes, charts) inside iframes.
-# After a rerun, browser focus can land inside one of those iframes, trapping
-# scroll events. This snippet runs on every rerun and immediately returns focus
-# to the parent document so scrolling always works on the main page.
-import streamlit.components.v1 as _components
-_components.html(
-    "<script>window.parent.document.body.focus();</script>",
-    height=0,
-)
-
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
+    /* ── Mobile scroll fix ───────────────────────────────────────────────── */
+    /* iOS captures touch-scroll gestures for any element with overflow:auto  */
+    /* even when content doesn't actually overflow, preventing page scroll.   */
+    /* Setting overflow:hidden removes that scroll context; touch-action:pan-y */
+    /* tells the browser vertical swipes belong to the page, not the element. */
+    [data-testid="stDataFrame"] > div {
+        overflow: hidden !important;
+        touch-action: pan-y !important;
+    }
+
     /* ── Bidi / Arabic text ─────────────────────────────────────────────── */
     [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] div,
