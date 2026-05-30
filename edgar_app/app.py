@@ -6042,10 +6042,57 @@ def render_test_runner_tab() -> None:
         save_test_report(report)
         save_punch_list_report(report)
 
+    # ── Local helper: render persisted report history from disk ──────────────
+    def _show_history(key_prefix: str = "") -> None:
+        from report_store import (
+            list_test_reports, list_punch_list_reports,
+            read_bytes, label_from_path,
+        )
+        st.divider()
+        st.subheader("📁 Report History")
+        st.caption(
+            "Latest 3 reports of each type are kept automatically. "
+            "Oldest file is removed when a 4th is generated."
+        )
+        _h1, _h2 = st.columns(2)
+        with _h1:
+            st.markdown("**🧪 Test Runner Reports**")
+            _tr_files = list(reversed(list_test_reports()))
+            if _tr_files:
+                for _idx, _fp in enumerate(_tr_files):
+                    _lbl = label_from_path(_fp)
+                    st.download_button(
+                        label=f"⬇️ #{_idx + 1} — {_lbl}",
+                        data=read_bytes(_fp),
+                        file_name=f"{_lbl.replace(' ', '_').replace(':', '-')}_test_report.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"{key_prefix}dl_tr_hist_{_idx}",
+                        use_container_width=True,
+                    )
+            else:
+                st.info("No saved test reports yet. Run tests to generate one.", icon="📭")
+        with _h2:
+            st.markdown("**🔴 Punch List Reports**")
+            _pl_files = list(reversed(list_punch_list_reports()))
+            if _pl_files:
+                for _idx, _fp in enumerate(_pl_files):
+                    _lbl = label_from_path(_fp)
+                    st.download_button(
+                        label=f"⬇️ #{_idx + 1} — {_lbl}",
+                        data=read_bytes(_fp),
+                        file_name=f"{_lbl.replace(' ', '_').replace(':', '-')}_punch_list.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"{key_prefix}dl_pl_hist_{_idx}",
+                        use_container_width=True,
+                    )
+            else:
+                st.info("No saved punch list reports yet. Run tests to generate one.", icon="📭")
+
     report = st.session_state.get("_test_report")
 
     if not report:
         st.info("Click **▶️ Run Pre-Release Tests** to begin.", icon="🧪")
+        _show_history()   # persisted files survive session/mode changes
         return
 
     with col_ts:
@@ -6194,56 +6241,7 @@ def render_test_runner_tab() -> None:
             st.button("⬇️ Export Punch List (CSV)", disabled=True,
                       key="dl_punch_list_empty", use_container_width=True)
 
-    # ── Report History ─────────────────────────────────────────────────────────
-    st.divider()
-    st.subheader("📁 Report History")
-    st.caption(
-        "Latest 3 reports of each type are kept automatically. "
-        "Oldest file is removed when a 4th is generated."
-    )
-
-    from report_store import (
-        list_test_reports, list_punch_list_reports,
-        read_bytes, label_from_path,
-    )
-
-    _h1, _h2 = st.columns(2)
-
-    with _h1:
-        st.markdown("**🧪 Test Runner Reports**")
-        _tr_files = list(reversed(list_test_reports()))   # newest first
-        if _tr_files:
-            for _idx, _fp in enumerate(_tr_files):
-                _lbl  = label_from_path(_fp)
-                _name = f"#{_idx + 1} — {_lbl}"
-                st.download_button(
-                    label=f"⬇️ {_name}",
-                    data=read_bytes(_fp),
-                    file_name=f"{_lbl.replace(' ', '_').replace(':', '-')}_test_report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_tr_hist_{_idx}",
-                    use_container_width=True,
-                )
-        else:
-            st.info("No saved test reports yet. Run tests to generate one.", icon="📭")
-
-    with _h2:
-        st.markdown("**🔴 Punch List Reports**")
-        _pl_files = list(reversed(list_punch_list_reports()))   # newest first
-        if _pl_files:
-            for _idx, _fp in enumerate(_pl_files):
-                _lbl  = label_from_path(_fp)
-                _name = f"#{_idx + 1} — {_lbl}"
-                st.download_button(
-                    label=f"⬇️ {_name}",
-                    data=read_bytes(_fp),
-                    file_name=f"{_lbl.replace(' ', '_').replace(':', '-')}_punch_list.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_pl_hist_{_idx}",
-                    use_container_width=True,
-                )
-        else:
-            st.info("No saved punch list reports yet. Run tests to generate one.", icon="📭")
+    _show_history()
 
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
