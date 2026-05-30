@@ -2360,8 +2360,6 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 key="alloc_dl_report",
                 use_container_width=True,
             )
-        else:
-            st.caption("Report export unavailable.")
     with _ex2:
         _csv_io = _io.StringIO()
         _disp.to_csv(_csv_io, index=False, float_format="%.2f")
