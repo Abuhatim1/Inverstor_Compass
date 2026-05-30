@@ -2603,7 +2603,10 @@ def render_holdings_tab() -> None:
             if st.button("➕ Add New Position", key="open_add_new_btn",
                          type="primary", use_container_width=True,
                          help="Open a single new position with a BUY transaction."):
-                _dlg_add_new()
+                # Cannot call _dlg_add_new() directly here — it is defined below
+                # this code block, and Python marks it as local (UnboundLocalError).
+                # Set a flag; the dialog is opened after its definition executes.
+                st.session_state["_open_dlg_add_new"] = True
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
@@ -3183,6 +3186,10 @@ def render_holdings_tab() -> None:
             with _sb2:
                 if st.button("Cancel", use_container_width=True):
                     st.rerun()
+
+        # ── Open Add New dialog if flagged by the toolbar button ─────────────
+        if st.session_state.pop("_open_dlg_add_new", False):
+            _dlg_add_new()
 
         # ── Dialog: Edit ─────────────────────────────────────────────────────
         @st.dialog("✏️ Edit Holding")
