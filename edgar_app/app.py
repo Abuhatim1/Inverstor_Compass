@@ -90,11 +90,24 @@ st.markdown(
     /* ── Mobile scroll fix ───────────────────────────────────────────────── */
     /* iOS captures touch-scroll gestures for any element with overflow:auto  */
     /* even when content doesn't actually overflow, preventing page scroll.   */
-    /* Setting overflow:hidden removes that scroll context; touch-action:pan-y */
-    /* tells the browser vertical swipes belong to the page, not the element. */
-    [data-testid="stDataFrame"] > div {
+    /* Setting overflow:hidden removes that scroll context; touch-action:pan-x */
+    /* on textareas / pan-y on containers tells iOS vertical swipes = page.   */
+
+    /* Dataframes (direct child + one level deeper for expander-nested ones) */
+    [data-testid="stDataFrame"] > div,
+    [data-testid="stDataFrame"] > div > div {
         overflow: hidden !important;
         touch-action: pan-y !important;
+    }
+
+    /* Textareas (Notes fields etc.) — pan-x only so vertical goes to page */
+    textarea {
+        touch-action: pan-x !important;
+    }
+
+    /* Expander content — remove any overflow scroll context */
+    [data-testid="stExpanderDetails"] {
+        overflow: visible !important;
     }
 
     /* ── Bidi / Arabic text ─────────────────────────────────────────────── */
