@@ -1017,7 +1017,8 @@ def _cat_h() -> list[TestResult]:
         old_env = os.environ.get("SAHMK_API_KEY")
         os.environ.pop("SAHMK_API_KEY", None)
         try:
-            result = sahmk_client.get_quote("2222")
+            # force=True bypasses the in-process cache so the absent key is checked
+            result = sahmk_client.get_quote("2222", force=True)
             ok = result is None
         finally:
             if old_env is not None:
@@ -1222,6 +1223,142 @@ def _cat_i() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category J — SAHMK: Live Integration (requires SAHMK_API_KEY)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_j() -> list[TestResult]:
+    """
+    J01–J05: Live SAHMK integration tests.
+    J01–J02 are pure env/network checks (no API call).
+    J03 makes a real GET /quote/2222/ request — marked P1/non-blocker since
+    the quote depends on the test key's access level.
+    J04 verifies the fallback chain (SAHMK miss → yfinance).
+    J05 confirms the valuation engine accepts a SAHMK-sourced price cleanly.
+    """
+    CAT = "SAHMK — Live Integration"
+    results: list[TestResult] = []
+
+    # ── J01: SAHMK API key is configured ─────────────────────────────────────
+    def j01():
+        import sahmk_client
+        ok = sahmk_client.is_configured()
+        return (
+            "is_configured()=True",
+            f"is_configured()={ok}",
+            ok,
+        )
+
+    results.append(_run(
+        "J01",
+        "SAHMK_API_KEY is present in environment",
+        CAT, "sahmk_client", "P0", True, j01,
+    ))
+
+    # ── J02: SAHMK base URL DNS resolves ─────────────────────────────────────
+    def j02():
+        import socket, os
+        base = os.environ.get("SAHMK_BASE_URL", "https://app.sahmk.sa/api/v1")
+        # Extract hostname from URL (strip scheme and path)
+        host = base.split("//")[-1].split("/")[0]
+        try:
+            socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+            ok = True
+            act = f"{host} resolved"
+        except socket.gaierror as e:
+            ok = False
+            act = f"{host} failed: {e}"
+        return (f"{host} resolves via DNS", act, ok)
+
+    results.append(_run(
+        "J02",
+        "SAHMK base URL hostname resolves via DNS",
+        CAT, "sahmk_client", "P0", True, j02,
+    ))
+
+    # ── J03: get_quote("2222") returns a valid price ──────────────────────────
+    def j03():
+        import sahmk_client
+        sahmk_client.clear_cache()           # force a live network call
+        q = sahmk_client.get_quote("2222", force=True)
+        if q is None:
+            return (
+                "dict with price > 0",
+                "None (API returned no data — test-key limitation or market closed)",
+                False,
+            )
+        p = q.get("price")
+        ok = isinstance(p, (int, float)) and float(p) > 0
+        return (
+            "dict with price > 0",
+            f"price={p}, currency={q.get('currency','?')}",
+            ok,
+        )
+
+    results.append(_run(
+        "J03",
+        "get_quote('2222') returns a live quote with a positive price",
+        CAT, "sahmk_client", "P1", False, j03,   # P1/non-blocker: test-key may be limited
+    ))
+
+    # ── J04: Fallback chain — SAHMK miss → yfinance picks up ─────────────────
+    def j04():
+        from market_data_router import get_routed_price, PROVIDER_SAHMK, PROVIDER_YFINANCE
+        # "ZZZINVALID" as exchange_symbol → SAHMK returns None for unknown symbol
+        # "AAPL" as ticker             → yfinance should succeed
+        rp = get_routed_price(
+            ticker          = "AAPL",
+            exchange_symbol = "ZZZINVALID",
+            last_known_price  = 0.0,
+            last_known_source = "manual",
+        )
+        # Must NOT come from SAHMK (the invalid symbol should produce None)
+        # Should come from yfinance (AAPL is always available)
+        ok = rp.provider == PROVIDER_YFINANCE and rp.is_ok
+        return (
+            f"provider=yfinance, price>0",
+            f"provider={rp.provider!r}, price={rp.price}, source={rp.source!r}",
+            ok,
+        )
+
+    results.append(_run(
+        "J04",
+        "SAHMK miss on invalid symbol → router falls back to yfinance",
+        CAT, "market_data_router", "P0", True, j04,
+    ))
+
+    # ── J05: Valuation engine accepts SAHMK-sourced price without error ───────
+    def j05():
+        from portfolio.holdings import Holding
+        from portfolio.valuation import calculate_portfolio_valuation
+        from fx_rates import FxRate
+        # Build a holding whose current_price comes from SAHMK (simulated)
+        h = Holding(
+            ticker="2222.SR", company_name="Saudi Aramco",
+            quantity=100.0, avg_cost=30.0, current_price=32.50,
+            currency="SAR", has_ticker=True,
+            exchange_symbol="2222",
+        )
+        fx = {"SAR": FxRate(from_ccy="SAR", base_ccy="SAR",
+                            rate=1.0, source="test", fetched_at=_ts())}
+        v = calculate_portfolio_valuation({"2222.SR": h}, {}, "SAR", fx)
+        exp_mv = 100.0 * 32.50   # 3250.0
+        ok = abs(v.holdings_value_base - exp_mv) < 0.01
+        return (
+            f"holdings_value_base={exp_mv:.2f}",
+            f"holdings_value_base={v.holdings_value_base:.2f}",
+            ok,
+        )
+
+    results.append(_run(
+        "J05",
+        "Valuation engine correctly uses SAHMK-sourced price (no errors)",
+        CAT, "portfolio.valuation", "P0", True, j05,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -1232,7 +1369,7 @@ def run_all_tests() -> TestReport:
     """
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
-        + _cat_f() + _cat_g() + _cat_h() + _cat_i()
+        + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
     )
 
     punch_list: list[PunchListItem] = []

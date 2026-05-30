@@ -3,9 +3,16 @@ sahmk_client.py
 ---------------
 Market data provider for the Saudi market via the SAHMK API.
 
+Official API:
+  BASE_URL  = https://app.sahmk.sa/api/v1   (override via SAHMK_BASE_URL)
+  Auth      = X-API-Key: <SAHMK_API_KEY>
+
+MVP endpoint (free tier):
+  GET /quote/{symbol}/   — single quote for a local-market symbol (e.g. "2222")
+
 Configuration (environment variables):
   SAHMK_API_KEY   — required; your SAHMK subscription key
-  SAHMK_BASE_URL  — optional; defaults to https://api.sahmk.com/v1
+  SAHMK_BASE_URL  — optional; overrides the default base URL above
 
 Design rules:
 - Never raises. All public functions return None / empty dict on failure.
@@ -33,7 +40,7 @@ from typing import Any, Optional
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-_BASE_URL = os.environ.get("SAHMK_BASE_URL", "https://api.sahmk.com/v1").rstrip("/")
+_BASE_URL = os.environ.get("SAHMK_BASE_URL", "https://app.sahmk.sa/api/v1").rstrip("/")
 _API_KEY  = os.environ.get("SAHMK_API_KEY", "")
 
 # ── Cache TTLs ────────────────────────────────────────────────────────────────
@@ -68,7 +75,7 @@ def _get(path: str, params: dict | None = None, timeout: int = 10) -> Optional[d
     if not key:
         return None
 
-    base = os.environ.get("SAHMK_BASE_URL", "https://api.sahmk.com/v1").rstrip("/")
+    base = os.environ.get("SAHMK_BASE_URL", "https://app.sahmk.sa/api/v1").rstrip("/")
     url  = f"{base}/{path.lstrip('/')}"
     if params:
         qs  = "&".join(f"{k}={v}" for k, v in params.items())
@@ -141,22 +148,26 @@ def get_quote(symbol: str, *, force: bool = False) -> Optional[dict]:
         if cached is not None:
             return cached
 
-    data = _get(f"quotes/{symbol}")
+    # MVP free-tier endpoint: GET /quote/{symbol}/
+    data = _get(f"quote/{symbol}/")
     result: Optional[dict] = None
     if isinstance(data, dict):
         # Normalise common field names across API versions
         price = _safe_float(
             data.get("price") or data.get("last_price") or data.get("lastPrice")
+            or data.get("close") or data.get("current_price")
         )
         if price is not None:
             result = {
                 "symbol":      symbol,
                 "price":       price,
+                "currency":    data.get("currency", "SAR"),
                 "change":      _safe_float(data.get("change")),
                 "change_pct":  _safe_float(
                     data.get("change_pct") or data.get("changePct") or data.get("pct_change")
                 ),
                 "volume":      _safe_float(data.get("volume")),
+                "is_delayed":  bool(data.get("is_delayed", True)),
                 "timestamp":   data.get("timestamp") or data.get("time") or "",
                 "raw":         data,
             }
