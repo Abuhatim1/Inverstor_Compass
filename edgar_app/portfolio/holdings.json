@@ -132,7 +132,7 @@
     "sector": "Healthcare",
     "quantity": 952.0,
     "avg_cost": 124.79,
-    "current_price": 98.44999694824219,
+    "current_price": 98.45,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "SAR",
@@ -141,10 +141,10 @@
     "cik": "",
     "purchase_date": "2023-05-01",
     "notes": "",
-    "price_source": "yfinance",
+    "price_source": "SAHMK",
     "price_date": "2026-05-30",
     "default_account_id": "",
-    "exchange_symbol": ""
+    "exchange_symbol": "4164"
   },
   "7010.SR": {
     "ticker": "7010.SR",
@@ -153,7 +153,7 @@
     "sector": "Communication Services",
     "quantity": 3470.0,
     "avg_cost": 37.72,
-    "current_price": 44.040000915527344,
+    "current_price": 44.04,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "SAR",
@@ -162,10 +162,10 @@
     "cik": "",
     "purchase_date": "2020-05-01",
     "notes": "",
-    "price_source": "yfinance",
+    "price_source": "SAHMK",
     "price_date": "2026-05-30",
     "default_account_id": "",
-    "exchange_symbol": ""
+    "exchange_symbol": "7010"
   },
   "AAPL": {
     "ticker": "AAPL",

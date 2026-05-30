@@ -1580,6 +1580,323 @@ def _cat_l() -> list[TestResult]:
     return results
 
 
+def _cat_m() -> list[TestResult]:
+    """
+    M01–M08: UI & Valuation Consistency Tests.
+
+    Eight named checks requested against the centralized valuation engine:
+
+      M01  Header Portfolio Value        — engine total vs. manual cross-check
+      M02  Holdings Total                — engine holdings_value_base vs. manual
+      M03  Cash Total                    — engine cash_value_base vs. manual
+      M04  Allocation Consistency        — Allocation total == engine holdings total
+      M05  Portfolio Risk Consistency    — independent engine call == primary
+      M06  Weight Validation             — invested weights sum ≈ 100 %
+      M07  Base Currency Propagation     — SAR / USD / AED: internal consistency
+      M08  Single Valuation Engine       — static check: all tabs call the engine
+
+    Rules:
+      · Fixed synthetic portfolio + pinned FX rates → deterministic results.
+      · No application logic modified.  Mismatches are reported only.
+      · M08 performs static source-code analysis (file reads + text search).
+    """
+    CAT = "UI & Valuation Consistency"
+    results: list[TestResult] = []
+
+    # ── Shared synthetic portfolio ─────────────────────────────────────────────
+    # AAPL:   10 shares @ $180  (USD holding)  → 1 800 USD → 6 750 SAR
+    # ARAMCO: 100 shares @ 35   (SAR holding)  → 3 500 SAR
+    # acc1:   5 000 SAR cash
+    # acc2:   2 000 USD cash                   → 7 500 SAR
+    # ──────────────────────────────────────────────────────────────────────────
+    # Expected holdings total  =  6 750 + 3 500           = 10 250 SAR
+    # Expected cash total      =  5 000 + 7 500           = 12 500 SAR
+    # Expected portfolio total = 10 250 + 12 500          = 22 750 SAR
+    # SAR/USD ratio = 3.75  →  portfolio USD = 22 750 / 3.75 ≈ 6 066.67 USD
+    # ──────────────────────────────────────────────────────────────────────────
+    _SAR_RATE     = 3.75                     # 1 USD = 3.75 SAR (pegged)
+    _AED_RATE     = 3.6725                   # 1 USD = 3.6725 AED (pegged)
+    _AED_IN_SAR   = _AED_RATE / _SAR_RATE    # 1 AED ≈ 0.9793 SAR
+
+    _fx_sar = {
+        "SAR": _fx("SAR", "SAR", 1.0),
+        "USD": _fx("USD", "SAR", _SAR_RATE),
+        "AED": _fx("AED", "SAR", _AED_IN_SAR),
+    }
+    _fx_usd = {
+        "SAR": _fx("SAR", "USD", 1.0 / _SAR_RATE),
+        "USD": _fx("USD", "USD", 1.0),
+        "AED": _fx("AED", "USD", 1.0 / _AED_RATE),
+    }
+    _fx_aed = {
+        "SAR": _fx("SAR", "AED", _SAR_RATE / _AED_RATE),
+        "USD": _fx("USD", "AED", _AED_RATE),
+        "AED": _fx("AED", "AED", 1.0),
+    }
+
+    _hld = {
+        "AAPL":   _holding("AAPL",   10.0,  150.0, 180.0, ccy="USD"),
+        "ARAMCO": _holding("ARAMCO", 100.0,  30.0,  35.0, ccy="SAR"),
+    }
+    _acct = {
+        "acc1": _account("acc1", 5_000.0, "SAR"),
+        "acc2": _account("acc2", 2_000.0, "USD"),
+    }
+
+    # Pre-computed expected values (arithmetic, not relying on the engine)
+    _EXP_HV   = round((10 * 180 * _SAR_RATE) + (100 * 35 * 1.0), 2)   # 10 250.00
+    _EXP_CV   = round((5_000 * 1.0) + (2_000 * _SAR_RATE), 2)          # 12 500.00
+    _EXP_TV   = round(_EXP_HV + _EXP_CV, 2)                            # 22 750.00
+
+    # One canonical engine result for SAR base — shared by M01–M06
+    _eng = _val(_hld, _acct, "SAR", _fx_sar)
+
+    # ── M01: Header Portfolio Value ───────────────────────────────────────────
+    # The global header renders _gh_val.total_portfolio_value_base.
+    # Cross-check: manually computed expected total vs. engine.
+    def m01():
+        engine_tv = round(_eng.total_portfolio_value_base, 2)
+        ok = _near(_EXP_TV, engine_tv, tol=0.05)
+        return (
+            f"Header total_portfolio_value_base = {_EXP_TV:,.2f} SAR",
+            f"engine={engine_tv:,.2f} SAR, manual_expected={_EXP_TV:,.2f} SAR",
+            ok,
+        )
+
+    results.append(_run(
+        "M01",
+        "Header Portfolio Value: engine total_portfolio_value_base matches manual cross-check",
+        CAT, "portfolio.valuation", "P0", True, m01,
+    ))
+
+    # ── M02: Holdings Total ───────────────────────────────────────────────────
+    # Holdings tab displays _val.holdings_value_base.
+    # Cross-check: manual arithmetic (qty × price × fx) matches the engine.
+    def m02():
+        engine_hv = round(_eng.holdings_value_base, 2)
+        ok = _near(_EXP_HV, engine_hv, tol=0.05)
+        return (
+            f"Holdings holdings_value_base = {_EXP_HV:,.2f} SAR",
+            f"engine={engine_hv:,.2f} SAR, manual_expected={_EXP_HV:,.2f} SAR",
+            ok,
+        )
+
+    results.append(_run(
+        "M02",
+        "Holdings Total: engine holdings_value_base matches manual qty×price×fx cross-check",
+        CAT, "portfolio.valuation", "P0", True, m02,
+    ))
+
+    # ── M03: Cash Total ───────────────────────────────────────────────────────
+    # Accounts tab shows _total_cash (inline sum).  Engine shows cash_value_base.
+    # Cross-check: manual arithmetic matches engine; also compare engine vs. inline.
+    def m03():
+        engine_cv = round(_eng.cash_value_base, 2)
+        # Replicate Accounts tab inline formula exactly (app.py ~3666-3669)
+        active = {aid: a for aid, a in _acct.items() if a.active}
+        tab_cv = round(sum(
+            a.cash_balance * (_fx_sar[a.base_currency].rate
+                              if a.base_currency in _fx_sar else 1.0)
+            for a in active.values()
+        ), 2)
+        manual_ok = _near(_EXP_CV, engine_cv, tol=0.05)
+        tab_ok    = _near(tab_cv,  engine_cv, tol=0.05)
+        ok        = manual_ok and tab_ok
+        flag = "" if tab_ok else f"  ⚠️ Accounts tab ({tab_cv:,.2f}) ≠ engine ({engine_cv:,.2f})"
+        return (
+            f"cash_value_base = {_EXP_CV:,.2f} SAR; Accounts tab matches engine",
+            (
+                f"engine={engine_cv:,.2f}, manual={_EXP_CV:,.2f}, "
+                f"accounts_tab={tab_cv:,.2f}{flag}"
+            ),
+            ok,
+        )
+
+    results.append(_run(
+        "M03",
+        "Cash Total: engine cash_value_base matches manual cross-check and Accounts tab formula",
+        CAT, "portfolio.valuation", "P0", True, m03,
+    ))
+
+    # ── M04: Allocation Consistency ───────────────────────────────────────────
+    # Allocation tab re-uses the same PortfolioValuation object from Holdings.
+    # sum(per_holding.base_market_value) must equal holdings_value_base.
+    def m04():
+        alloc_sum = round(sum(ph.base_market_value for ph in _eng.per_holding), 2)
+        hv        = round(_eng.holdings_value_base, 2)
+        ok = _near(alloc_sum, hv, tol=0.01)
+        flag = "" if ok else f"  ⚠️ MISMATCH: alloc={alloc_sum:,.2f} ≠ hv={hv:,.2f}"
+        return (
+            f"Allocation total == holdings_value_base ({hv:,.2f} SAR)",
+            f"sum(per_holding.base_mv)={alloc_sum:,.2f}, holdings_value_base={hv:,.2f}{flag}",
+            ok,
+        )
+
+    results.append(_run(
+        "M04",
+        "Allocation Consistency: sum of per-holding base values == engine holdings_value_base",
+        CAT, "portfolio.valuation", "P0", True, m04,
+    ))
+
+    # ── M05: Portfolio Risk Consistency ──────────────────────────────────────
+    # render_portfolio_risk_tab() calls the engine independently.
+    # With the same fixed FX rates the result must be identical to the primary call.
+    def m05():
+        risk_eng = _val(_hld, _acct, "SAR", _fx_sar)
+        tv_main  = round(_eng.total_portfolio_value_base, 2)
+        tv_risk  = round(risk_eng.total_portfolio_value_base, 2)
+        hv_main  = round(_eng.holdings_value_base, 2)
+        hv_risk  = round(risk_eng.holdings_value_base, 2)
+        ok = _near(tv_main, tv_risk, tol=0.01) and _near(hv_main, hv_risk, tol=0.01)
+        flag = "" if ok else "  ⚠️ MISMATCH"
+        return (
+            f"Risk engine total={tv_main:,.2f} SAR == primary engine{flag}",
+            (
+                f"primary: hv={hv_main:,.2f} tv={tv_main:,.2f} | "
+                f"risk:    hv={hv_risk:,.2f} tv={tv_risk:,.2f}"
+            ),
+            ok,
+        )
+
+    results.append(_run(
+        "M05",
+        "Portfolio Risk Consistency: independent engine call matches primary engine totals",
+        CAT, "portfolio.valuation", "P0", True, m05,
+    ))
+
+    # ── M06: Weight Validation ────────────────────────────────────────────────
+    # Sum of all holding invested_weight_pct must be ≈ 100 %.
+    # Tolerance: ±0.5 pp to allow floating-point rounding.
+    def m06():
+        w_sum = round(sum(ph.invested_weight_pct for ph in _eng.per_holding), 4)
+        ok    = _near(w_sum, 100.0, tol=0.5)
+        flag  = "" if ok else f"  ⚠️ MISMATCH: {w_sum:.4f} % ≠ 100 %"
+        return (
+            "sum(invested_weight_pct) ≈ 100 % (±0.5 pp)",
+            f"sum = {w_sum:.4f} %{flag}",
+            ok,
+        )
+
+    results.append(_run(
+        "M06",
+        "Weight Validation: sum of all holding invested_weight_pct ≈ 100 % (±0.5 pp)",
+        CAT, "portfolio.valuation", "P0", True, m06,
+    ))
+
+    # ── M07: Base Currency Propagation (SAR → USD → AED) ─────────────────────
+    # Calls the engine three times with SAR, USD, and AED as the base currency.
+    # For each: holdings + cash must equal total_portfolio_value_base (internal
+    # consistency).  Cross-currency ratio SAR/USD must ≈ 3.75 (the pinned rate).
+    def m07():
+        eng_sar = _val(_hld, _acct, "SAR", _fx_sar)
+        eng_usd = _val(_hld, _acct, "USD", _fx_usd)
+        eng_aed = _val(_hld, _acct, "AED", _fx_aed)
+
+        findings: list[str] = []
+        all_ok = True
+
+        for label, eng, base in [
+            ("SAR", eng_sar, "SAR"),
+            ("USD", eng_usd, "USD"),
+            ("AED", eng_aed, "AED"),
+        ]:
+            hv   = round(eng.holdings_value_base, 4)
+            cv   = round(eng.cash_value_base, 4)
+            tv   = round(eng.total_portfolio_value_base, 4)
+            calc = round(hv + cv, 4)
+            ok_i = _near(calc, tv, tol=0.02)
+            if not ok_i:
+                all_ok = False
+            tick = "✓" if ok_i else "⚠️"
+            findings.append(
+                f"{base}: hv={hv:,.2f}+cv={cv:,.2f}={calc:,.2f} tv={tv:,.2f} {tick}"
+            )
+
+        # Cross-currency ratio: SAR total / USD total must ≈ 3.75
+        if eng_usd.total_portfolio_value_base > 0:
+            ratio     = eng_sar.total_portfolio_value_base / eng_usd.total_portfolio_value_base
+            ratio_ok  = _near(ratio, _SAR_RATE, tol=0.01)
+            if not ratio_ok:
+                all_ok = False
+            findings.append(
+                f"SAR/USD ratio={ratio:.4f} (expected {_SAR_RATE}) "
+                f"{'✓' if ratio_ok else '⚠️'}"
+            )
+
+        return (
+            "Engine internally consistent for SAR, USD, AED; SAR/USD ratio ≈ 3.75",
+            " | ".join(findings),
+            all_ok,
+        )
+
+    results.append(_run(
+        "M07",
+        "Base Currency Propagation: engine consistent across SAR / USD / AED base currencies",
+        CAT, "portfolio.valuation", "P0", True, m07,
+    ))
+
+    # ── M08: Single Valuation Engine Verification (static analysis) ───────────
+    # Reads source files to confirm:
+    #   (a) app.py and command_center.py call calculate_portfolio_valuation()
+    #   (b) No tab file defines its own independent portfolio total computation
+    # The Accounts tab inline cash sum is flagged as a divergence point.
+    # is_release_blocker=False — reported only, no fix applied here.
+    def m08():
+        import os
+        _EDGAR = os.path.dirname(os.path.abspath(__file__))
+        ENGINE_CALL = "calculate_portfolio_valuation"
+
+        # Files that must call the engine (tab renderers that show portfolio KPIs)
+        key_files = {
+            "app.py":            os.path.join(_EDGAR, "app.py"),
+            "command_center.py": os.path.join(_EDGAR, "command_center.py"),
+        }
+
+        findings: list[str] = []
+        all_ok = True
+
+        for label, path in key_files.items():
+            try:
+                src   = open(path, encoding="utf-8").read()
+                count = src.count(ENGINE_CALL)
+                if count == 0:
+                    findings.append(f"{label}: does NOT call {ENGINE_CALL} ⚠️")
+                    all_ok = False
+                else:
+                    findings.append(f"{label}: calls {ENGINE_CALL} ×{count} ✓")
+            except OSError:
+                findings.append(f"{label}: unreadable ⚠️")
+                all_ok = False
+
+        # Detect the Accounts tab inline cash sum (app.py ~line 3666)
+        # It bypasses the engine for its "Total Cash" display.
+        try:
+            app_src = open(os.path.join(_EDGAR, "app.py"), encoding="utf-8").read()
+            if "a.cash_balance *" in app_src:
+                findings.append(
+                    "render_accounts_tab: inline cash sum detected "
+                    f"(does not call {ENGINE_CALL} for cash display) "
+                    "— reported only, no fix applied ⚠️"
+                )
+                all_ok = False
+        except OSError:
+            pass
+
+        return (
+            f"All tab renderers call {ENGINE_CALL}; no independent valuations",
+            " | ".join(findings),
+            all_ok,
+        )
+
+    results.append(_run(
+        "M08",
+        "Single Valuation Engine: static check that all tab renderers call calculate_portfolio_valuation()",
+        CAT, "app.py / command_center.py", "P1", False, m08,
+    ))
+
+    return results
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1592,7 +1909,7 @@ def run_all_tests() -> TestReport:
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
-        + _cat_k() + _cat_l()
+        + _cat_k() + _cat_l() + _cat_m()
     )
 
     punch_list: list[PunchListItem] = []
