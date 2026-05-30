@@ -110,6 +110,15 @@ st.markdown(
         overflow: visible !important;
     }
 
+    /* Prevent iOS rubber-band bounce at top/bottom page boundaries.
+       Without this, the first swipe at page edges triggers an elastic
+       animation instead of scrolling, making it feel like scroll failed. */
+    html, body,
+    section[data-testid="stMain"],
+    [data-testid="stAppViewContainer"] {
+        overscroll-behavior-y: none !important;
+    }
+
     /* ── Bidi / Arabic text ─────────────────────────────────────────────── */
     [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] div,
