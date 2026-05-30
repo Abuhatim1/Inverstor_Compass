@@ -9,6 +9,7 @@ Beginner-friendly SEC EDGAR investment research app with portfolio tracking, FX 
 | **Stable rev 0.1** | `4c99e7b10faa47dce53755c2fe94b04769e46c72` | 2026-05-29 | Multi-select allocation filters, PDF export, Developer Mode, warnings moved to bottom of Holdings page |
 | **Stable core engine code ver 0.1** | `ee366d6abe715b8ed18c8e1d7e349dff6a50bc35` | 2026-05-30 | SAHMK routing PASS · Valuation consistency PASS · UI valuation consistency PASS · Portfolio accounting N01–N10 PASS · Cash integrity PASS · Closed holdings PASS · Persistence PASS · Report history persistence (FIFO 3-file retention) |
 | **MVP Core Engine Stable Baseline ver 0.2** | `36b23e3896c1577f3f6eab48f63766457e2a0b25` | 2026-05-30 | Same engine as ver 0.1 + relabelled stable checkpoint in docs |
+| **MVP_CORE_STABLE_BEFORE_SAHMK_DISCOVERY** | `0e6f3d139c2b54621879b56ddabe161a3ea19b6e` | 2026-05-30 | Dual-mode Add New Position (Mode A/B) + ADD-01–07 tests all passing. Stable baseline before SAHMK Discovery Engine. |
 
 To roll back: open Version History (clock icon, left sidebar) → find the checkpoint whose description matches → click **Rollback here**.
 

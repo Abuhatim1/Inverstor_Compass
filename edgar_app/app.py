@@ -6359,6 +6359,143 @@ def render_test_runner_tab() -> None:
     _show_history()
 
 
+# ── Developer Mode: SAHMK Discovery Console ──────────────────────────────────
+
+def render_sahmk_discovery_tab() -> None:
+    """Developer Mode — SAHMK Data Discovery Console."""
+    import io
+    import pandas as pd
+
+    if not st.session_state.get("dev_mode", False):
+        st.info(
+            "🔒 **SAHMK Discovery is only available in Developer Mode.**  \n"
+            "Enable **🔧 Developer Mode** in the sidebar to access the discovery console.",
+            icon="🔧",
+        )
+        return
+
+    st.header("🔍 SAHMK Discovery Console")
+    st.caption(
+        "Probes every SAHMK endpoint for a given Saudi symbol and reports exactly "
+        "what data is available under the current subscription plan.  "
+        "Read-only — no portfolio data is modified."
+    )
+
+    from sahmk_client import is_configured as _sahmk_configured
+    if not _sahmk_configured():
+        st.error(
+            "**SAHMK_API_KEY is not set.**  \n"
+            "Add your SAHMK API key as a secret to enable discovery.",
+            icon="🔑",
+        )
+
+    # ── Input ─────────────────────────────────────────────────────────────────
+    _dc1, _dc2 = st.columns([3, 1])
+    with _dc1:
+        _disc_symbol = st.text_input(
+            "Saudi symbol",
+            placeholder="e.g. 2222",
+            key="disc_symbol",
+            help="Local Saudi exchange symbol — e.g. 2222 (Saudi Aramco), 1120 (Al Rajhi).",
+        ).strip()
+    with _dc2:
+        st.write("")
+        _run_disc = st.button(
+            "🔍 Run Discovery",
+            type="primary",
+            use_container_width=True,
+            key="disc_run_btn",
+            disabled=not _disc_symbol,
+        )
+
+    if _run_disc and _disc_symbol:
+        with st.spinner(f"Probing SAHMK endpoints for **{_disc_symbol}**…"):
+            from portfolio.sahmk_discovery import discover as _disc_discover
+            _report = _disc_discover(_disc_symbol)
+        st.session_state["_disc_report"] = _report
+
+    _report = st.session_state.get("_disc_report")
+    if not _report:
+        st.info("Enter a Saudi symbol above and press **🔍 Run Discovery** to begin.", icon="🔍")
+        return
+
+    # ── Report header ─────────────────────────────────────────────────────────
+    st.divider()
+    _m1, _m2, _m3, _m4 = st.columns(4)
+    _m1.metric("Symbol",       _report["symbol"] or "—")
+    _m2.metric("Source",       _report["source"])
+    _m3.metric("Available",    len(_report["available_datasets"]))
+    _m4.metric("Unavailable",  len(_report["unavailable_datasets"]))
+    st.caption(f"Discovered at: {_report['discovered_at'][:19].replace('T', ' ')}")
+
+    # ── Data Availability Summary ─────────────────────────────────────────────
+    st.subheader("📊 Data Availability Summary")
+    _sum_df = pd.DataFrame(_report["summary_table"])
+    if not _sum_df.empty:
+        st.dataframe(
+            _sum_df.rename(columns={
+                "dataset": "Dataset",
+                "status":  "Status",
+                "fields":  "Fields",
+                "records": "Records",
+                "http":    "HTTP",
+            }),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    # ── Per-endpoint detail ───────────────────────────────────────────────────
+    st.subheader("🔬 Endpoint Detail")
+    for _ep in _report["endpoint_results"]:
+        _icon  = "✅" if _ep["success"] else "❌"
+        _label = (
+            f"{_icon} **{_ep['endpoint_name']}**"
+            f"  `{_ep['path']}`"
+            f"  · HTTP {_ep['http_status'] or '—'}"
+            f"  · {_ep['response_size_bytes']:,} bytes"
+        )
+        with st.expander(_label, expanded=_ep["success"]):
+            if _ep["error"]:
+                st.error(_ep["error"], icon="🚫")
+
+            if _ep["available_fields"]:
+                st.markdown(f"**Available fields ({len(_ep['available_fields'])}):**")
+                st.code(", ".join(_ep["available_fields"]), language=None)
+
+            if _ep["record_count"] is not None:
+                st.caption(f"Record count: **{_ep['record_count']:,}**")
+
+            if _ep["sample_values"]:
+                st.markdown("**Sample values:**")
+                _sv_rows = [
+                    {"Field": k, "Value": str(v)}
+                    for k, v in _ep["sample_values"].items()
+                ]
+                st.dataframe(
+                    pd.DataFrame(_sv_rows),
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Field": st.column_config.TextColumn("Field", width="small"),
+                        "Value": st.column_config.TextColumn("Value"),
+                    },
+                )
+
+    # ── Export ────────────────────────────────────────────────────────────────
+    st.divider()
+    from portfolio.sahmk_discovery import report_to_json as _disc_to_json
+    _json_bytes = _disc_to_json(_report).encode("utf-8")
+    _fname = f"sahmk_discovery_{_report['symbol']}_{_report['discovered_at'][:10]}.json"
+    st.download_button(
+        "⬇️ Export Discovery Report (JSON)",
+        data=_json_bytes,
+        file_name=_fname,
+        mime="application/json",
+        key="disc_export_btn",
+        use_container_width=True,
+    )
+
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ App Settings")
@@ -6374,7 +6511,7 @@ render_global_header()
 (tab_holdings, tab_closed, tab_accounts, tab_transactions, tab_cash,
  tab_decisions, tab_risk, tab_command,
  tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
- tab_test) = st.tabs([
+ tab_test, tab_discovery) = st.tabs([
     "💼 Holdings",
     "📁 Closed Holdings",
     "💳 Accounts",
@@ -6389,6 +6526,7 @@ render_global_header()
     "🔬 Research Watchlist",
     "📂 Upload Filing",
     "🧪 Test Runner",
+    "🔍 SAHMK Discovery",
 ])
 
 with tab_holdings:
@@ -6500,3 +6638,6 @@ with tab_search:
 
 with tab_test:
     render_test_runner_tab()
+
+with tab_discovery:
+    render_sahmk_discovery_tab()

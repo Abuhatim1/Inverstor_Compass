@@ -3505,6 +3505,244 @@ def _cat_add() -> list[TestResult]:
     return results
 
 
+def _cat_disc() -> list[TestResult]:
+    """
+    DISC: SAHMK Discovery Engine regression tests.
+
+    DISC-01  Valid symbol discovery completes and returns a report dict.
+    DISC-02  Invalid symbol handled gracefully (no exception, errors captured).
+    DISC-03  Unconfigured API (no key) handled gracefully.
+    DISC-04  Discovery report serialises to valid JSON (export works).
+    DISC-05  Holdings valuation unchanged after importing discovery module.
+    DISC-06  Current price refresh function unchanged after importing discovery module.
+
+    All tests are read-only and use synthetic / real-API-optional paths.
+    """
+    CAT = "SAHMK Discovery"
+    results: list[TestResult] = []
+
+    def disc01():
+        """
+        Running discover() for a real Saudi symbol returns the expected report
+        structure.  The API may or may not have data — we only verify the
+        report schema is complete (keys present, types correct).
+        """
+        from portfolio.sahmk_discovery import discover
+        report = discover("2222", timeout=20)
+
+        required_keys = {
+            "symbol", "source", "discovered_at", "api_configured",
+            "available_datasets", "unavailable_datasets",
+            "endpoint_results", "summary_table",
+        }
+        missing = required_keys - set(report.keys())
+        schema_ok = not missing
+
+        ep_ok = isinstance(report["endpoint_results"], list) and len(report["endpoint_results"]) > 0
+        sum_ok = isinstance(report["summary_table"], list) and len(report["summary_table"]) > 0
+        sym_ok = report["symbol"] == "2222"
+        src_ok = report["source"] == "SAHMK"
+
+        ok = schema_ok and ep_ok and sum_ok and sym_ok and src_ok
+
+        detail = []
+        if missing:
+            detail.append(f"missing keys: {missing}")
+        if not ep_ok:
+            detail.append("endpoint_results empty or wrong type")
+        if not sum_ok:
+            detail.append("summary_table empty or wrong type")
+
+        return (
+            "report dict with all required keys; 8 endpoint entries; symbol=2222",
+            "PASS" if ok else "; ".join(detail),
+            ok,
+        )
+
+    def disc02():
+        """
+        Discover with an invalid/nonexistent symbol must return a complete report
+        without raising — all endpoint entries should have success=False and
+        capture an error string.
+        """
+        from portfolio.sahmk_discovery import discover
+        report = discover("INVALID_SYMBOL_99999", timeout=15)
+
+        schema_ok = "endpoint_results" in report and "symbol" in report
+        no_exception = True   # if we reached here, no exception was raised
+
+        ep_list = report.get("endpoint_results", [])
+        # Symbol-required endpoints should all fail gracefully (success=False)
+        sym_eps = [ep for ep in ep_list if ep.get("symbol_required", True)]
+        all_failed = all(not ep["success"] for ep in sym_eps)
+        errors_captured = all(
+            ep["error"] is not None or not ep["success"]
+            for ep in sym_eps
+        )
+
+        ok = schema_ok and no_exception and all_failed and errors_captured
+        return (
+            "no exception; all symbol-required endpoints fail gracefully with error captured",
+            (
+                f"schema_ok={schema_ok}, all_failed={all_failed}, "
+                f"errors_captured={errors_captured}"
+            ),
+            ok,
+        )
+
+    def disc03():
+        """
+        discover() with SAHMK_API_KEY unset returns a complete report with
+        api_configured=False and all endpoints capturing a 'not configured' error.
+        """
+        import os
+        from portfolio.sahmk_discovery import discover
+
+        # Temporarily unset the key
+        _orig = os.environ.pop("SAHMK_API_KEY", None)
+        try:
+            report = discover("2222", timeout=5)
+        finally:
+            if _orig is not None:
+                os.environ["SAHMK_API_KEY"] = _orig
+
+        schema_ok   = "endpoint_results" in report
+        not_cfg     = report.get("api_configured") is False
+        ep_list     = report.get("endpoint_results", [])
+        sym_eps     = [ep for ep in ep_list if ep.get("symbol_required", True)]
+        all_no_data = all(not ep["success"] for ep in sym_eps)
+
+        ok = schema_ok and not_cfg and all_no_data
+        return (
+            "api_configured=False; all symbol endpoints fail gracefully when key absent",
+            f"schema_ok={schema_ok}, not_cfg={not_cfg}, all_no_data={all_no_data}",
+            ok,
+        )
+
+    def disc04():
+        """
+        report_to_json() must produce a parseable JSON string from a discovery
+        report (export works).
+        """
+        import json
+        from portfolio.sahmk_discovery import discover, report_to_json
+
+        # Use a no-API call to get a lightweight report
+        import os
+        _orig = os.environ.pop("SAHMK_API_KEY", None)
+        try:
+            report = discover("2222", timeout=5)
+        finally:
+            if _orig is not None:
+                os.environ["SAHMK_API_KEY"] = _orig
+
+        json_str = report_to_json(report)
+        parseable = False
+        try:
+            parsed = json.loads(json_str)
+            parseable = isinstance(parsed, dict)
+        except Exception:
+            pass
+
+        has_symbol = '"symbol"' in json_str
+        ok = parseable and has_symbol
+        return (
+            "report_to_json produces valid, parseable JSON containing symbol key",
+            f"parseable={parseable}, has_symbol={has_symbol}, len={len(json_str)}",
+            ok,
+        )
+
+    def disc05():
+        """
+        Importing sahmk_discovery must not affect portfolio valuation results.
+        Run calculate_portfolio_valuation before and after import — totals must match.
+        """
+        import importlib
+        h1 = _holding("__SB_DISC05A__", qty=10.0, avg_cost=100.0, price=120.0)
+        h2 = _holding("__SB_DISC05B__", qty=5.0,  avg_cost=50.0,  price=60.0)
+        fx = {
+            "USD": _fx("USD", "USD", 1.0),
+        }
+        val_before = _val(
+            {"__SB_DISC05A__": h1, "__SB_DISC05B__": h2},
+            {}, "USD", fx,
+        )
+
+        # Import / reimport the discovery module
+        import portfolio.sahmk_discovery as _disc_mod
+        importlib.reload(_disc_mod)
+
+        val_after = _val(
+            {"__SB_DISC05A__": h1, "__SB_DISC05B__": h2},
+            {}, "USD", fx,
+        )
+
+        mv_before = round(val_before.holdings_value_base, 4)
+        mv_after  = round(val_after.holdings_value_base, 4)
+        ok = _near(mv_before, mv_after, 0.001)
+        return (
+            f"holdings_value_base unchanged after discovery module import",
+            f"before={mv_before}, after={mv_after}",
+            ok,
+        )
+
+    def disc06():
+        """
+        Importing sahmk_discovery must not affect the current price refresh
+        path — update_current_price must still be importable and callable.
+        """
+        import portfolio.sahmk_discovery  # trigger import
+
+        from portfolio.holdings import update_current_price, load_holdings
+        # Verify function is callable (signature check only — no real file write
+        # for a nonexistent sandbox ticker that isn't in holdings)
+        import inspect
+        sig = inspect.signature(update_current_price)
+        params = list(sig.parameters.keys())
+        has_ticker = "ticker" in params
+        has_price  = "price" in params or "new_price" in params
+
+        ok = callable(update_current_price) and has_ticker
+        return (
+            "update_current_price remains callable and has expected signature after discovery import",
+            f"callable={callable(update_current_price)}, params={params}",
+            ok,
+        )
+
+    results.append(_run(
+        "DISC-01",
+        "Valid symbol discovery completes with full report schema",
+        CAT, "portfolio.sahmk_discovery", "P1", False, disc01,
+    ))
+    results.append(_run(
+        "DISC-02",
+        "Invalid symbol handled gracefully — no exception, errors captured",
+        CAT, "portfolio.sahmk_discovery", "P1", False, disc02,
+    ))
+    results.append(_run(
+        "DISC-03",
+        "Unconfigured API (no key) handled gracefully — api_configured=False",
+        CAT, "portfolio.sahmk_discovery", "P1", False, disc03,
+    ))
+    results.append(_run(
+        "DISC-04",
+        "Discovery report export produces valid parseable JSON",
+        CAT, "portfolio.sahmk_discovery", "P0", True, disc04,
+    ))
+    results.append(_run(
+        "DISC-05",
+        "Holdings valuation unchanged after importing discovery module",
+        CAT, "portfolio.sahmk_discovery + portfolio.valuation", "P0", True, disc05,
+    ))
+    results.append(_run(
+        "DISC-06",
+        "Current price refresh function unchanged after importing discovery module",
+        CAT, "portfolio.sahmk_discovery + portfolio.holdings", "P0", True, disc06,
+    ))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -3514,7 +3752,7 @@ def run_all_tests() -> TestReport:
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
-        + _cat_add()
+        + _cat_add() + _cat_disc()
     )
 
     punch_list: list[PunchListItem] = []

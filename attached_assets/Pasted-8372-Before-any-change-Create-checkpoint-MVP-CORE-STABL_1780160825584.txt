@@ -1,0 +1,151 @@
+8372”}
+Before any change:
+
+Create checkpoint:
+
+MVP_CORE_STABLE_BEFORE_SAHMK_DISCOVERY
+
+Objective
+
+Build a simple SAHMK Discovery Engine similar to the existing SEC Engine.
+
+The goal is NOT to design future datasets.
+
+The goal is to discover and expose exactly what data is available under the current SAHMK subscription plan.
+
+Do not modify:
+
+* Holdings
+* Valuation Engine
+* FIFO
+* Transactions
+* Accounts
+* Existing price refresh logic
+* Existing SAHMK routing used by Holdings
+
+Create new module:
+
+portfolio/sahmk_discovery.py
+
+Purpose
+
+Provide a controlled interface that queries SAHMK and reports exactly what information is available for a given Saudi security.
+
+No assumptions.
+
+No manual-entry system.
+
+No scenario tables.
+
+No research engine.
+
+No thesis engine.
+
+No performance engine.
+
+Just discovery and inspection.
+
+Requirements
+
+For a supplied symbol (e.g. 2222):
+
+1. Query every SAHMK endpoint currently available through our subscription.
+2. Capture:
+
+* endpoint name
+* request status
+* response status
+* response size
+* available fields
+* sample values
+
+3. Standardize output into:
+
+{
+“symbol”: “…”,
+“source”: “SAHMK”,
+“available_datasets”: […],
+“unavailable_datasets”: […],
+“endpoint_results”: […]
+}
+
+Developer Mode
+
+Create:
+
+SAHMK Discovery Console
+
+Input:
+
+* Saudi symbol
+
+Button:
+
+* Run Discovery
+
+Display:
+
+For each discovered endpoint:
+
+* endpoint name
+* success/failure
+* available fields
+* sample data
+* record count if applicable
+
+Also generate:
+
+Data Availability Summary
+
+Example:
+
+Quote Data …….. Available
+Company Profile … Available
+Fundamentals …… Not Available
+Historical Prices . Available
+News ………….. Available
+Financial Statements Available
+Dividends ……… Not Available
+
+(The summary must be generated from actual API responses, not assumptions.)
+
+Export
+
+Allow Developer Mode export:
+
+Discovery Report (JSON)
+
+Testing
+
+DISC-01
+Valid symbol discovery completes
+
+DISC-02
+Invalid symbol handled gracefully
+
+DISC-03
+API failure handled gracefully
+
+DISC-04
+Discovery report export works
+
+DISC-05
+Holdings valuation unchanged
+
+DISC-06
+Current price refresh unchanged
+
+Run full suite.
+
+Expected Result
+
+After completion I want to know exactly:
+
+* What SAHMK provides
+* Which fields are available
+* Which datasets are unavailable
+* Which future modules can be built without manual entry
+
+Do not build any future architecture yet.
+
+Discovery
