@@ -3663,10 +3663,9 @@ def render_accounts_tab() -> None:
     _ab_ccy = st.session_state.get("global_base_ccy", "SAR")
     _ab_ccys = list({a.base_currency for a in active.values()})
     _ab_fx   = get_rates_for_holdings(_ab_ccys, _ab_ccy) if _ab_ccys else {}
-    _total_cash = sum(
-        a.cash_balance * (_ab_fx[a.base_currency].rate if a.base_currency in _ab_fx else 1.0)
-        for a in active.values()
-    )
+    from portfolio.valuation import calculate_portfolio_valuation as _calc_acct_val
+    _acct_val   = _calc_acct_val({}, accounts, _ab_ccy, fx_rates=_ab_fx)
+    _total_cash = _acct_val.cash_value_base
 
     if accounts:
         _n_ccy = len({a.base_currency for a in active.values()})
