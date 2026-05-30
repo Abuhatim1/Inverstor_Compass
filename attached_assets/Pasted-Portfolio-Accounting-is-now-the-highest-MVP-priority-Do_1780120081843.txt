@@ -1,0 +1,82 @@
+Portfolio Accounting is now the highest MVP priority.
+
+Do NOT build any new features.
+
+Do NOT change UI.
+
+Do NOT add analytics, charts, watchlists, market intelligence, reports, or cosmetic enhancements.
+
+Task: Audit and strengthen the Test Runner coverage for portfolio accounting and valuation integrity.
+
+Add automated tests for the following critical scenarios:
+
+A1 – Buy Transaction
+
+* Buy new position.
+* Verify quantity, average cost, market value, unrealized P&L.
+
+A2 – Multiple Buys
+
+* Buy same asset multiple times at different prices.
+* Verify weighted average cost is correct.
+
+A3 – Partial Sell
+
+* Sell part of a position.
+* Verify:
+    * Remaining quantity
+    * Remaining cost basis
+    * Realized gain/loss
+    * Unrealized gain/loss
+
+A4 – Full Close
+
+* Sell entire position.
+* Verify:
+    * Position removed from active holdings
+    * Moved to Closed Holdings
+    * Realized gain/loss preserved
+
+A5 – Multi-Currency Valuation
+
+* Holdings in SAR and USD.
+* Verify portfolio valuation changes correctly when base currency changes.
+
+A6 – Valuation Consistency
+Verify Holdings, Accounts, Allocation, Risk, and Command Center all use the same valuation engine and produce identical portfolio totals.
+
+A7 – Cash Integrity
+
+* Buy decreases cash.
+* Sell increases cash.
+* Portfolio value reconciliation remains correct.
+
+A8 – Closed Holdings Integrity
+
+* Historical realized P&L remains unchanged after close.
+* Closed positions do not affect active holdings calculations.
+
+A9 – Data Persistence
+
+* Save data.
+* Restart app.
+* Verify holdings, accounts, transactions, and realized gains remain unchanged.
+
+A10 – Regression Protection
+Create blocker-level tests that fail the suite if:
+
+* Portfolio totals differ across modules.
+* Quantity becomes negative.
+* Cost basis becomes invalid.
+* Realized and unrealized gains become inconsistent.
+* Closed holdings reappear in active holdings.
+
+Deliver:
+
+1. Full list of new tests added.
+2. PASS/FAIL status for each test.
+3. Any accounting defects discovered.
+4. Recommended fixes before further feature development.
+
+Do not implement new functionality unless a test exposes a defect.
+Focus on verification and data integrity only.
