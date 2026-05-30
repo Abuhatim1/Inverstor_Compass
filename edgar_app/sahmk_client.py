@@ -98,7 +98,15 @@ def _get(path: str, params: dict | None = None, timeout: int = 10) -> Optional[d
         if exc.code in (401, 403):
             _warn(f"SAHMK auth error {exc.code} — check SAHMK_API_KEY")
         elif exc.code == 429:
-            _warn("SAHMK rate limit exceeded — results from cache if available")
+            try:
+                _detail = _json.loads(exc.read().decode()).get("detail", "")
+            except Exception:
+                _detail = ""
+            _warn(
+                f"SAHMK rate limit exceeded — {_detail}"
+                if _detail
+                else "SAHMK rate limit exceeded — results from cache if available"
+            )
         else:
             _warn(f"SAHMK HTTP {exc.code} for {path}")
         return None

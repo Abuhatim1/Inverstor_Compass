@@ -22,6 +22,7 @@ Design rules:
 from __future__ import annotations
 
 import datetime
+import re as _re
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
@@ -81,6 +82,37 @@ def _now_iso() -> str:
     return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# ── Saudi symbol normalisation ────────────────────────────────────────────────
+
+# Matches 4–5 digit Saudi tickers with an optional exchange suffix:
+#   "2222"     → group(1) = "2222"
+#   "2222.SE"  → group(1) = "2222"
+#   "2222.SR"  → group(1) = "2222"
+#   "2222.SA"  → group(1) = "2222"
+_SAUDI_SYM_RE = _re.compile(r'^(\d{4,5})(?:\.[A-Za-z]{2,3})?$')
+
+
+def _saudi_local_sym(exchange_symbol: str, ticker: str) -> str:
+    """
+    Return the clean local exchange symbol to pass to the SAHMK API.
+
+    Priority:
+      1. exchange_symbol — strip any .SE / .SR / .SA suffix
+      2. ticker — if it looks like a Saudi ticker (4–5 digits + optional suffix)
+
+    Returns "" when neither source resolves to a Saudi-looking symbol, so
+    non-Saudi tickers (AAPL, MSFT, …) never trigger a SAHMK call.
+    """
+    for raw in (exchange_symbol, ticker):
+        s = (raw or "").strip()
+        if not s:
+            continue
+        m = _SAUDI_SYM_RE.match(s)
+        if m:
+            return m.group(1)   # numeric-only, e.g. "2222"
+    return ""
+
+
 # ── Core routing function ─────────────────────────────────────────────────────
 
 def get_routed_price(
@@ -105,7 +137,8 @@ def get_routed_price(
     now = _now_iso()
 
     # ── Step 1: SAHMK — local_market_symbol → GET /quote/{symbol}/ ───────────
-    local_sym = exchange_symbol.strip()
+    # Normalise: strip .SE/.SR/.SA suffixes; fall back to ticker for bare Saudi codes
+    local_sym = _saudi_local_sym(exchange_symbol, ticker)
     if local_sym:
         try:
             import sahmk_client
