@@ -55,6 +55,19 @@ def normalize_ticker(ticker: str) -> str:
     return t
 
 
+def _check_new_holding_account(existing: "Holding | None", account_id: str) -> str | None:
+    """
+    Return an error string when a *new* holding would be created without an
+    account_id, else return None.
+
+    Called by both record_transaction() (BUY path) and upsert_holding()
+    so the rule is enforced at every creation path.
+    """
+    if existing is None and not account_id:
+        return "Account is required when opening a new position."
+    return None
+
+
 # ── Taxonomy constants ────────────────────────────────────────────────────────
 
 ASSET_TYPES: list[str] = [
@@ -211,10 +224,19 @@ def upsert_holding(
     notes:           str | None = None,
     price_source:    str | None = None,
     price_date:      str | None = None,
+    # Account linkage — mandatory when creating a NEW holding
+    default_account_id: str | None = None,
     # v3 market-provider fields
     exchange_symbol: str | None = None,
 ) -> "Holding":
-    """Insert or update one holding's fields. None means 'don't change'."""
+    """
+    Insert or update one holding's fields. None means 'don't change'.
+
+    When creating a NEW holding (ticker not yet in holdings.json),
+    default_account_id must be supplied and non-empty — raises ValueError
+    otherwise.  Updates to existing holdings may omit it; the stored value
+    is preserved automatically.
+    """
     holdings = load_holdings()
     existing = holdings.get(ticker)
 
@@ -222,6 +244,12 @@ def upsert_holding(
         if new is not None:
             return new
         return getattr(existing, old_attr) if existing else default
+
+    # ── Account-linkage enforcement ───────────────────────────────────────────
+    _eff_aid = _pick(default_account_id, "default_account_id", "")
+    err = _check_new_holding_account(existing, _eff_aid)
+    if err:
+        raise ValueError(err)
 
     new_holding = Holding(
         ticker=ticker,
@@ -242,6 +270,7 @@ def upsert_holding(
         notes=_pick(notes, "notes", ""),
         price_source=_pick(price_source, "price_source", "manual"),
         price_date=_pick(price_date, "price_date", ""),
+        default_account_id=_eff_aid,          # preserved from existing or new value
         exchange_symbol=_pick(exchange_symbol, "exchange_symbol", ""),
     )
     holdings[ticker] = new_holding
@@ -413,6 +442,9 @@ def record_transaction(
         holdings[ticker] = existing
         updated = existing
     else:  # BUY
+        _acct_err = _check_new_holding_account(existing, account_id)
+        if _acct_err:
+            return None, None, _acct_err
         if existing is None:
             updated = Holding(
                 ticker=ticker,

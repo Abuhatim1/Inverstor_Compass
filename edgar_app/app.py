@@ -2841,6 +2841,8 @@ def render_holdings_tab() -> None:
             format_func=lambda k: _acct_opts[k],
             key="ahn_acct_id",
         )
+        if not _ad_aid:
+            st.warning("An account is required to open a position.", icon="⚠️")
 
         # ── Fees / Date / Notes / Correction ─────────────────────────────────
         _tf1, _tf2 = st.columns(2)
@@ -2911,7 +2913,7 @@ def render_holdings_tab() -> None:
         with _xb1:
             if st.button(
                 "✅ Open Position", type="primary", use_container_width=True,
-                disabled=(not _ad_tk_clean or _is_dup or not _cash_ok),
+                disabled=(not _ad_tk_clean or _is_dup or not _cash_ok or not _ad_aid),
                 key="ahn_submit",
             ):
                 try:

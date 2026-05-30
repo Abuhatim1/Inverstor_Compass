@@ -2412,6 +2412,141 @@ def _cat_n() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category ARCH — Account Binding Integrity (A01 / A03)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_arch() -> list[TestResult]:
+    """
+    A01/A03 account-binding regression tests + reconciliation report.
+
+    REC-01  Reconciliation: count active holdings with missing account linkage.
+    A01-01  record_transaction BUY, new ticker, no account  → error (guard fires)
+    A01-02  record_transaction BUY, new ticker, with account → guard passes
+    A03-01  upsert_holding new ticker, no default_account_id  → ValueError
+    A03-02  upsert_holding new ticker, with default_account_id → success + cleanup
+    """
+    CAT = "Account Binding (A01/A03)"
+    results: list[TestResult] = []
+
+    from portfolio.holdings import (
+        _check_new_holding_account,
+        upsert_holding,
+        delete_holding,
+        load_holdings,
+    )
+
+    # ── REC-01: reconciliation ────────────────────────────────────────────────
+    def rec_01():
+        live = load_holdings()
+        orphans = sorted(
+            t for t, h in live.items()
+            if h.quantity > 1e-9 and not getattr(h, "default_account_id", "")
+        )
+        total_active = sum(1 for h in live.values() if h.quantity > 1e-9)
+        detail = (
+            f"{len(orphans)}/{total_active} active holdings missing account linkage"
+            + (f" — {', '.join(orphans)}" if orphans else "")
+        )
+        # Reconciliation always PASS: it is a report, not a binary gate.
+        # Existing legacy holdings are expected to have empty account IDs.
+        return ("reconciliation report generated", detail, True)
+
+    results.append(_run(
+        "REC-01",
+        "Holdings reconciliation: active holdings with missing account linkage",
+        CAT, "portfolio.holdings.load_holdings", "P1", False, rec_01,
+    ))
+
+    # ── A01-01: new holding without account → guard blocks ────────────────────
+    def a01_01():
+        err = _check_new_holding_account(existing=None, account_id="")
+        ok  = err == "Account is required when opening a new position."
+        return (
+            "guard returns error for new holding without account",
+            repr(err), ok,
+        )
+
+    results.append(_run(
+        "A01-01",
+        "record_transaction BUY: new holding without account is rejected",
+        CAT, "portfolio.holdings._check_new_holding_account", "P0", True, a01_01,
+    ))
+
+    # ── A01-02: new holding with account → guard passes ───────────────────────
+    def a01_02():
+        err = _check_new_holding_account(existing=None, account_id="any_non_empty_id")
+        ok  = err is None
+        return (
+            "guard returns None for new holding with account",
+            repr(err), ok,
+        )
+
+    results.append(_run(
+        "A01-02",
+        "record_transaction BUY: new holding with account is accepted",
+        CAT, "portfolio.holdings._check_new_holding_account", "P0", True, a01_02,
+    ))
+
+    # ── A03-01: upsert_holding new holding without account → ValueError ───────
+    def a03_01():
+        SB = "__SBA03NX__"
+        live = load_holdings()
+        if SB in live:
+            delete_holding(SB)
+        try:
+            upsert_holding(SB, quantity=1.0, avg_cost=10.0, current_price=10.0,
+                           default_account_id="")
+            return ("ValueError raised", "no error raised — guard did NOT fire", False)
+        except ValueError as e:
+            ok = "account" in str(e).lower()
+            return (
+                "ValueError: account required for new holding",
+                repr(str(e)), ok,
+            )
+
+    results.append(_run(
+        "A03-01",
+        "upsert_holding: new holding without default_account_id raises ValueError",
+        CAT, "portfolio.holdings.upsert_holding", "P0", True, a03_01,
+    ))
+
+    # ── A03-02: upsert_holding new holding with account → PASS + cleanup ─────
+    def a03_02():
+        SB = "__SBA03WX__"
+        live = load_holdings()
+        if SB in live:
+            delete_holding(SB)
+        try:
+            h = upsert_holding(
+                SB,
+                company_name="Sandbox A03",
+                quantity=1.0,
+                avg_cost=10.0,
+                current_price=10.0,
+                currency="USD",
+                default_account_id="sandbox_acct_id",
+            )
+            aid = getattr(h, "default_account_id", "")
+            ok  = h is not None and aid == "sandbox_acct_id"
+            delete_holding(SB)   # cleanup — no transaction written
+            return (
+                "holding created; default_account_id preserved",
+                f"default_account_id={aid!r}",
+                ok,
+            )
+        except Exception as e:
+            return ("holding created successfully", repr(e), False)
+
+    results.append(_run(
+        "A03-02",
+        "upsert_holding: new holding with default_account_id succeeds",
+        CAT, "portfolio.holdings.upsert_holding", "P0", True, a03_02,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Category A10 — Account Deletion Guard Regression
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -2637,7 +2772,7 @@ def run_all_tests() -> TestReport:
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
-        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_a10() + _cat_ch()
+        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_a10() + _cat_ch()
     )
 
     punch_list: list[PunchListItem] = []
