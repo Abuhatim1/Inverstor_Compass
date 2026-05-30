@@ -2452,6 +2452,8 @@ def render_holdings_tab() -> None:
         manual_tickers: list[str] = []
 
         for ticker, h in sorted(holdings.items()):
+            if h.quantity <= 1e-9:          # hide fully-closed positions
+                continue
             has_tk  = getattr(h, "has_ticker", True)
             ccy     = getattr(h, "currency", "USD")
             fx_r    = _fx.get(ccy)

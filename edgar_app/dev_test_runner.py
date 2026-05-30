@@ -2412,6 +2412,95 @@ def _cat_n() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category CH — Closed-Position Visibility Regression
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_ch() -> list[TestResult]:
+    """
+    CH01: Closed-position visibility regression.
+
+    Verifies end-to-end that a fully closed position:
+      · disappears from the active Holdings view  (qty ≤ 1e-9 filter)
+      · appears in Closed Holdings                (lot generated with correct P&L)
+      · contributes zero to portfolio valuation   (MV = 0)
+
+    Uses synthetic sandbox data only — no portfolio files read or written.
+    """
+    CAT = "Closed-Position Visibility"
+    results: list[TestResult] = []
+
+    def ch01():
+        from portfolio.closed_holdings import execute_sell_fifo
+
+        BUY_QTY   = 100.0
+        BUY_PRICE = 50.0
+        SELL_PRICE = 70.0
+        EXP_REALIZED = BUY_QTY * (SELL_PRICE - BUY_PRICE)   # 2 000.0
+
+        # ── Step 1: active position exists ────────────────────────────────────
+        h = _holding("__SB_CH01__", qty=BUY_QTY, avg_cost=BUY_PRICE, price=SELL_PRICE)
+        step1_active = h.quantity > 1e-9   # True → position is active
+
+        # ── Step 2: fully close via FIFO engine ───────────────────────────────
+        lots, err = execute_sell_fifo(
+            ticker="__SB_CH01__",
+            company_name="CH01 Sandbox",
+            currency="USD",
+            quantity=BUY_QTY,
+            sell_price=SELL_PRICE,
+            sell_date="2026-01-01",
+            fallback_avg_cost=BUY_PRICE,
+            fallback_open_date="2025-01-01",
+        )
+        if err:
+            return ("no FIFO error, lots generated", f"error={err!r}", False)
+        h.quantity = max(0.0, h.quantity - BUY_QTY)   # mirrors record_transaction SELL
+
+        # ── Step 3: disappears from Holdings (active filter: qty > 1e-9) ──────
+        step3_hidden = h.quantity <= 1e-9   # True → filtered out of Holdings tab
+
+        # ── Step 4: appears in Closed Holdings (lot present, P&L correct) ─────
+        realized_pnl = round(sum(l.realized_pnl for l in lots), 4)
+        step4_closed = (
+            bool(lots) and
+            _near(realized_pnl, EXP_REALIZED, 0.01)
+        )
+
+        # ── Step 5: portfolio valuation unchanged (MV = 0 for qty=0 holding) ──
+        fx  = {"USD": _fx("USD", "USD", 1.0)}
+        val = _val({"__SB_CH01__": h}, {}, "USD", fx)
+        step5_mv_zero = val.holdings_value_base == 0.0
+
+        ok = step1_active and step3_hidden and step4_closed and step5_mv_zero
+
+        fails = []
+        if not step1_active:
+            fails.append(f"step1: position not active (qty={BUY_QTY})")
+        if not step3_hidden:
+            fails.append(f"step3: qty={h.quantity} still passes active filter (> 1e-9)")
+        if not step4_closed:
+            fails.append(
+                f"step4: lots={len(lots)}, realized={realized_pnl} ≠ {EXP_REALIZED}"
+            )
+        if not step5_mv_zero:
+            fails.append(f"step5: MV={val.holdings_value_base} (expected 0)")
+
+        return (
+            "active→True; hidden→True; closed_lot P&L=2000; MV=0",
+            "all 4 steps pass" if ok else "; ".join(fails),
+            ok,
+        )
+
+    results.append(_run(
+        "CH01",
+        "Fully closed position: hidden from Holdings, visible in Closed Holdings, MV=0",
+        CAT, "app.Holdings + portfolio.closed_holdings", "P0", True, ch01,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -2423,7 +2512,7 @@ def run_all_tests() -> TestReport:
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
-        + _cat_k() + _cat_l() + _cat_m() + _cat_n()
+        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_ch()
     )
 
     punch_list: list[PunchListItem] = []
