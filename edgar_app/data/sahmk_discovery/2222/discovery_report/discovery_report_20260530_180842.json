@@ -1,0 +1,93 @@
+{
+  "symbol": "2222",
+  "source": "SAHMK",
+  "endpoint": "discovery/report",
+  "fetched_at": "2026-05-30T18:08:42.569926",
+  "dataset": "Discovery Report",
+  "status": "success",
+  "available_fields": [
+    "symbol",
+    "source",
+    "discovered_at",
+    "api_configured",
+    "available_datasets",
+    "unavailable_datasets",
+    "endpoint_results",
+    "summary_table"
+  ],
+  "raw_response": {
+    "symbol": "2222",
+    "source": "SAHMK",
+    "discovered_at": "2026-05-30T18:08:38.935176",
+    "api_configured": true,
+    "available_datasets": [],
+    "unavailable_datasets": [
+      "Quote",
+      "Historical Prices",
+      "Company Info",
+      "Financials",
+      "Ratios",
+      "Dividends",
+      "Market Summary",
+      "Market Events"
+    ],
+    "summary_table": [
+      {
+        "dataset": "Quote",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 200
+      },
+      {
+        "dataset": "Historical Prices",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 200
+      },
+      {
+        "dataset": "Company Info",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 404
+      },
+      {
+        "dataset": "Financials",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 404
+      },
+      {
+        "dataset": "Ratios",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 404
+      },
+      {
+        "dataset": "Dividends",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 404
+      },
+      {
+        "dataset": "Market Summary",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 200
+      },
+      {
+        "dataset": "Market Events",
+        "status": "❌ Not Available",
+        "fields": 0,
+        "records": "—",
+        "http": 404
+      }
+    ]
+  }
+}

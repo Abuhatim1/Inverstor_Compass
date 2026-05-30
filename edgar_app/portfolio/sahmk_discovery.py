@@ -55,9 +55,9 @@ Stored file content
 
 from __future__ import annotations
 
+import gzip as _gzip
 import json as _json
 import os
-import time
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -127,7 +127,7 @@ def _probe_endpoint(path: str, params: dict, *, timeout: int = 15) -> dict:
                 "X-API-Key":      api_key,
                 "Accept":         "application/json, text/plain, */*",
                 "Accept-Language":"en-US,en;q=0.9,ar;q=0.8",
-                "Accept-Encoding":"gzip, deflate, br",
+                "Accept-Encoding":"gzip, deflate",
                 "User-Agent":     (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -144,6 +144,13 @@ def _probe_endpoint(path: str, params: dict, *, timeout: int = 15) -> dict:
             raw_bytes = resp.read()
             result["http_status"]         = resp.status
             result["response_size_bytes"] = len(raw_bytes)
+            # Decompress if the server returned gzip-encoded content
+            encoding = resp.headers.get("Content-Encoding", "")
+            if encoding == "gzip" or (raw_bytes[:2] == b"\x1f\x8b"):
+                try:
+                    raw_bytes = _gzip.decompress(raw_bytes)
+                except Exception:
+                    pass
             parsed = _json.loads(raw_bytes.decode("utf-8", errors="replace"))
             result["raw_response"] = parsed
             result["success"] = True
@@ -152,7 +159,14 @@ def _probe_endpoint(path: str, params: dict, *, timeout: int = 15) -> dict:
     except urllib.error.HTTPError as exc:
         result["http_status"] = exc.code
         try:
-            body = exc.read().decode("utf-8", errors="replace")
+            raw_err = exc.read()
+            enc = exc.headers.get("Content-Encoding", "")
+            if enc == "gzip" or (raw_err[:2] == b"\x1f\x8b"):
+                try:
+                    raw_err = _gzip.decompress(raw_err)
+                except Exception:
+                    pass
+            body = raw_err.decode("utf-8", errors="replace")
             result["error"] = f"HTTP {exc.code} — {body[:200]}"
         except Exception:
             result["error"] = f"HTTP {exc.code}"
