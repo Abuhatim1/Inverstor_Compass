@@ -2640,6 +2640,16 @@ def render_holdings_tab() -> None:
         # ── Portfolio Allocation ───────────────────────────────────────────────
         _render_allocation_section(_val, holdings, _base_ccy)
 
+        # ── Bottom-of-page notices (action items, not calculation errors) ──────
+        _se_tickers = [t for t in holdings if t.upper().endswith(".SE")]
+        if _se_tickers:
+            st.warning(
+                f"**Saudi ticker suffix**: {', '.join(_se_tickers)} use `.SE` "
+                f"which Yahoo Finance does not recognise. "
+                f"Edit to `.SR` (e.g. `{_se_tickers[0][:-3]}.SR`) "
+                f"to enable live price fetching.",
+                icon="⚠️",
+            )
 
     # ── Account helpers (needed by all dialogs, including Add New) ───────────
     from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
