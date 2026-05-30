@@ -1,0 +1,185 @@
+{
+  "symbol": "6004",
+  "source": "SAHMK",
+  "endpoint": "historical/6004",
+  "fetched_at": "2026-05-30T18:19:06.436750",
+  "dataset": "Historical Prices",
+  "status": "success",
+  "available_fields": [
+    "symbol",
+    "interval",
+    "from",
+    "to",
+    "count",
+    "data"
+  ],
+  "raw_response": {
+    "symbol": "6004",
+    "interval": "1d",
+    "from": "2026-04-30",
+    "to": "2026-05-30",
+    "count": 16,
+    "data": [
+      {
+        "date": "2026-04-30",
+        "open": 69.65,
+        "high": 70.95,
+        "low": 69.2,
+        "close": 70.4,
+        "volume": 187169,
+        "adjusted_close": 70.4,
+        "turnover": 13107660.45
+      },
+      {
+        "date": "2026-05-03",
+        "open": 71.0,
+        "high": 71.4,
+        "low": 70.3,
+        "close": 70.65,
+        "volume": 191045,
+        "adjusted_close": 70.65,
+        "turnover": 13517440.8
+      },
+      {
+        "date": "2026-05-04",
+        "open": 70.75,
+        "high": 70.75,
+        "low": 69.8,
+        "close": 69.95,
+        "volume": 119247,
+        "adjusted_close": 69.95,
+        "turnover": 8369678.95
+      },
+      {
+        "date": "2026-05-05",
+        "open": 69.9,
+        "high": 69.9,
+        "low": 68.85,
+        "close": 68.95,
+        "volume": 138525,
+        "adjusted_close": 68.95,
+        "turnover": 9569479.85
+      },
+      {
+        "date": "2026-05-06",
+        "open": 68.95,
+        "high": 70.55,
+        "low": 68.6,
+        "close": 70.2,
+        "volume": 214757,
+        "adjusted_close": 70.2,
+        "turnover": 14995029.35
+      },
+      {
+        "date": "2026-05-07",
+        "open": 70.15,
+        "high": 70.15,
+        "low": 69.15,
+        "close": 69.55,
+        "volume": 244448,
+        "adjusted_close": 69.55,
+        "turnover": 17001171.8
+      },
+      {
+        "date": "2026-05-10",
+        "open": 70.7,
+        "high": 73.9,
+        "low": 70.3,
+        "close": 73.05,
+        "volume": 1049024,
+        "adjusted_close": 73.05,
+        "turnover": 75490713.4
+      },
+      {
+        "date": "2026-05-11",
+        "open": 73.1,
+        "high": 75.35,
+        "low": 73.1,
+        "close": 74.4,
+        "volume": 583914,
+        "adjusted_close": 74.4,
+        "turnover": 43406192.15
+      },
+      {
+        "date": "2026-05-12",
+        "open": 74.6,
+        "high": 75.55,
+        "low": 73.3,
+        "close": 74.3,
+        "volume": 385870,
+        "adjusted_close": 74.3,
+        "turnover": 28610379.25
+      },
+      {
+        "date": "2026-05-13",
+        "open": 74.25,
+        "high": 75.8,
+        "low": 73.4,
+        "close": 73.4,
+        "volume": 406230,
+        "adjusted_close": 73.4,
+        "turnover": 30236316.55
+      },
+      {
+        "date": "2026-05-14",
+        "open": 73.05,
+        "high": 75.7,
+        "low": 73.05,
+        "close": 74.5,
+        "volume": 297284,
+        "adjusted_close": 74.5,
+        "turnover": 22204951.9
+      },
+      {
+        "date": "2026-05-17",
+        "open": 74.15,
+        "high": 74.3,
+        "low": 73.0,
+        "close": 73.0,
+        "volume": 98651,
+        "adjusted_close": 73.0,
+        "turnover": 7242274.65
+      },
+      {
+        "date": "2026-05-18",
+        "open": 72.9,
+        "high": 72.95,
+        "low": 72.15,
+        "close": 72.2,
+        "volume": 159085,
+        "adjusted_close": 72.2,
+        "turnover": 11525970.6
+      },
+      {
+        "date": "2026-05-19",
+        "open": 72.2,
+        "high": 73.4,
+        "low": 72.2,
+        "close": 73.0,
+        "volume": 100111,
+        "adjusted_close": 73.0,
+        "turnover": 7294771.65
+      },
+      {
+        "date": "2026-05-20",
+        "open": 73.0,
+        "high": 73.5,
+        "low": 72.35,
+        "close": 73.3,
+        "volume": 72518,
+        "adjusted_close": 73.3,
+        "turnover": 5289960.4
+      },
+      {
+        "date": "2026-05-21",
+        "open": 73.4,
+        "high": 75.45,
+        "low": 73.4,
+        "close": 73.6,
+        "volume": 350042,
+        "adjusted_close": 73.6,
+        "turnover": 26033896.7
+      }
+    ]
+  }
+}

@@ -6362,255 +6362,94 @@ def render_test_runner_tab() -> None:
 # ── Developer Mode: SAHMK Discovery Console ──────────────────────────────────
 
 def render_sahmk_discovery_tab() -> None:
-    """Developer Mode — SAHMK Data Discovery + Storage Console."""
-    import pandas as pd
+    """Developer Mode — SAHMK Data Fetch & Store."""
     from portfolio.sahmk_discovery import (
-        discover          as _disc_discover,
         download_and_store as _disc_download,
         list_stored        as _disc_list,
-        load_stored_dataset as _disc_load,
-        report_to_json     as _disc_to_json,
     )
 
     if not st.session_state.get("dev_mode", False):
         st.info(
             "🔒 **SAHMK Discovery is only available in Developer Mode.**  \n"
-            "Enable **🔧 Developer Mode** in the sidebar to access the discovery console.",
+            "Enable **🔧 Developer Mode** in the sidebar to access this tab.",
             icon="🔧",
         )
         return
 
-    # ── 1. Header ─────────────────────────────────────────────────────────────
-    st.header("🔍 SAHMK Discovery Console")
-    st.caption(
-        "Discover available SAHMK datasets, download and store them locally, "
-        "or load previously stored data — without touching Holdings or Valuation."
-    )
+    st.header("🔍 SAHMK Data")
 
     from sahmk_client import is_configured as _sahmk_configured
-    _api_ok = _sahmk_configured()
-    if not _api_ok:
-        st.warning(
-            "**SAHMK_API_KEY is not set** — discovery and download require an API key.  \n"
-            "Load Stored Data still works without a key.",
-            icon="🔑",
-        )
+    if not _sahmk_configured():
+        st.error("**SAHMK_API_KEY is not set.** Add it in Secrets to continue.", icon="🔑")
+        return
 
-    # ── 2. Symbol input ───────────────────────────────────────────────────────
-    _disc_symbol = st.text_input(
-        "Saudi symbol",
-        placeholder="e.g. 2222",
-        key="disc_symbol",
-        help="Local Saudi exchange symbol — e.g. 2222 (Saudi Aramco), 1120 (Al Rajhi).",
-    ).strip()
-
-    # ── 3. Action buttons ─────────────────────────────────────────────────────
-    _ab1, _ab2, _ab3 = st.columns(3)
-    with _ab1:
-        _run_disc = st.button(
-            "🔍 Run Discovery",
+    # ── Symbol + single Run button ────────────────────────────────────────────
+    _sc1, _sc2 = st.columns([4, 1])
+    with _sc1:
+        _sym = st.text_input(
+            "Saudi symbol",
+            placeholder="e.g. 2222",
+            key="disc_symbol",
+            label_visibility="collapsed",
+        ).strip()
+    with _sc2:
+        _run = st.button(
+            "▶ Run",
             type="primary",
             use_container_width=True,
             key="disc_run_btn",
-            disabled=(not _disc_symbol or not _api_ok),
-            help="Probe all SAHMK endpoints and show availability. Does not store data.",
-        )
-    with _ab2:
-        _run_dl = st.button(
-            "💾 Download & Store",
-            use_container_width=True,
-            key="disc_dl_btn",
-            disabled=(not _disc_symbol or not _api_ok),
-            help="Download all available datasets and persist them locally.",
-        )
-    with _ab3:
-        _run_load = st.button(
-            "📂 Load Stored Data",
-            use_container_width=True,
-            key="disc_load_btn",
-            disabled=not _disc_symbol,
-            help="Load previously stored datasets from disk without calling the API.",
+            disabled=not _sym,
         )
 
-    # ── Run actions ───────────────────────────────────────────────────────────
-    if _run_disc and _disc_symbol:
-        with st.spinner(f"Probing SAHMK endpoints for **{_disc_symbol}**…"):
-            _rpt = _disc_discover(_disc_symbol)
-        st.session_state["_disc_report"] = _rpt
-        st.toast(
-            f"Discovery complete — "
-            f"{len(_rpt['available_datasets'])} available, "
-            f"{len(_rpt['unavailable_datasets'])} unavailable.",
-            icon="🔍",
-        )
+    # ── Fetch + store on click ────────────────────────────────────────────────
+    if _run and _sym:
+        with st.spinner(f"Fetching data for **{_sym}**…"):
+            _result = _disc_download(_sym)
+        _saved = [p for p in _result["stored"] if "discovery_report" not in p]
+        if _saved:
+            st.success(
+                f"Stored **{len(_saved)}** dataset(s) for **{_sym}**: "
+                + ", ".join(_result["discovery"]["available_datasets"]),
+                icon="💾",
+            )
+        else:
+            st.warning(f"No data available for **{_sym}** under the current subscription.", icon="⚠️")
 
-    if _run_dl and _disc_symbol:
-        with st.spinner(f"Downloading & storing data for **{_disc_symbol}**…"):
-            _dl_result = _disc_download(_disc_symbol)
-        st.session_state["_disc_report"] = _dl_result["discovery"]
-        n_stored = len([p for p in _dl_result["stored"] if "discovery_report" not in p])
-        st.toast(
-            f"Stored {n_stored} dataset(s) for **{_disc_symbol}**.",
-            icon="💾",
-        )
-
-    if _run_load and _disc_symbol:
-        # Refresh stored list; don't touch the discovery report
-        st.toast(f"Loaded stored datasets for **{_disc_symbol}**.", icon="📂")
-
-    # ── 4. Stored SAHMK Data ─────────────────────────────────────────────────
+    # ── Stored files table ────────────────────────────────────────────────────
     st.divider()
-    st.subheader("🗄️ Stored SAHMK Data")
+    _stored = _disc_list(_sym) if _sym else []
+    _data_rows = [s for s in _stored if "discovery_report" not in s["slug"]]
 
-    _stored = _disc_list(_disc_symbol) if _disc_symbol else []
-    # Group by dataset
-    _ds_groups: dict[str, list[dict]] = {}
-    for _item in _stored:
-        # Exclude discovery_report from main stored table (show separately)
-        _ds_groups.setdefault(_item["dataset"], []).append(_item)
-
-    if not _stored:
-        _empty_msg = (
-            f"No stored SAHMK data found for **{_disc_symbol}**."
-            if _disc_symbol
-            else "Enter a symbol above to see stored data."
+    if not _data_rows:
+        st.info(
+            f"No stored data for **{_sym}**. Enter a symbol and press **▶ Run**." if _sym
+            else "Enter a symbol above and press **▶ Run**.",
+            icon="📭",
         )
-        st.info(_empty_msg, icon="📭")
     else:
-        for _ds_name, _versions in sorted(_ds_groups.items()):
-            with st.expander(
-                f"**{_ds_name}** — {len(_versions)} version(s)",
-                expanded=True,
-            ):
-                for _v in _versions:
-                    _vc1, _vc2, _vc3 = st.columns([3, 2, 1])
-                    with _vc1:
-                        st.markdown(
-                            f"📄 `{_v['filename']}`  \n"
-                            f"🕐 {_v['fetched_at']}  \n"
-                            f"📦 {_v['size_bytes']:,} bytes"
-                        )
-                    with _vc2:
-                        # Load & preview button
-                        _vk = f"disc_view_{_v['filename']}"
-                        if st.button("👁️ View", key=_vk, use_container_width=True):
-                            st.session_state["_disc_loaded_file"] = _v["filepath"]
-                    with _vc3:
-                        # Download stored file
-                        try:
-                            with open(_v["filepath"], "rb") as _fh:
-                                _fdata = _fh.read()
-                            st.download_button(
-                                "⬇️",
-                                data=_fdata,
-                                file_name=_v["filename"],
-                                mime="application/json",
-                                key=f"disc_dl_stored_{_v['filename']}",
-                                use_container_width=True,
-                            )
-                        except OSError:
-                            st.caption("—")
-
-        # ── Inline viewer for a selected stored file ──────────────────────────
-        _loaded_fp = st.session_state.get("_disc_loaded_file")
-        if _loaded_fp:
-            _loaded_data = _disc_load(_loaded_fp)
-            if _loaded_data:
-                st.divider()
+        for _row in _data_rows:
+            _rc1, _rc2 = st.columns([5, 1])
+            with _rc1:
                 st.markdown(
-                    f"**Viewing:** `{os.path.basename(_loaded_fp)}`  \n"
-                    f"Fetched at: {_loaded_data.get('fetched_at', '—')}  \n"
-                    f"Source: {_loaded_data.get('source', '—')} · "
-                    f"Dataset: {_loaded_data.get('dataset', '—')}"
+                    f"**{_row['dataset']}** &nbsp;·&nbsp; "
+                    f"`{_row['filename']}` &nbsp;·&nbsp; "
+                    f"{_row['fetched_at']} &nbsp;·&nbsp; "
+                    f"{_row['size_bytes']:,} bytes"
                 )
-                _fields = _loaded_data.get("available_fields", [])
-                if _fields:
-                    st.markdown(f"**Fields ({len(_fields)}):** {', '.join(_fields)}")
-                _raw = _loaded_data.get("raw_response")
-                if _raw is not None:
-                    with st.expander("Raw response", expanded=False):
-                        st.json(_raw)
-            else:
-                st.warning("Could not load selected file.", icon="⚠️")
-
-    # ── 5. Latest Discovery Summary ───────────────────────────────────────────
-    _report = st.session_state.get("_disc_report")
-    if _report:
-        st.divider()
-        st.subheader("📊 Latest Discovery Summary")
-        _m1, _m2, _m3, _m4 = st.columns(4)
-        _m1.metric("Symbol",      _report["symbol"] or "—")
-        _m2.metric("Source",      _report["source"])
-        _m3.metric("Available",   len(_report["available_datasets"]))
-        _m4.metric("Unavailable", len(_report["unavailable_datasets"]))
-        st.caption(f"Discovered at: {_report['discovered_at'][:19].replace('T', ' ')}")
-
-        _sum_df = pd.DataFrame(_report["summary_table"])
-        if not _sum_df.empty:
-            st.dataframe(
-                _sum_df.rename(columns={
-                    "dataset": "Dataset", "status": "Status",
-                    "fields": "Fields", "records": "Records", "http": "HTTP",
-                }),
-                hide_index=True,
-                use_container_width=True,
-            )
-
-        # Export discovery report
-        _json_bytes = _disc_to_json(_report).encode("utf-8")
-        _fname = (
-            f"sahmk_discovery_{_report['symbol']}_"
-            f"{_report['discovered_at'][:10]}.json"
-        )
-        st.download_button(
-            "⬇️ Export Discovery Report (JSON)",
-            data=_json_bytes,
-            file_name=_fname,
-            mime="application/json",
-            key="disc_export_btn",
-            use_container_width=True,
-        )
-
-        # ── 6. Endpoint Detail ─────────────────────────────────────────────────
-        st.divider()
-        st.subheader("🔬 Endpoint Detail")
-        for _ep in _report["endpoint_results"]:
-            _icon  = "✅" if _ep["success"] else "❌"
-            _label = (
-                f"{_icon} **{_ep['endpoint_name']}**"
-                f"  `{_ep['path']}`"
-                f"  · HTTP {_ep['http_status'] or '—'}"
-                f"  · {_ep['response_size_bytes']:,} bytes"
-            )
-            with st.expander(_label, expanded=False):
-                if _ep.get("error"):
-                    st.error(_ep["error"], icon="🚫")
-                if _ep["available_fields"]:
-                    st.markdown(f"**Fields ({len(_ep['available_fields'])}):**")
-                    st.code(", ".join(_ep["available_fields"]), language=None)
-                if _ep.get("record_count") is not None:
-                    st.caption(f"Record count: **{_ep['record_count']:,}**")
-                if _ep.get("sample_values"):
-                    st.markdown("**Sample values:**")
-                    st.dataframe(
-                        pd.DataFrame([
-                            {"Field": k, "Value": str(v)}
-                            for k, v in _ep["sample_values"].items()
-                        ]),
-                        hide_index=True,
+            with _rc2:
+                try:
+                    with open(_row["filepath"], "rb") as _fh:
+                        _fdata = _fh.read()
+                    st.download_button(
+                        "⬇️ JSON",
+                        data=_fdata,
+                        file_name=_row["filename"],
+                        mime="application/json",
+                        key=f"dl_{_row['filename']}",
                         use_container_width=True,
-                        column_config={
-                            "Field": st.column_config.TextColumn("Field", width="small"),
-                            "Value": st.column_config.TextColumn("Value"),
-                        },
                     )
-    else:
-        if _disc_symbol:
-            st.info(
-                "Press **🔍 Run Discovery** to probe endpoints, or "
-                "**💾 Download & Store** to fetch and save data.",
-                icon="🔍",
-            )
+                except OSError:
+                    st.caption("—")
 
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
