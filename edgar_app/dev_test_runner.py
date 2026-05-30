@@ -2412,6 +2412,131 @@ def _cat_n() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category A10 — Account Deletion Guard Regression
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_a10() -> list[TestResult]:
+    """
+    A10-01 through A10-04: regression tests for the delete_account() guard.
+
+    A10-01  account with cash          → blocked (ValueError)
+    A10-02  account with linked holding → blocked (ValueError)
+    A10-03  account with transaction    → blocked (ValueError)
+    A10-04  empty unused account        → deletion succeeds
+
+    A10-01 through A10-03 exercise _guard_delete_account() with in-memory
+    sandbox data — no portfolio files are read or written.
+    A10-04 exercises the full delete_account() path using a transient sandbox
+    account that is created and immediately deleted.
+    """
+    CAT = "Account Deletion Guard (A10)"
+    results: list[TestResult] = []
+
+    _ERR_MSG = (
+        "Cannot delete account with cash, holdings, transactions, or closed lots."
+    )
+    SB_ID = "__SBA10__"   # sandbox account_id used across all sub-tests
+
+    # ── shared guard import ───────────────────────────────────────────────────
+    from portfolio.accounts import _guard_delete_account, upsert_account, delete_account, load_accounts
+
+    # ── A10-01: account with cash blocked ────────────────────────────────────
+    def a10_01():
+        err = _guard_delete_account(SB_ID, cash_balance=500.0, holdings={}, transactions=[], closed_lots=[])
+        ok  = err == _ERR_MSG
+        return (
+            f"guard returns '{_ERR_MSG}'",
+            repr(err),
+            ok,
+        )
+
+    results.append(_run(
+        "A10-01",
+        "Account with cash balance cannot be deleted",
+        CAT, "portfolio.accounts._guard_delete_account", "P0", True, a10_01,
+    ))
+
+    # ── A10-02: account with linked holding blocked ───────────────────────────
+    def a10_02():
+        from portfolio.holdings import Holding
+        h = Holding(ticker="__SB_AAPL__", company_name="Sandbox", quantity=10.0,
+                    avg_cost=100.0, current_price=120.0, default_account_id=SB_ID)
+        err = _guard_delete_account(SB_ID, cash_balance=0.0,
+                                    holdings={"__SB_AAPL__": h},
+                                    transactions=[], closed_lots=[])
+        ok  = err == _ERR_MSG
+        return (
+            f"guard returns '{_ERR_MSG}'",
+            repr(err),
+            ok,
+        )
+
+    results.append(_run(
+        "A10-02",
+        "Account with linked holding cannot be deleted",
+        CAT, "portfolio.accounts._guard_delete_account", "P0", True, a10_02,
+    ))
+
+    # ── A10-03: account with transaction blocked ──────────────────────────────
+    def a10_03():
+        from portfolio.holdings import Transaction
+        txn = Transaction(ticker="__SB_AAPL__", side="BUY", quantity=10.0,
+                          price=100.0, date="2026-01-01", account_id=SB_ID)
+        err = _guard_delete_account(SB_ID, cash_balance=0.0,
+                                    holdings={}, transactions=[txn], closed_lots=[])
+        ok  = err == _ERR_MSG
+        return (
+            f"guard returns '{_ERR_MSG}'",
+            repr(err),
+            ok,
+        )
+
+    results.append(_run(
+        "A10-03",
+        "Account with referencing transaction cannot be deleted",
+        CAT, "portfolio.accounts._guard_delete_account", "P0", True, a10_03,
+    ))
+
+    # ── A10-04: empty unused account can be deleted ───────────────────────────
+    def a10_04():
+        SB_CLEAN_ID = "__SBA10CLEAN__"
+        # Create a fresh sandbox account with zero cash and no references.
+        upsert_account(
+            account_id    = SB_CLEAN_ID,
+            account_name  = "Sandbox A10 Clean",
+            account_type  = "Other",
+            base_currency = "USD",
+            opening_cash  = 0.0,
+        )
+        before = SB_CLEAN_ID in load_accounts()
+
+        try:
+            delete_account(SB_CLEAN_ID)
+            raised = False
+        except ValueError:
+            raised = True
+
+        after = SB_CLEAN_ID in load_accounts()
+        ok    = before and not raised and not after
+        detail = (
+            f"before={before}, raised={raised}, after={after}"
+        )
+        return (
+            "account created; delete_account() succeeds; account removed",
+            detail,
+            ok,
+        )
+
+    results.append(_run(
+        "A10-04",
+        "Empty unused account can be deleted",
+        CAT, "portfolio.accounts.delete_account", "P0", True, a10_04,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Category CH — Closed-Position Visibility Regression
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -2512,7 +2637,7 @@ def run_all_tests() -> TestReport:
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
-        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_ch()
+        + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_a10() + _cat_ch()
     )
 
     punch_list: list[PunchListItem] = []

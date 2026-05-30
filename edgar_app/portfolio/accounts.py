@@ -139,9 +139,76 @@ def set_account_cash(account_id: str, balance: float) -> None:
     save_accounts(accounts)
 
 
+def _guard_delete_account(
+    account_id:   str,
+    cash_balance: float,
+    holdings:     dict,   # dict[str, Holding] or dict[str, dict]
+    transactions: list,   # list[Transaction]  or list[dict]
+    closed_lots:  list,   # list[ClosedLot]    or list[dict]
+) -> str | None:
+    """
+    Return an error string if the account cannot safely be deleted, else None.
+
+    Accepts both dataclass instances and plain dicts so it is testable
+    with in-memory sandbox objects and callable from delete_account().
+    """
+    _ERR = (
+        "Cannot delete account with cash, holdings, transactions, or closed lots."
+    )
+
+    def _attr(obj, name: str, default=""):
+        return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
+
+    # 1 — non-zero cash balance
+    if cash_balance != 0.0:
+        return _ERR
+
+    # 2 — any holding linked to this account
+    for h in holdings.values():
+        if _attr(h, "default_account_id") == account_id:
+            return _ERR
+
+    # 3 — any transaction referencing this account
+    for txn in transactions:
+        if _attr(txn, "account_id") == account_id:
+            return _ERR
+
+    # 4 — any non-voided closed lot referencing this account
+    for lot in closed_lots:
+        if _attr(lot, "account_id") == account_id and not _attr(lot, "voided", False):
+            return _ERR
+
+    return None
+
+
 def delete_account(account_id: str) -> None:
+    """
+    Permanently remove an account.
+
+    Raises ValueError if the account has a non-zero cash balance, linked
+    holdings, transactions, or closed lots.  Only completely unused accounts
+    (empty, no references anywhere) may be hard-deleted.
+    """
+    # Deferred imports avoid circular dependencies (accounts ↛ holdings/closed_holdings).
+    from .holdings       import load_holdings, load_transactions
+    from .closed_holdings import load_closed_lots
+
     accounts = load_accounts()
-    accounts.pop(account_id, None)
+    if account_id not in accounts:
+        return                          # nothing to delete — silent no-op
+
+    acct  = accounts[account_id]
+    error = _guard_delete_account(
+        account_id,
+        acct.cash_balance,
+        load_holdings(),
+        load_transactions(),
+        load_closed_lots(),
+    )
+    if error:
+        raise ValueError(error)
+
+    accounts.pop(account_id)
     save_accounts(accounts)
 
 
