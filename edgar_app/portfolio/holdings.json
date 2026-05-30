@@ -111,7 +111,7 @@
     "sector": "Energy",
     "quantity": 7106.0,
     "avg_cost": 24.90084435677414,
-    "current_price": 27.899999618530273,
+    "current_price": 27.9,
     "added_at": "2026-05-28",
     "asset_type": "Stock",
     "currency": "SAR",
@@ -120,10 +120,10 @@
     "cik": "",
     "purchase_date": "2020-05-01",
     "notes": "",
-    "price_source": "cached",
+    "price_source": "SAHMK",
     "price_date": "2026-05-30",
     "default_account_id": "",
-    "exchange_symbol": ""
+    "exchange_symbol": "2222"
   },
   "4164.SR": {
     "ticker": "4164.SR",

@@ -1,0 +1,112 @@
+Before building anything new, perform a verification pass.
+
+Do NOT redesign the UI.
+Do NOT change Holdings architecture.
+
+====================================================
+1. VERIFY CURRENT SAHMK IMPLEMENTATION
+====================================================
+
+Confirm and document:
+
+- actual Sahmk API endpoint in use
+- actual Sahmk responses received
+- which fields are successfully retrieved
+- which fields are unavailable
+
+Show results in Developer Mode only.
+
+====================================================
+2. PRICE SOURCE VISIBILITY
+====================================================
+
+The system already stores:
+
+price_source
+
+per holding.
+
+Expose it in Holdings UI.
+
+Add:
+
+Source
+
+column showing:
+
+SAHMK
+Yahoo
+Cached
+Manual
+
+Optional:
+
+Last Updated timestamp
+
+Keep compact.
+
+====================================================
+3. BASE CURRENCY CONSISTENCY AUDIT
+====================================================
+
+Audit every module.
+
+Changing Base Currency must update:
+
+- Holdings
+- Allocation
+- Accounts
+- Command Center
+- Dashboard
+- Portfolio totals
+
+Verify all use the same valuation engine.
+
+Report any mismatch before changing code.
+
+====================================================
+4. SAUDI MARKET INTELLIGENCE PAGE
+====================================================
+
+Create a dedicated page only if Sahmk data beyond price is available.
+
+Possible sections:
+
+- Company Profile
+- Sector
+- Industry
+- Announcements
+- Financials
+- Dividends
+- Corporate Actions
+
+If Sahmk does not provide these fields,
+do not build placeholders.
+
+====================================================
+5. FUTURE INTEGRATION PREPARATION
+====================================================
+
+If announcements become available:
+
+prepare reusable service methods that can later feed:
+
+- Decision Queue
+- Thesis Memory
+- Command Center
+
+Do not build these integrations yet.
+
+Only prepare architecture.
+
+====================================================
+6. MVP RULE
+====================================================
+
+Do not add new features until:
+
+- valuation consistency
+- currency consistency
+- transaction integrity
+
+are verified.

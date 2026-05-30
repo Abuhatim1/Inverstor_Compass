@@ -1,0 +1,143 @@
+Before making any code changes, read the existing implementation and verify assumptions against the actual codebase.
+
+Context
+
+The SAHMK integration is already working.
+
+Confirmed working:
+- Exchange Symbol field already exists and is being used correctly.
+- SAHMK price routing works.
+- SAHMK company profile endpoint works.
+- SAHMK market summary endpoint works.
+- price_source is already stored per holding.
+- Holdings valuation engine is working.
+- Portfolio calculations are working.
+
+Do NOT redesign, refactor, or rebuild the SAHMK integration.
+
+Do NOT create new tabs, pages, dashboards, navigation items, or architectural changes.
+
+MVP-first approach only.
+
+Tasks
+
+Task 1 — Show Price Source in Holdings
+
+The system already stores:
+
+price_source
+
+Values may include:
+- SAHMK
+- yfinance
+- cached
+- manual
+
+Add a compact read-only Source column in the Holdings table.
+
+Requirements:
+- Minimal width.
+- Mobile friendly.
+- No impact on existing calculations.
+- No new valuation logic.
+- Pure UI rendering of already stored data.
+
+Example:
+
+Ticker | Price | Source
+2222.SE | 27.90 | SAHMK
+VCYT    | 47.59 | Yahoo
+
+Use friendly labels:
+SAHMK
+Yahoo
+Cached
+Manual
+
+Task 2 — Developer Mode Diagnostics
+
+Developer Mode only.
+
+Add a diagnostics section that displays:
+
+- Ticker
+- Exchange Symbol
+- Price Source
+- Last Price Update Timestamp
+- Current Price
+
+Purpose:
+Verify routing behavior and troubleshooting.
+
+Must not be visible in normal user mode.
+
+Task 3 — SAHMK Company Profile Card
+
+Do NOT create a new page.
+
+Do NOT create a new tab.
+
+Inside the existing Holding Detail view/drawer/modal, add a compact Saudi Company Profile section when SAHMK profile data is available.
+
+Display only:
+
+- Company Name
+- Sector
+- Industry
+- Website
+- Description
+
+Use the existing SAHMK company endpoint.
+
+No additional calculations.
+
+No caching redesign.
+
+Task 4 — TASI Summary Widget
+
+Do NOT create a new page.
+
+Do NOT create a Saudi Market Intelligence tab.
+
+Add a compact TASI summary widget inside the existing Command Center page.
+
+Display only what is actually available from SAHMK.
+
+Examples:
+- TASI Index
+- Daily Change
+- Advancers
+- Decliners
+
+Do not fabricate metrics.
+
+Do not add placeholders.
+
+Restrictions
+
+Do NOT:
+- Change valuation engine.
+- Change holdings schema.
+- Change exchange symbol logic.
+- Change currency conversion logic.
+- Change account logic.
+- Create new database tables.
+- Create new navigation tabs.
+- Create a Saudi Market Intelligence page.
+
+Testing
+
+After implementation:
+
+1. Run Developer Mode test suite.
+2. Verify price_source displays correctly.
+3. Verify 2222.SE shows SAHMK source.
+4. Verify non-Saudi symbols show Yahoo source.
+5. Verify Company Profile card loads correctly for Aramco.
+6. Verify TASI widget loads successfully.
+7. Verify no portfolio valuation numbers changed.
+8. Verify no holdings quantities changed.
+9. Verify no account balances changed.
+
+Provide a concise test report showing:
+PASS / FAIL for each item.

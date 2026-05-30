@@ -2466,6 +2466,11 @@ def render_holdings_tab() -> None:
             if not has_tk:
                 manual_tickers.append(ticker)
 
+            _src_raw   = getattr(h, "price_source", "manual") or "manual"
+            _src_label = {"SAHMK": "SAHMK", "yfinance": "Yahoo",
+                          "cached": "Cached", "manual": "Manual"}.get(
+                _src_raw, _src_raw.capitalize())
+
             _ticker_order.append(ticker)
             rows.append({
                 " ":        status,
@@ -2478,6 +2483,7 @@ def render_holdings_tab() -> None:
                 "P&L %":    round(pnl_pct, 2),
                 "Wt %":     round(_wt_map.get(ticker, 0.0), 1),
                 "CCY":      ccy,
+                "Src":      _src_label,
             })
 
         _tbl_sel = st.dataframe(
@@ -2496,7 +2502,8 @@ def render_holdings_tab() -> None:
                 _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.0f"),
                 "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
                 "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
-                "CCY":      st.column_config.TextColumn("CCY",        width="small"),
+                "CCY":      st.column_config.TextColumn("CCY", width="small"),
+                "Src":      st.column_config.TextColumn("Src", width="small"),
             },
         )
         st.caption("👆 Tap a row to select it, then use the action bar below  ·  🟢 profit  🔴 loss  ⚪ flat")

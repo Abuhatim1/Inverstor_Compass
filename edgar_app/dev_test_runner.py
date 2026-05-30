@@ -1358,6 +1358,228 @@ def _cat_j() -> list[TestResult]:
     return results
 
 
+def _cat_k() -> list[TestResult]:
+    """
+    K01–K02: Price-source field verification.
+    K01 — Saudi symbol (exchange_symbol set) must be routed to SAHMK.
+    K02 — Non-Saudi symbol (no exchange_symbol) must be routed to yfinance.
+    Uses the real market_data_router; never touches portfolio files.
+    """
+    CAT = "Price Source Verification"
+    results: list[TestResult] = []
+
+    # ── K01: Saudi symbol (2222.SE) source = SAHMK ───────────────────────────
+    def k01():
+        from market_data_router import get_routed_price, PROVIDER_SAHMK
+        rp = get_routed_price(
+            ticker            = "2222.SE",
+            exchange_symbol   = "2222",
+            last_known_price  = 30.0,
+            last_known_source = "manual",
+        )
+        ok = rp.provider == PROVIDER_SAHMK and rp.is_ok
+        return (
+            f"provider={PROVIDER_SAHMK!r}",
+            f"provider={rp.provider!r}, price={rp.price}, ok={rp.is_ok}",
+            ok,
+        )
+
+    results.append(_run(
+        "K01",
+        "Saudi symbol (2222 / 2222.SE) price_source = SAHMK",
+        CAT, "market_data_router", "P1", False, k01,
+    ))
+
+    # ── K02: Non-Saudi symbol source = Yahoo (yfinance) ──────────────────────
+    def k02():
+        from market_data_router import get_routed_price, PROVIDER_YFINANCE
+        rp = get_routed_price(
+            ticker            = "AAPL",
+            exchange_symbol   = "",
+            last_known_price  = 150.0,
+            last_known_source = "manual",
+        )
+        ok = rp.provider == PROVIDER_YFINANCE and rp.is_ok
+        return (
+            f"provider={PROVIDER_YFINANCE!r}",
+            f"provider={rp.provider!r}, price={rp.price}, ok={rp.is_ok}",
+            ok,
+        )
+
+    results.append(_run(
+        "K02",
+        "Non-Saudi symbol (AAPL) price_source = Yahoo (yfinance)",
+        CAT, "market_data_router", "P1", False, k02,
+    ))
+
+    return results
+
+
+def _cat_l() -> list[TestResult]:
+    """
+    L01–L05: UI tab valuation-engine consistency.
+
+    Verifies that Holdings, Command Center, Allocation, Portfolio Risk, and
+    Accounts all surface totals that are consistent with the centralized
+    valuation engine (calculate_portfolio_valuation).
+
+    Strategy
+    --------
+    · Build a fixed 2-holding / 2-account synthetic portfolio with pinned
+      FX rates so every call is deterministic.
+    · Call the engine once and inspect the output (L01–L03, L05).
+    · For L04 (Portfolio Risk) call the engine a second time independently,
+      mirroring what render_portfolio_risk_tab() does, and compare.
+    · For L05 (Accounts tab) replicate the inline cash-sum formula from
+      render_accounts_tab() (lines 3666-3669 in app.py) and compare it
+      against engine.cash_value_base.
+    · Any mismatch is REPORTED only — no fix is applied here.
+
+    All tests use P0 / release-blocker severity except L05 (Accounts cash
+    divergence is reported but not a hard blocker; the Accounts tab does not
+    call the centralized engine for its cash total).
+    """
+    CAT = "Tab Valuation Consistency"
+    results: list[TestResult] = []
+
+    # ── Shared synthetic portfolio ────────────────────────────────────────────
+    BASE    = "SAR"
+    _fx_map = {
+        "SAR": _fx("SAR", BASE, 1.0),
+        "USD": _fx("USD", BASE, 3.75),
+    }
+    _holdings = {
+        "AAPL":   _holding("AAPL",   10.0,  150.0, 180.0, ccy="USD"),
+        "ARAMCO": _holding("ARAMCO", 100.0,  30.0,  35.0, ccy="SAR"),
+    }
+    _accounts_map = {
+        "acc1": _account("acc1", 5_000.0, "SAR"),
+        "acc2": _account("acc2", 2_000.0, "USD"),
+    }
+
+    # One canonical engine result — L01/L02/L03/L05 read from this object.
+    _engine = _val(_holdings, _accounts_map, BASE, _fx_map)
+
+    # ── L01: Holdings — per-holding sum == holdings_value_base ───────────────
+    # The Holdings tab displays _val.holdings_value_base and builds the table
+    # from _val.per_holding.  These must be numerically identical.
+    def l01():
+        ph_sum = round(sum(ph.base_market_value for ph in _engine.per_holding), 2)
+        hv     = round(_engine.holdings_value_base, 2)
+        ok     = _near(ph_sum, hv, tol=0.01)
+        return (
+            f"per_holding sum == holdings_value_base ({hv:,.2f} {BASE})",
+            f"per_holding sum = {ph_sum:,.2f}, holdings_value_base = {hv:,.2f}",
+            ok,
+        )
+
+    results.append(_run(
+        "L01",
+        "Holdings tab: sum of per-holding base_market_value == engine holdings_value_base",
+        CAT, "portfolio.valuation", "P0", True, l01,
+    ))
+
+    # ── L02: Command Center — holdings + cash == total_portfolio_value_base ──
+    # The top KPI card in Command Center shows total_portfolio_value_base,
+    # which must equal holdings_value_base + cash_value_base.
+    def l02():
+        hv   = round(_engine.holdings_value_base, 2)
+        cv   = round(_engine.cash_value_base, 2)
+        tv   = round(_engine.total_portfolio_value_base, 2)
+        calc = round(hv + cv, 2)
+        ok   = _near(calc, tv, tol=0.01)
+        return (
+            f"holdings + cash == total_portfolio_value_base ({tv:,.2f} {BASE})",
+            f"{hv:,.2f} + {cv:,.2f} = {calc:,.2f}  vs  total = {tv:,.2f}",
+            ok,
+        )
+
+    results.append(_run(
+        "L02",
+        "Command Center: holdings_value_base + cash_value_base == total_portfolio_value_base",
+        CAT, "portfolio.valuation", "P0", True, l02,
+    ))
+
+    # ── L03: Allocation — invested_weight_pct sums to ~100 % ─────────────────
+    # The Allocation tab receives the same _val object from the Holdings tab
+    # (no re-computation) and builds pie / donut charts from per_holding
+    # base_market_value.  Weights must sum to 100 %.
+    def l03():
+        w_sum = round(sum(ph.invested_weight_pct for ph in _engine.per_holding), 2)
+        ok    = _near(w_sum, 100.0, tol=0.5)
+        return (
+            "invested_weight_pct across all holdings sums to ~100 %",
+            f"sum(invested_weight_pct) = {w_sum:.4f} %",
+            ok,
+        )
+
+    results.append(_run(
+        "L03",
+        "Allocation tab: invested_weight_pct sums to ~100 % (charts stay coherent)",
+        CAT, "portfolio.valuation", "P0", True, l03,
+    ))
+
+    # ── L04: Portfolio Risk — independent engine call == Holdings total ───────
+    # render_portfolio_risk_tab() calls calculate_portfolio_valuation()
+    # independently of the Holdings tab.  With the same fixed FX rates the
+    # result must be identical.
+    def l04():
+        risk_engine = _val(_holdings, _accounts_map, BASE, _fx_map)
+        hv_hld  = round(_engine.holdings_value_base, 2)
+        hv_risk = round(risk_engine.holdings_value_base, 2)
+        tv_hld  = round(_engine.total_portfolio_value_base, 2)
+        tv_risk = round(risk_engine.total_portfolio_value_base, 2)
+        ok = _near(hv_hld, hv_risk, tol=0.01) and _near(tv_hld, tv_risk, tol=0.01)
+        return (
+            f"Risk holdings={hv_hld:,.2f}, total={tv_hld:,.2f} match Holdings",
+            (
+                f"Holdings: hv={hv_hld:,.2f} tv={tv_hld:,.2f} | "
+                f"Risk: hv={hv_risk:,.2f} tv={tv_risk:,.2f}"
+            ),
+            ok,
+        )
+
+    results.append(_run(
+        "L04",
+        "Portfolio Risk tab: independent engine call produces same totals as Holdings tab",
+        CAT, "portfolio.valuation", "P0", True, l04,
+    ))
+
+    # ── L05: Accounts tab — inline cash sum vs. engine cash_value_base ───────
+    # render_accounts_tab() computes _total_cash with its own inline formula
+    # (app.py lines 3666-3669) rather than calling the engine.  This test
+    # replicates that exact formula and checks for divergence.
+    # is_release_blocker=False — mismatch is reported only, not enforced.
+    def l05():
+        active   = {aid: a for aid, a in _accounts_map.items() if a.active}
+        tab_cash = round(sum(
+            a.cash_balance * (
+                _fx_map[a.base_currency].rate if a.base_currency in _fx_map else 1.0
+            )
+            for a in active.values()
+        ), 2)
+        engine_cash = round(_engine.cash_value_base, 2)
+        ok      = _near(tab_cash, engine_cash, tol=0.01)
+        mismatch = (
+            ""
+            if ok
+            else f"  ⚠️ MISMATCH — Accounts tab shows {tab_cash:,.2f}, engine returns {engine_cash:,.2f}"
+        )
+        return (
+            f"Accounts inline cash sum == engine cash_value_base ({engine_cash:,.2f} {BASE})",
+            f"tab_cash = {tab_cash:,.2f}, engine_cash = {engine_cash:,.2f}{mismatch}",
+            ok,
+        )
+
+    results.append(_run(
+        "L05",
+        "Accounts tab: inline cash sum matches engine cash_value_base (mismatch = report only)",
+        CAT, "portfolio.valuation", "P1", False, l05,
+    ))
+
+    return results
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1370,6 +1592,7 @@ def run_all_tests() -> TestReport:
     all_results: list[TestResult] = (
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
+        + _cat_k() + _cat_l()
     )
 
     punch_list: list[PunchListItem] = []
