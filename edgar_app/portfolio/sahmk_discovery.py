@@ -124,9 +124,20 @@ def _probe_endpoint(path: str, params: dict, *, timeout: int = 15) -> dict:
         req = urllib.request.Request(
             url,
             headers={
-                "X-API-Key":  api_key,
-                "Accept":     "application/json",
-                "User-Agent": "Bousala-Discovery/1.0",
+                "X-API-Key":      api_key,
+                "Accept":         "application/json, text/plain, */*",
+                "Accept-Language":"en-US,en;q=0.9,ar;q=0.8",
+                "Accept-Encoding":"gzip, deflate, br",
+                "User-Agent":     (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Referer":        "https://app.sahmk.sa/",
+                "Origin":         "https://app.sahmk.sa",
+                "Connection":     "keep-alive",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
             },
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
