@@ -1,0 +1,268 @@
+Before any change:
+
+1. Create checkpoint:
+
+SAHMK_DISCOVERY_STORAGE_STABLE_V1
+
+2. Confirm checkpoint was created successfully before modifying code.
+3. Do not modify:
+
+* Holdings
+* Holdings price refresh
+* market_data_router
+* valuation engine
+* FIFO accounting
+* transaction engine
+* performance engine
+* investment accounts
+* portfolio totals
+* portfolio valuation calculations
+
+This task is strictly limited to the SAHMK Discovery tab.
+
+====================================================
+OBJECTIVE
+
+Extend SAHMK Discovery Console into a lightweight Saudi Market Data Discovery and Storage layer.
+
+The purpose is to:
+
+* Discover exactly which SAHMK datasets are available under the current subscription.
+* Download available datasets on demand.
+* Persist downloaded datasets locally.
+* Keep a small rolling history.
+* Allow future modules (Thesis Engine, Research Engine, Scenario Engine, etc.) to consume this layer later.
+
+This layer must remain completely independent from Holdings and Portfolio Valuation.
+
+====================================================
+UI LAYOUT
+
+Reorder the SAHMK Discovery tab as follows:
+
+1. SAHMK Discovery Console header
+2. Saudi symbol input
+3. Action buttons:
+
+* Run Discovery
+* Download & Store Available Data
+* Load Stored Data
+
+4. Stored SAHMK Data
+
+(MUST appear immediately after buttons)
+
+5. Latest Discovery Summary
+6. Endpoint Detail
+
+The user must never need to scroll through endpoint results to see stored data.
+
+====================================================
+STORED SAHMK DATA SECTION
+
+Add section:
+
+“Stored SAHMK Data”
+
+Display:
+
+* Symbol
+* Dataset name
+* Last fetched timestamp
+* Record count
+* Available stored versions
+* File name
+* Download JSON
+* View / Load
+
+If no stored data exists:
+
+“No stored SAHMK data found for this symbol.”
+
+====================================================
+AVAILABLE DATASETS
+
+Store only datasets that successfully return data.
+
+Examples currently observed:
+
+* Quote
+* Historical Prices
+* Market Summary
+
+Do NOT store datasets returning HTTP 404 or empty payloads.
+
+====================================================
+LOCAL STORAGE
+
+Storage structure:
+
+data/sahmk_discovery/{symbol}/{dataset}/
+
+Examples:
+
+data/sahmk_discovery/6004/quote/
+data/sahmk_discovery/6004/historical_prices/
+data/sahmk_discovery/6004/market_summary/
+data/sahmk_discovery/6004/discovery_report/
+
+File naming:
+
+{dataset}_{YYYYMMDD_HHMMSS}.json
+
+Examples:
+
+quote_20260530_173000.json
+quote_20260530_181500.json
+
+====================================================
+FILE CONTENT
+
+Each stored file must contain:
+
+* symbol
+* source = SAHMK
+* endpoint
+* fetched_at
+* dataset
+* status
+* available_fields
+* raw_response
+
+====================================================
+PERSISTENCE
+
+Stored files must survive:
+
+* Page refresh
+* Browser refresh
+* App restart
+* Leaving and returning to the tab
+
+Do NOT clear stored files automatically.
+
+====================================================
+FIFO RETENTION
+
+For each symbol and dataset type:
+
+Keep only the latest 3 versions.
+
+Examples:
+
+6004 / quote:
+
+* keep newest 3
+* delete older versions automatically
+
+6004 / historical_prices:
+
+* keep newest 3
+* delete older versions automatically
+
+6004 / market_summary:
+
+* keep newest 3
+* delete older versions automatically
+
+6004 / discovery_report:
+
+* keep newest 3
+* delete older versions automatically
+
+Retention is per symbol and per dataset.
+
+Example:
+
+6004 quote → 3 files
+2222 quote → 3 files
+
+independently maintained.
+
+====================================================
+LOAD STORED DATA
+
+Add button:
+
+“Load Stored Data”
+
+Requirements:
+
+* Load data from local storage only.
+* Must not call SAHMK APIs.
+* Must display selected stored dataset.
+* Must indicate file timestamp.
+* Must indicate source file name.
+
+====================================================
+DISCOVERY SUMMARY
+
+Keep existing discovery summary.
+
+Show:
+
+* Available datasets
+* Unavailable datasets
+* Field counts
+* Endpoint status
+
+====================================================
+SAFETY RULES
+
+This feature must NOT:
+
+* Update Holdings
+* Update prices
+* Affect valuation
+* Affect accounts
+* Affect transactions
+* Affect performance engine
+* Affect portfolio totals
+
+Read-only discovery and storage only.
+
+====================================================
+TESTS
+
+Add:
+
+SDS-01 Discovery stores quote data.
+
+SDS-02 Discovery stores historical prices.
+
+SDS-03 Discovery stores market summary.
+
+SDS-04 404 datasets are not stored.
+
+SDS-05 Stored files survive refresh.
+
+SDS-06 Stored files survive app restart.
+
+SDS-07 Load Stored Data works without API calls.
+
+SDS-08 FIFO retention keeps only newest 3 versions.
+
+SDS-09 Stored SAHMK Data section appears before Endpoint Detail.
+
+SDS-10 Empty state message appears when no stored files exist.
+
+SDS-11 Holdings valuation unchanged.
+
+SDS-12 Portfolio totals unchanged.
+
+SDS-13 Full regression suite passes.
+
+====================================================
+SUCCESS CRITERIA
+
+Result should be a lightweight Saudi Market Data Layer that:
+
+* Discovers available SAHMK datasets.
+* Downloads data on demand.
+* Stores datasets locally.
+* Keeps last 3 versions per dataset.
+* Displays stored datasets prominently at the top of the tab.
+* Persists across sessions.
+* Has zero impact on Holdings, Accounts, Transactions, Valuation, or Performance calculations.
+
+Run the complete test suite and report results.

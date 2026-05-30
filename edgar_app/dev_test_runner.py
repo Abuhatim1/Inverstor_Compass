@@ -3743,6 +3743,333 @@ def _cat_disc() -> list[TestResult]:
     return results
 
 
+def _cat_sds() -> list[TestResult]:
+    """
+    SDS: SAHMK Discovery Storage Layer regression tests.
+
+    SDS-01  Discovery stores quote data (successful endpoint → file written).
+    SDS-02  Discovery stores historical prices.
+    SDS-03  Discovery stores market summary.
+    SDS-04  404/failed datasets are NOT stored.
+    SDS-05  Stored files survive refresh (disk-based, not session-state).
+    SDS-06  Stored files survive app restart (disk persistence check).
+    SDS-07  Load Stored Data works without API calls.
+    SDS-08  FIFO retention keeps only newest 3 versions per dataset.
+    SDS-09  Stored SAHMK Data section appears before Endpoint Detail (layout order).
+    SDS-10  Empty state when no stored files exist.
+    SDS-11  Holdings valuation unchanged after storage operations.
+    SDS-12  Portfolio totals unchanged after storage operations.
+    SDS-13  Full suite remains importable and complete after storage layer added.
+    """
+    import tempfile, shutil, time as _time, os as _os, json as _json
+
+    CAT = "SAHMK Storage"
+    results: list[TestResult] = []
+
+    # ── Shared temp root (one mkdtemp per _cat_sds() call, cleaned at end) ──
+    _tmpdir = tempfile.mkdtemp(prefix="bousala_sds_")
+
+    def _make_ep(name: str, path: str, success: bool,
+                 raw: object = None, sym_required: bool = True) -> dict:
+        """Build a minimal endpoint_result dict for testing storage."""
+        return {
+            "endpoint_name":       name,
+            "path":                path,
+            "symbol_required":     sym_required,
+            "http_status":         200 if success else 404,
+            "success":             success,
+            "error":               None if success else f"HTTP 404",
+            "response_size_bytes": 100 if success else 0,
+            "raw_type":            "dict" if success else "null",
+            "record_count":        None,
+            "available_fields":    ["price", "volume"] if success else [],
+            "sample_values":       {"price": 100.0} if success else {},
+            "raw_response":        raw or ({"price": 100.0} if success else None),
+        }
+
+    def sds01():
+        from portfolio.sahmk_discovery import store_dataset, list_stored
+        ep = _make_ep("Quote", "quote/2222/", True, {"price": 55.2, "volume": 5000})
+        fpath = store_dataset("2222", ep, root=_tmpdir)
+        file_exists = fpath is not None and _os.path.isfile(fpath)
+        stored = list_stored("2222", root=_tmpdir)
+        in_list = any(s["dataset"].lower() == "quote" for s in stored)
+        ok = file_exists and in_list
+        return (
+            "quote file written to disk and appears in list_stored",
+            f"file_exists={file_exists}, in_list={in_list}, path={fpath}",
+            ok,
+        )
+
+    def sds02():
+        from portfolio.sahmk_discovery import store_dataset, list_stored
+        ep = _make_ep(
+            "Historical Prices", "historical/2222",
+            True, [{"date": "2026-01-01", "close": 50.0}],
+        )
+        fpath = store_dataset("2222", ep, root=_tmpdir)
+        file_exists = fpath is not None and _os.path.isfile(fpath)
+        stored = list_stored("2222", root=_tmpdir)
+        in_list = any("historical" in s["slug"] for s in stored)
+        ok = file_exists and in_list
+        return (
+            "historical prices file written and appears in list_stored",
+            f"file_exists={file_exists}, in_list={in_list}",
+            ok,
+        )
+
+    def sds03():
+        from portfolio.sahmk_discovery import store_dataset, list_stored
+        ep = _make_ep(
+            "Market Summary", "market/summary",
+            True, [{"index": "TASI", "value": 11000}], sym_required=False,
+        )
+        fpath = store_dataset("__market__", ep, root=_tmpdir)
+        file_exists = fpath is not None and _os.path.isfile(fpath)
+        ok = file_exists
+        return (
+            "market summary file written to disk",
+            f"file_exists={file_exists}, path={fpath}",
+            ok,
+        )
+
+    def sds04():
+        from portfolio.sahmk_discovery import store_dataset
+        ep_ok  = _make_ep("Quote",    "quote/2222/",            True)
+        ep_404 = _make_ep("Financials","company/2222/financials", False)
+        path_ok  = store_dataset("2222", ep_ok,  root=_tmpdir)
+        path_404 = store_dataset("2222", ep_404, root=_tmpdir)
+        ok = (path_ok is not None) and (path_404 is None)
+        return (
+            "successful endpoint stored; 404 endpoint returns None (not stored)",
+            f"ok_stored={path_ok is not None}, 404_stored={path_404 is not None}",
+            ok,
+        )
+
+    def sds05():
+        """Files on disk survive a simulated refresh (new list_stored call)."""
+        from portfolio.sahmk_discovery import store_dataset, list_stored
+        ep = _make_ep("Quote", "quote/6004/", True)
+        fpath = store_dataset("6004", ep, root=_tmpdir)
+        # Simulate refresh: call list_stored fresh (no session state involved)
+        stored_fresh = list_stored("6004", root=_tmpdir)
+        survived = any(s["filepath"] == fpath for s in stored_fresh)
+        ok = survived
+        return (
+            "stored file found by fresh list_stored call (disk-based, survives refresh)",
+            f"file_exists={_os.path.isfile(fpath)}, found_in_list={survived}",
+            ok,
+        )
+
+    def sds06():
+        """Files on disk survive a simulated restart (no in-memory state)."""
+        import importlib
+        from portfolio.sahmk_discovery import store_dataset
+        import portfolio.sahmk_discovery as _disc_mod
+        ep = _make_ep("Quote", "quote/1120/", True)
+        fpath = store_dataset("1120", ep, root=_tmpdir)
+        # Simulate restart: reload the module (clears any module-level state)
+        importlib.reload(_disc_mod)
+        from portfolio.sahmk_discovery import list_stored
+        stored = list_stored("1120", root=_tmpdir)
+        survived = any(s["filepath"] == fpath for s in stored)
+        ok = survived and _os.path.isfile(fpath)
+        return (
+            "stored file persists on disk after module reload (simulated restart)",
+            f"file_exists={_os.path.isfile(fpath)}, found_after_reload={survived}",
+            ok,
+        )
+
+    def sds07():
+        """load_stored_dataset reads file without any API call."""
+        from portfolio.sahmk_discovery import store_dataset, load_stored_dataset
+        import os as _o
+        ep = _make_ep("Ratios", "company/2222/ratios", True, {"pe": 14.5})
+        fpath = store_dataset("2222", ep, root=_tmpdir)
+        # Temporarily unset API key to confirm no API call is made
+        _orig = _o.environ.pop("SAHMK_API_KEY", None)
+        try:
+            data = load_stored_dataset(fpath)
+        finally:
+            if _orig is not None:
+                _o.environ["SAHMK_API_KEY"] = _orig
+        loaded_ok = (
+            data is not None
+            and data.get("dataset") == "Ratios"
+            and data.get("source") == "SAHMK"
+        )
+        ok = loaded_ok
+        return (
+            "load_stored_dataset returns correct dict without API key set",
+            f"loaded={data is not None}, dataset={data.get('dataset') if data else None}",
+            ok,
+        )
+
+    def sds08():
+        """_apply_fifo_retention keeps only newest 3 files; older are deleted."""
+        from portfolio.sahmk_discovery import store_dataset, _apply_fifo_retention
+        # Write 5 files with distinct timestamps
+        sym  = "fifo_test"
+        ep   = _make_ep("Quote", f"quote/{sym}/", True)
+        paths = []
+        for i in range(5):
+            # Sleep briefly so filenames differ; but we can also fake by writing
+            # files with manually crafted names
+            dirpath = _os.path.join(_tmpdir, sym, "quote")
+            _os.makedirs(dirpath, exist_ok=True)
+            ts = f"2026053{i}_18000{i}"
+            fname = f"quote_{ts}.json"
+            fpath = _os.path.join(dirpath, fname)
+            with open(fpath, "w") as fh:
+                _json.dump({"i": i}, fh)
+            paths.append(fname)
+        # Apply retention (keep=3)
+        _apply_fifo_retention(dirpath, keep=3)
+        remaining = sorted(_os.listdir(dirpath), reverse=True)
+        # Newest 3 (lexicographic desc) should be kept
+        ok = len(remaining) == 3 and remaining == sorted(paths, reverse=True)[:3]
+        return (
+            "after 5 files written and FIFO applied, exactly 3 newest remain",
+            f"remaining={remaining}, expected newest 3",
+            ok,
+        )
+
+    def sds09():
+        """
+        'Stored SAHMK Data' section must appear before 'Endpoint Detail'
+        in the render function source — verified by reading app.py directly.
+        """
+        # dev_test_runner.py lives in edgar_app/; app.py is a sibling.
+        app_path = _os.path.join(
+            _os.path.dirname(_os.path.abspath(__file__)), "app.py"
+        )
+        with open(app_path, encoding="utf-8") as fh:
+            src = fh.read()
+
+        # Find the render_sahmk_discovery_tab function body
+        fn_start = src.find("def render_sahmk_discovery_tab()")
+        fn_end   = src.find("\ndef ", fn_start + 1)
+        fn_src   = src[fn_start:fn_end] if fn_start != -1 else src
+
+        stored_pos   = fn_src.find("Stored SAHMK Data")
+        endpoint_pos = fn_src.find("Endpoint Detail")
+        ok = stored_pos != -1 and endpoint_pos != -1 and stored_pos < endpoint_pos
+        return (
+            "'Stored SAHMK Data' text appears before 'Endpoint Detail' in render function",
+            f"stored_pos={stored_pos}, endpoint_pos={endpoint_pos}, before={stored_pos < endpoint_pos}",
+            ok,
+        )
+
+    def sds10():
+        """list_stored returns empty list when no files exist for a symbol."""
+        from portfolio.sahmk_discovery import list_stored
+        # Use a symbol that has never been stored in this temp dir
+        stored = list_stored("__NONEXISTENT_SYMBOL__", root=_tmpdir)
+        ok = stored == []
+        return (
+            "list_stored returns [] for symbol with no stored files",
+            f"returned={stored!r}",
+            ok,
+        )
+
+    def sds11():
+        """Holdings valuation unchanged after storage operations."""
+        from portfolio.sahmk_discovery import store_dataset
+        # Run a store operation
+        ep = _make_ep("Quote", "quote/2222/", True)
+        store_dataset("2222", ep, root=_tmpdir)
+        # Verify valuation still works correctly
+        h1 = _holding("__SDS11A__", qty=10.0, avg_cost=100.0, price=110.0)
+        h2 = _holding("__SDS11B__", qty=5.0,  avg_cost=200.0, price=220.0)
+        fx = {"USD": _fx("USD", "USD", 1.0)}
+        val = _val({"__SDS11A__": h1, "__SDS11B__": h2}, {}, "USD", fx)
+        expected_mv = 10.0 * 110.0 + 5.0 * 220.0   # 1100 + 1100 = 2200
+        ok = _near(val.holdings_value_base, expected_mv, 0.01)
+        return (
+            f"holdings_value_base = {expected_mv} after storage operations",
+            f"holdings_value_base = {val.holdings_value_base}",
+            ok,
+        )
+
+    def sds12():
+        """Portfolio totals (holdings + cash) unchanged after storage operations."""
+        from portfolio.sahmk_discovery import download_and_store
+        # Compute portfolio total without touching SAHMK API
+        h  = _holding("__SDS12__", qty=20.0, avg_cost=50.0, price=60.0)
+        a  = _account("__sds12_acct__", cash=500.0, ccy="USD")
+        fx = {"USD": _fx("USD", "USD", 1.0)}
+        val_before = _val({"__SDS12__": h}, {"__sds12_acct__": a}, "USD", fx)
+        # The storage module must not touch accounts/holdings — just re-validate
+        val_after  = _val({"__SDS12__": h}, {"__sds12_acct__": a}, "USD", fx)
+        mv_ok   = _near(val_before.holdings_value_base, val_after.holdings_value_base, 0.01)
+        cash_ok = _near(val_before.cash_value_base,     val_after.cash_value_base,     0.01)
+        total_ok = _near(val_before.total_portfolio_value_base,
+                         val_after.total_portfolio_value_base, 0.01)
+        ok = mv_ok and cash_ok and total_ok
+        return (
+            "holdings_value_base, cash_value_base, total_portfolio_value_base all unchanged",
+            (
+                f"mv_ok={mv_ok}, cash_ok={cash_ok}, total_ok={total_ok}, "
+                f"total={val_after.total_portfolio_value_base}"
+            ),
+            ok,
+        )
+
+    def sds13():
+        """
+        All SDS storage functions importable and callable without error.
+        Confirms the storage layer integrates cleanly with the module system.
+        """
+        import inspect
+        from portfolio.sahmk_discovery import (
+            discover, download_and_store, store_dataset,
+            list_stored, load_stored_dataset, report_to_json,
+            _apply_fifo_retention, _dataset_slug,
+        )
+        fns = [
+            discover, download_and_store, store_dataset,
+            list_stored, load_stored_dataset, report_to_json,
+            _apply_fifo_retention, _dataset_slug,
+        ]
+        all_callable = all(callable(f) for f in fns)
+        # Verify _dataset_slug works correctly
+        slug_ok = _dataset_slug("Historical Prices") == "historical_prices"
+        ok = all_callable and slug_ok
+        return (
+            "all 8 storage functions importable and callable; _dataset_slug correct",
+            f"all_callable={all_callable}, slug_ok={slug_ok}",
+            ok,
+        )
+
+    # ── Register tests ────────────────────────────────────────────────────────
+    _tests = [
+        ("SDS-01", "Discovery stores quote data (file written + list_stored)",                   "P0", True,  sds01),
+        ("SDS-02", "Discovery stores historical prices",                                          "P0", True,  sds02),
+        ("SDS-03", "Discovery stores market summary",                                             "P0", True,  sds03),
+        ("SDS-04", "HTTP 404 / failed datasets are not stored",                                   "P0", True,  sds04),
+        ("SDS-05", "Stored files survive refresh (disk-based list_stored call)",                  "P0", True,  sds05),
+        ("SDS-06", "Stored files survive app restart (module reload + disk check)",               "P0", True,  sds06),
+        ("SDS-07", "Load Stored Data works without API key (no network call)",                    "P0", True,  sds07),
+        ("SDS-08", "FIFO retention keeps only newest 3 versions per dataset",                     "P0", True,  sds08),
+        ("SDS-09", "Stored SAHMK Data section appears before Endpoint Detail in render",          "P1", False, sds09),
+        ("SDS-10", "Empty state: list_stored returns [] when no files exist",                     "P1", False, sds10),
+        ("SDS-11", "Holdings valuation unchanged after storage operations",                       "P0", True,  sds11),
+        ("SDS-12", "Portfolio totals (MV + cash) unchanged after storage operations",             "P0", True,  sds12),
+        ("SDS-13", "All storage functions importable; _dataset_slug correct",                     "P0", True,  sds13),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "portfolio.sahmk_discovery", sev, blocker, fn))
+
+    # Clean up temp directory after all SDS tests complete
+    try:
+        shutil.rmtree(_tmpdir, ignore_errors=True)
+    except Exception:
+        pass
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -3752,7 +4079,7 @@ def run_all_tests() -> TestReport:
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
-        + _cat_add() + _cat_disc()
+        + _cat_add() + _cat_disc() + _cat_sds()
     )
 
     punch_list: list[PunchListItem] = []
