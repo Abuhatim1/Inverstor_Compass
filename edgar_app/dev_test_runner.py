@@ -1412,6 +1412,62 @@ def _cat_k() -> list[TestResult]:
         CAT, "market_data_router", "P1", False, k02,
     ))
 
+    # ── K03: SAHMK-first regression — Saudi symbol variants all route to SAHMK ─
+    def k03():
+        """
+        Regression guard: every way a Saudi ticker can appear in a holding must
+        route to SAHMK first and never fall through to Yahoo Finance.
+
+        Variants tested (all should return provider=SAHMK, never yfinance):
+          A. ticker="2222.SE",  exchange_symbol=""      → derive "2222" from ticker
+          B. ticker="2222.SR",  exchange_symbol=""      → derive "2222" from ticker
+          C. ticker="2222.SE",  exchange_symbol="2222"  → explicit exchange_symbol
+          D. ticker="2222.SE",  exchange_symbol="2222.SE" → normalise suffix from exchange_symbol
+        """
+        from market_data_router import get_routed_price, PROVIDER_SAHMK, PROVIDER_YFINANCE
+        import sahmk_client
+        if not sahmk_client.is_configured():
+            return ("SAHMK configured", "SAHMK_API_KEY not set — skipped", False)
+
+        variants = [
+            ("2222.SE", "",        "A: ticker=2222.SE, no exchange_symbol"),
+            ("2222.SR", "",        "B: ticker=2222.SR, no exchange_symbol"),
+            ("2222.SE", "2222",    "C: ticker=2222.SE, exchange_symbol=2222"),
+            ("2222.SE", "2222.SE", "D: ticker=2222.SE, exchange_symbol=2222.SE"),
+        ]
+        failures = []
+        prices   = []
+        for ticker, exch, label in variants:
+            rp = get_routed_price(
+                ticker            = ticker,
+                exchange_symbol   = exch,
+                last_known_price  = 0.0,
+                last_known_source = "manual",
+            )
+            if rp.provider != PROVIDER_SAHMK:
+                failures.append(f"{label} → provider={rp.provider!r} (expected SAHMK)")
+            elif rp.price and rp.price > 0:
+                prices.append(rp.price)
+
+        if failures:
+            return (
+                "all variants provider=SAHMK",
+                "; ".join(failures),
+                False,
+            )
+        price_str = f"{prices[0]}" if prices else "unknown"
+        return (
+            "all variants provider=SAHMK",
+            f"all 4 variants routed to SAHMK, price={price_str} SAR",
+            True,
+        )
+
+    results.append(_run(
+        "K03",
+        "SAHMK-first regression: all Saudi ticker variants route to SAHMK, never Yahoo",
+        CAT, "market_data_router", "P0", True, k03,
+    ))
+
     return results
 
 
