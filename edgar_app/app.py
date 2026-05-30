@@ -6437,19 +6437,19 @@ def render_sahmk_discovery_tab() -> None:
                     f"{_row['size_bytes']:,} bytes"
                 )
             with _rc2:
+                if st.button("👁 View", key=f"view_{_row['filename']}", use_container_width=True):
+                    _toggle = f"_disc_open_{_row['filename']}"
+                    st.session_state[_toggle] = not st.session_state.get(_toggle, False)
+
+            # Inline JSON viewer — shown when toggled open
+            _toggle_key = f"_disc_open_{_row['filename']}"
+            if st.session_state.get(_toggle_key):
                 try:
-                    with open(_row["filepath"], "rb") as _fh:
-                        _fdata = _fh.read()
-                    st.download_button(
-                        "⬇️ JSON",
-                        data=_fdata,
-                        file_name=_row["filename"],
-                        mime="application/json",
-                        key=f"dl_{_row['filename']}",
-                        use_container_width=True,
-                    )
+                    with open(_row["filepath"], encoding="utf-8") as _fh:
+                        _raw_txt = _fh.read()
+                    st.code(_raw_txt, language="json")
                 except OSError:
-                    st.caption("—")
+                    st.warning("Could not read file.", icon="⚠️")
 
 
 # ── Main UI ───────────────────────────────────────────────────────────────────

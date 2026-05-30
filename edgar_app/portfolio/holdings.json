@@ -120,7 +120,7 @@
     "cik": "",
     "purchase_date": "2020-05-01",
     "notes": "",
-    "price_source": "SAHMK",
+    "price_source": "cached",
     "price_date": "2026-05-30",
     "default_account_id": "5cc295b7",
     "exchange_symbol": "2222"
