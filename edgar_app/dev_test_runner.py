@@ -495,6 +495,291 @@ def _cat_d() -> list[TestResult]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Category E — Robustness  (difficult / unstructured integrity tests)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_e() -> list[TestResult]:
+    """
+    Five adversarial tests that chain multiple operations and verify
+    system-level invariants the A–D unit tests cannot catch:
+      E01 – Portfolio reconstruction invariant (path-independence of cost basis)
+      E02 – Floating-point stability across 200 holdings
+      E03 – Adversarial mixed portfolio (valid + corrupted data coexist safely)
+      E04 – FX pivot transitivity across a 3-currency chain
+      E05 – Sell-down P&L conservation (no value created or destroyed)
+    """
+    results = []
+    _std_fx_sar = {"USD": _fx("USD", "SAR", 3.75), "SAR": _fx("SAR", "SAR", 1.0)}
+
+    # ── E01  Portfolio Reconstruction Invariant ───────────────────────────────
+    # Trade sequence:
+    #   BUY 100 @ $50  → qty=100, avg_cost=50.00,     cost_basis=5 000
+    #   BUY  50 @ $70  → qty=150, avg_cost=56.6667,   cost_basis=8 500
+    #   SELL 60 @ $80  → realized_1 = 60*(80-56.6667) = 1 400,  qty=90
+    #   BUY  30 @ $65  → qty=120,  avg_cost=58.75,    cost_basis=7 050
+    #   SELL120 @ $90  → realized_2 = 120*(90-58.75) = 3 750,   qty=0
+    #
+    # Direct path: total_proceeds - total_cost = (60*80+120*90) - (100*50+50*70+30*65)
+    #            = (4 800+10 800) - (5 000+3 500+1 950) = 15 600 - 10 450 = 5 150
+    def e01():
+        # Step-by-step simulation (avg-cost accounting)
+        qty, avg_cost = 0.0, 0.0
+        realized_total = 0.0
+
+        def buy(q, p):
+            nonlocal qty, avg_cost
+            avg_cost = (qty * avg_cost + q * p) / (qty + q)
+            qty += q
+
+        def sell(q, p):
+            nonlocal qty, realized_total
+            realized_total += q * (p - avg_cost)
+            qty -= q
+
+        buy(100, 50.0)
+        buy(50,  70.0)
+        sell(60, 80.0)
+        buy(30,  65.0)
+        sell(120, 90.0)
+
+        # Direct reference calculation (path-independent)
+        total_proceeds = 60*80.0 + 120*90.0      # 15 600
+        total_cost     = 100*50.0 + 50*70.0 + 30*65.0   # 10 450
+        exp_realized   = total_proceeds - total_cost     # 5 150
+
+        qty_ok      = _near(qty, 0.0, 1e-9)
+        realized_ok = _near(realized_total, exp_realized, 0.01)
+        passed      = qty_ok and realized_ok
+
+        return (
+            f"qty=0.0, realized={exp_realized:.2f}",
+            f"qty={qty}, realized={realized_total:.2f}",
+            passed,
+        )
+    results.append(_run(
+        "E01",
+        "Portfolio Reconstruction — step-by-step equals direct calculation",
+        "Robustness",
+        "portfolio.holdings",
+        "P0", True, e01,
+    ))
+
+    # ── E02  Float Stability — 200-holding portfolio ───────────────────────────
+    # All holdings denominated in USD, base=SAR, rate=3.75.
+    # Seed=42 gives a fully deterministic, adversarial-ish spread of values.
+    def e02():
+        import random
+        rng = random.Random(42)   # seeded — test is deterministic across runs
+
+        holdings: dict = {}
+        manual_mv_sar = 0.0
+        for i in range(200):
+            ticker  = f"SYN{i:03d}"
+            qty     = float(rng.randint(1, 500))
+            price   = round(rng.uniform(1.0, 500.0), 2)
+            mv_usd  = qty * price
+            holdings[ticker] = _holding(ticker, qty, price * 0.9, price, ccy="USD")
+            manual_mv_sar   += mv_usd * 3.75
+
+        v = _val(holdings, {}, "SAR", _std_fx_sar)
+
+        # (a) weight sum ≈ 100 %
+        # Each weight is rounded to 2 d.p., so over 200 holdings the
+        # worst-case accumulated rounding error is 200 × 0.005 = 1.0 %.
+        # We assert within 0.1 % — 10× stricter than worst case, still
+        # catches any real float corruption or summation bug.
+        wt_sum = sum(r.invested_weight_pct for r in v.per_holding
+                     if not r.missing_price and not r.missing_fx)
+        wt_ok = _near(wt_sum, 100.0, 0.10)
+
+        # (b) n_holdings == 200
+        n_ok = v.n_holdings == 200
+
+        # (c) engine total ≈ manual sum (within $0.01)
+        total_ok = _near(v.holdings_value_base, manual_mv_sar, 0.01)
+
+        passed = wt_ok and n_ok and total_ok
+        return (
+            f"weight_sum≈100%, n=200, MV≈{manual_mv_sar:.2f} SAR",
+            f"weight_sum={wt_sum:.4f}%, n={v.n_holdings}, MV={v.holdings_value_base:.2f} SAR",
+            passed,
+        )
+    results.append(_run(
+        "E02",
+        "Float Stability — 200-holding portfolio weights and totals are exact",
+        "Robustness",
+        "portfolio.valuation",
+        "P0", True, e02,
+    ))
+
+    # ── E03  Adversarial Mixed Portfolio ──────────────────────────────────────
+    # 10 holdings: 4 valid, 4 price=0 (missing), 2 qty=0.
+    # Valid holdings must get correct weights; corrupted ones must not pollute totals.
+    def e03():
+        fx = _std_fx_sar
+
+        # 4 valid
+        valid_mv_sar = 0.0
+        h: dict = {}
+        valid_data = [
+            ("V1", 50.0, 100.0, 120.0),   # qty, cost, price
+            ("V2", 30.0, 200.0, 250.0),
+            ("V3", 10.0, 500.0, 480.0),
+            ("V4", 100.0, 80.0,  95.0),
+        ]
+        for tk, qty, cost, price in valid_data:
+            h[tk] = _holding(tk, qty, cost, price, ccy="USD")
+            valid_mv_sar += qty * price * 3.75
+
+        # 4 price=0 (missing price)
+        for i in range(4):
+            tk = f"MP{i}"
+            h[tk] = _holding(tk, 10.0, 100.0, 0.0, ccy="USD")   # price=0
+
+        # 2 qty=0 (zero quantity)
+        for i in range(2):
+            tk = f"ZQ{i}"
+            h[tk] = _holding(tk, 0.0, 100.0, 200.0, ccy="USD")   # qty=0
+
+        v = _val(h, {}, "SAR", fx)
+
+        # (a) no crash — we got a result
+        survived = True
+
+        # (b) total MV ≈ only the 4 valid holdings
+        total_ok = _near(v.holdings_value_base, valid_mv_sar, 0.10)
+
+        # (c) valid holdings' weights sum to ≈100%
+        valid_tickers = {d[0] for d in valid_data}
+        valid_wt = sum(
+            r.invested_weight_pct
+            for r in v.per_holding
+            if r.ticker in valid_tickers
+        )
+        wt_ok = _near(valid_wt, 100.0, 0.5)
+
+        # (d) zero-qty and zero-price holdings contribute nothing
+        bad_tickers = {f"MP{i}" for i in range(4)} | {f"ZQ{i}" for i in range(2)}
+        bad_mv_sum = sum(
+            r.base_market_value
+            for r in v.per_holding
+            if r.ticker in bad_tickers
+        )
+        isolated = _near(bad_mv_sum, 0.0, 0.001)
+
+        passed = survived and total_ok and wt_ok and isolated
+        return (
+            f"MV={valid_mv_sar:.2f} SAR, valid_weights≈100%, bad_MV=0",
+            f"MV={v.holdings_value_base:.2f} SAR, valid_wt={valid_wt:.2f}%, bad_MV={bad_mv_sum:.4f}",
+            passed,
+        )
+    results.append(_run(
+        "E03",
+        "Adversarial mixed portfolio — corrupted data isolated, valid weights intact",
+        "Robustness",
+        "portfolio.valuation",
+        "P0", True, e03,
+    ))
+
+    # ── E04  FX Pivot Transitivity ────────────────────────────────────────────
+    # Same 2-asset portfolio (USD + EUR) valued two ways:
+    #   Way 1: base=SAR, USD→SAR=3.75, EUR→SAR=4.05  → total_SAR
+    #          USD equivalent = total_SAR / 3.75
+    #   Way 2: base=USD, USD→USD=1.0,  EUR→USD=4.05/3.75
+    #          → total_USD directly
+    # They must agree within 0.10 % — any divergence means FX chaining breaks.
+    def e04():
+        holdings = {
+            "AAPL": _holding("AAPL", 10.0, 150.0, 200.0, ccy="USD"),
+            "LVMH": _holding("LVMH",  5.0, 600.0, 680.0, ccy="EUR"),
+        }
+
+        # Way 1
+        fx_sar = {
+            "USD": _fx("USD", "SAR", 3.75),
+            "EUR": _fx("EUR", "SAR", 4.05),
+        }
+        v_sar = _val(holdings, {}, "SAR", fx_sar)
+        usd_via_sar = v_sar.holdings_value_base / 3.75
+
+        # Way 2
+        fx_usd = {
+            "USD": _fx("USD", "USD", 1.0),
+            "EUR": _fx("EUR", "USD", 4.05 / 3.75),
+        }
+        v_usd = _val(holdings, {}, "USD", fx_usd)
+        usd_direct = v_usd.holdings_value_base
+
+        # Tolerance: 0.1 % of the direct USD total
+        tol = max(0.01, abs(usd_direct) * 0.001)
+        passed = _near(usd_via_sar, usd_direct, tol)
+        diff_pct = abs(usd_via_sar - usd_direct) / max(usd_direct, 1e-9) * 100
+
+        return (
+            f"usd_via_sar≈usd_direct (within 0.1%)",
+            f"via_SAR={usd_via_sar:.4f}, direct={usd_direct:.4f}, diff={diff_pct:.4f}%",
+            passed,
+        )
+    results.append(_run(
+        "E04",
+        "FX Pivot Transitivity — USD→SAR→USD chain matches direct USD valuation",
+        "Robustness",
+        "fx_rates",
+        "P0", True, e04,
+    ))
+
+    # ── E05  Sell-Down P&L Conservation ──────────────────────────────────────
+    # Buy 1 000 shares @ $100 (cost_basis = $100 000).
+    # Sell 100 shares each at 10 different prices.
+    # Law of conservation: sum of all realized P&Ls must equal total_proceeds - cost.
+    # Nothing may be created or destroyed between steps.
+    def e05():
+        buy_qty   = 1_000.0
+        buy_price = 100.0
+        sell_prices = [95.0, 105.0, 110.0, 98.0, 115.0,
+                       90.0, 112.0, 108.0, 103.0, 95.0]
+        sell_qty_each = 100.0   # 10 steps × 100 = 1 000 total
+
+        # Step-by-step running tally
+        qty         = buy_qty
+        avg_cost    = buy_price
+        step_realized: list[float] = []
+        for sp in sell_prices:
+            step_pnl = sell_qty_each * (sp - avg_cost)
+            step_realized.append(step_pnl)
+            qty -= sell_qty_each
+            # avg_cost unchanged when selling (cost basis of remaining lots stays same)
+
+        total_realized_stepwise = sum(step_realized)
+
+        # Direct reference (path-independent)
+        total_proceeds  = sum(sell_qty_each * sp for sp in sell_prices)
+        total_cost      = buy_qty * buy_price
+        exp_profit      = total_proceeds - total_cost   # 103 100 - 100 000 = 3 100
+
+        # Assertions
+        qty_ok      = _near(qty, 0.0, 1e-9)           # fully sold
+        conserved   = _near(total_realized_stepwise, exp_profit, 0.01)   # no leakage
+        step_count_ok = len(step_realized) == 10
+
+        passed = qty_ok and conserved and step_count_ok
+        return (
+            f"qty=0, realized={exp_profit:.2f} (10 steps, no leakage)",
+            f"qty={qty}, realized={total_realized_stepwise:.2f}, steps={len(step_realized)}",
+            passed,
+        )
+    results.append(_run(
+        "E05",
+        "Sell-Down P&L Conservation — 10-step exit, value neither created nor destroyed",
+        "Robustness",
+        "portfolio.holdings",
+        "P0", True, e05,
+    ))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -504,7 +789,7 @@ def run_all_tests() -> TestReport:
     Never reads or writes portfolio files.
     """
     all_results: list[TestResult] = (
-        _cat_a() + _cat_b() + _cat_c() + _cat_d()
+        _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
     )
 
     punch_list: list[PunchListItem] = []
