@@ -2128,7 +2128,6 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     import pandas as pd
     from datetime import datetime
 
-    st.divider()
     st.subheader("📊 Portfolio Allocation")
 
     # ── Build allocation rows from valuation engine ───────────────────────────
