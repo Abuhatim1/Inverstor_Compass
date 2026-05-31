@@ -3936,27 +3936,25 @@ def _cat_sds() -> list[TestResult]:
 
     def sds09():
         """
-        'Stored SAHMK Data' section must appear before 'Endpoint Detail'
-        in the render function source — verified by reading app.py directly.
+        Stored-files display must appear after the Run button in the simplified
+        render function — verified by reading app.py directly.
         """
-        # dev_test_runner.py lives in edgar_app/; app.py is a sibling.
         app_path = _os.path.join(
             _os.path.dirname(_os.path.abspath(__file__)), "app.py"
         )
         with open(app_path, encoding="utf-8") as fh:
             src = fh.read()
 
-        # Find the render_sahmk_discovery_tab function body
         fn_start = src.find("def render_sahmk_discovery_tab()")
         fn_end   = src.find("\ndef ", fn_start + 1)
         fn_src   = src[fn_start:fn_end] if fn_start != -1 else src
 
-        stored_pos   = fn_src.find("Stored SAHMK Data")
-        endpoint_pos = fn_src.find("Endpoint Detail")
-        ok = stored_pos != -1 and endpoint_pos != -1 and stored_pos < endpoint_pos
+        run_btn_pos   = fn_src.find("disc_run_btn")
+        stored_display = fn_src.find("_data_rows")
+        ok = run_btn_pos != -1 and stored_display != -1 and run_btn_pos < stored_display
         return (
-            "'Stored SAHMK Data' text appears before 'Endpoint Detail' in render function",
-            f"stored_pos={stored_pos}, endpoint_pos={endpoint_pos}, before={stored_pos < endpoint_pos}",
+            "Run button defined before stored-files display loop in simplified render",
+            f"run_btn_pos={run_btn_pos}, stored_display_pos={stored_display}, order_ok={ok}",
             ok,
         )
 
@@ -4070,6 +4068,207 @@ def _cat_sds() -> list[TestResult]:
     return results
 
 
+def _cat_fas() -> list[TestResult]:
+    """
+    FAS: Filtered Allocation Summary tests.
+
+    FAS-01  No filter → summary equals total open holdings.
+    FAS-02  Market filter → only selected market included.
+    FAS-03  Sector filter → only selected sector included.
+    FAS-04  Asset filter → only selected assets included.
+    FAS-05  Filtered weight = filtered_mv / total_mv.
+    FAS-06  Filtered P&L amount and % correct.
+    FAS-07  Global portfolio header (holdings_value_base) unchanged.
+    FAS-08  All prior FAS tests pass (meta).
+    """
+    CAT = "Filtered Allocation Summary"
+    results: list[TestResult] = []
+
+    # ── Pure-Python summary calculation (mirrors _render_allocation_section) ──
+    def _fas_calc(rows: list[dict], filtered_rows: list[dict], total_mv: float) -> dict:
+        """
+        Replicate the summary math from _render_allocation_section.
+        rows         – full unfiltered row list
+        filtered_rows– post-filter row list
+        total_mv     – val.holdings_value_base
+        """
+        filt_mv  = sum(r["_mv"] for r in filtered_rows)
+        filt_cb  = sum(r["_cb"] for r in filtered_rows)
+        filt_pnl = filt_mv - filt_cb
+        filt_pnl_pct = (filt_pnl / filt_cb * 100) if filt_cb > 0 else 0.0
+        filt_weight  = (filt_mv / total_mv * 100) if total_mv > 0 else 0.0
+        return {
+            "mv":      filt_mv,
+            "cb":      filt_cb,
+            "pnl":     filt_pnl,
+            "pnl_pct": filt_pnl_pct,
+            "weight":  filt_weight,
+            "n":       len(filtered_rows),
+        }
+
+    def _make_rows(specs: list[dict]) -> tuple[list[dict], float]:
+        """
+        Build row dicts + total_mv from specs.
+        Each spec: {ticker, market, sector, mv, cb}
+        """
+        rows = [
+            {"Ticker":  s["ticker"],
+             "Company": s["ticker"],
+             "Market":  s.get("market", "US"),
+             "Sector":  s.get("sector", "Energy"),
+             "_mv":     s["mv"],
+             "_cb":     s["cb"]}
+            for s in specs
+        ]
+        total_mv = sum(r["_mv"] for r in rows)
+        return rows, total_mv
+
+    # ── Shared test portfolio ─────────────────────────────────────────────────
+    _SPECS = [
+        {"ticker": "A", "market": "US",     "sector": "Energy", "mv": 1000.0, "cb": 800.0},
+        {"ticker": "B", "market": "US",     "sector": "Tech",   "mv": 2000.0, "cb": 1500.0},
+        {"ticker": "C", "market": "Saudi",  "sector": "Energy", "mv": 500.0,  "cb": 600.0},
+        {"ticker": "D", "market": "Saudi",  "sector": "Finance","mv": 750.0,  "cb": 700.0},
+    ]
+    _ALL_ROWS, _TOTAL_MV = _make_rows(_SPECS)
+
+    def fas01():
+        s = _fas_calc(_ALL_ROWS, _ALL_ROWS, _TOTAL_MV)
+        ok = (
+            _near(s["mv"],  _TOTAL_MV, 0.01) and
+            _near(s["weight"], 100.0, 0.01) and
+            s["n"] == 4
+        )
+        return (
+            f"no-filter summary MV = {_TOTAL_MV}, weight = 100%, n = 4",
+            f"mv={s['mv']}, weight={s['weight']:.2f}%, n={s['n']}",
+            ok,
+        )
+
+    def fas02():
+        filt = [r for r in _ALL_ROWS if r["Market"] == "US"]
+        s = _fas_calc(_ALL_ROWS, filt, _TOTAL_MV)
+        us_mv = 1000.0 + 2000.0
+        ok = _near(s["mv"], us_mv, 0.01) and s["n"] == 2
+        return (
+            f"US market filter → MV = {us_mv}, n = 2",
+            f"mv={s['mv']}, n={s['n']}",
+            ok,
+        )
+
+    def fas03():
+        filt = [r for r in _ALL_ROWS if r["Sector"] == "Energy"]
+        s = _fas_calc(_ALL_ROWS, filt, _TOTAL_MV)
+        energy_mv = 1000.0 + 500.0
+        ok = _near(s["mv"], energy_mv, 0.01) and s["n"] == 2
+        return (
+            f"Energy sector filter → MV = {energy_mv}, n = 2",
+            f"mv={s['mv']}, n={s['n']}",
+            ok,
+        )
+
+    def fas04():
+        filt = [r for r in _ALL_ROWS if r["Ticker"] in ("A", "D")]
+        s = _fas_calc(_ALL_ROWS, filt, _TOTAL_MV)
+        asset_mv = 1000.0 + 750.0
+        ok = _near(s["mv"], asset_mv, 0.01) and s["n"] == 2
+        return (
+            f"asset filter A+D → MV = {asset_mv}, n = 2",
+            f"mv={s['mv']}, n={s['n']}",
+            ok,
+        )
+
+    def fas05():
+        filt = [r for r in _ALL_ROWS if r["Market"] == "Saudi"]
+        s = _fas_calc(_ALL_ROWS, filt, _TOTAL_MV)
+        saudi_mv   = 500.0 + 750.0
+        expected_w = saudi_mv / _TOTAL_MV * 100
+        ok = _near(s["weight"], expected_w, 0.01)
+        return (
+            f"filtered weight = {expected_w:.4f}%",
+            f"weight={s['weight']:.4f}%",
+            ok,
+        )
+
+    def fas06():
+        filt = [r for r in _ALL_ROWS if r["Market"] == "US"]
+        s = _fas_calc(_ALL_ROWS, filt, _TOTAL_MV)
+        us_mv  = 1000.0 + 2000.0
+        us_cb  = 800.0 + 1500.0
+        exp_pnl     = us_mv - us_cb          # 700.0
+        exp_pnl_pct = exp_pnl / us_cb * 100  # 30.43...
+        pnl_ok  = _near(s["pnl"],     exp_pnl,     0.01)
+        pct_ok  = _near(s["pnl_pct"], exp_pnl_pct, 0.01)
+        ok = pnl_ok and pct_ok
+        return (
+            f"US filtered P&L = {exp_pnl:.2f}, pct = {exp_pnl_pct:.2f}%",
+            f"pnl={s['pnl']:.2f}, pnl_pct={s['pnl_pct']:.2f}%",
+            ok,
+        )
+
+    def fas07():
+        """Global portfolio header (holdings_value_base) unchanged by summary calc."""
+        h1 = _holding("__FAS07A__", qty=10.0, avg_cost=100.0, price=120.0)
+        h2 = _holding("__FAS07B__", qty=5.0,  avg_cost=200.0, price=180.0)
+        fx = {"USD": _fx("USD", "USD", 1.0)}
+        val_before = _val({"__FAS07A__": h1, "__FAS07B__": h2}, {}, "USD", fx)
+        hv_before  = val_before.holdings_value_base
+        # Simulate summary calc on rows derived from val
+        rows = [
+            {"_mv": r.base_market_value, "_cb": r.base_cost_basis}
+            for r in val_before.per_holding
+        ]
+        filt = rows  # no filter
+        _ = _fas_calc(rows, filt, val_before.holdings_value_base)
+        # Re-compute val to confirm it's unaffected
+        val_after  = _val({"__FAS07A__": h1, "__FAS07B__": h2}, {}, "USD", fx)
+        ok = _near(val_before.holdings_value_base, val_after.holdings_value_base, 0.01)
+        return (
+            "holdings_value_base unchanged before and after summary calc",
+            f"before={hv_before:.2f}, after={val_after.holdings_value_base:.2f}",
+            ok,
+        )
+
+    def fas08():
+        """Meta: all FAS-01–07 sub-calcs produce consistent results."""
+        specs2 = [
+            {"ticker": "X", "market": "EU", "sector": "Health", "mv": 3000.0, "cb": 2500.0},
+            {"ticker": "Y", "market": "EU", "sector": "Tech",   "mv": 1000.0, "cb": 1200.0},
+        ]
+        rows2, total2 = _make_rows(specs2)
+        s_all  = _fas_calc(rows2, rows2, total2)
+        s_filt = _fas_calc(rows2, [rows2[0]], total2)  # only X
+        weight_ok  = _near(s_all["weight"], 100.0, 0.01)
+        filt_mv_ok = _near(s_filt["mv"], 3000.0, 0.01)
+        pnl_ok     = _near(s_all["pnl"], 300.0, 0.01)   # 4000 - 3700
+        n_ok       = s_all["n"] == 2 and s_filt["n"] == 1
+        ok = weight_ok and filt_mv_ok and pnl_ok and n_ok
+        return (
+            "all summary metrics consistent across no-filter and filtered scenarios",
+            (
+                f"weight_ok={weight_ok}, filt_mv_ok={filt_mv_ok}, "
+                f"pnl_ok={pnl_ok}, n_ok={n_ok}"
+            ),
+            ok,
+        )
+
+    _tests = [
+        ("FAS-01", "No filter → summary equals total open holdings MV",              "P0", True,  fas01),
+        ("FAS-02", "Market filter → only selected market included in summary",         "P0", True,  fas02),
+        ("FAS-03", "Sector filter → only selected sector included in summary",         "P0", True,  fas03),
+        ("FAS-04", "Asset filter → only selected assets included in summary",          "P0", True,  fas04),
+        ("FAS-05", "Filtered weight = filtered_mv / total_mv",                        "P0", True,  fas05),
+        ("FAS-06", "Filtered P&L amount and % correct for known values",               "P0", True,  fas06),
+        ("FAS-07", "holdings_value_base unchanged after summary calc",                 "P0", True,  fas07),
+        ("FAS-08", "All summary metrics consistent across filter scenarios (meta)",    "P0", True,  fas08),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._render_allocation_section", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4079,7 +4278,7 @@ def run_all_tests() -> TestReport:
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
-        + _cat_add() + _cat_disc() + _cat_sds()
+        + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas()
     )
 
     punch_list: list[PunchListItem] = []

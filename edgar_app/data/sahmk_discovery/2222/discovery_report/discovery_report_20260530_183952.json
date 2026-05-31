@@ -2,7 +2,7 @@
   "symbol": "2222",
   "source": "SAHMK",
   "endpoint": "discovery/report",
-  "fetched_at": "2026-05-30T18:07:54.279057",
+  "fetched_at": "2026-05-30T18:39:52.269587",
   "dataset": "Discovery Report",
   "status": "success",
   "available_fields": [
@@ -18,32 +18,33 @@
   "raw_response": {
     "symbol": "2222",
     "source": "SAHMK",
-    "discovered_at": "2026-05-30T18:07:48.259491",
+    "discovered_at": "2026-05-30T18:39:48.018006",
     "api_configured": true,
-    "available_datasets": [],
-    "unavailable_datasets": [
+    "available_datasets": [
       "Quote",
       "Historical Prices",
+      "Market Summary"
+    ],
+    "unavailable_datasets": [
       "Company Info",
       "Financials",
       "Ratios",
       "Dividends",
-      "Market Summary",
       "Market Events"
     ],
     "summary_table": [
       {
         "dataset": "Quote",
-        "status": "❌ Not Available",
-        "fields": 0,
-        "records": "—",
+        "status": "✅ Available",
+        "fields": 17,
+        "records": 1,
         "http": 200
       },
       {
         "dataset": "Historical Prices",
-        "status": "❌ Not Available",
-        "fields": 0,
-        "records": "—",
+        "status": "✅ Available",
+        "fields": 11,
+        "records": 1,
         "http": 200
       },
       {
@@ -76,9 +77,9 @@
       },
       {
         "dataset": "Market Summary",
-        "status": "❌ Not Available",
-        "fields": 0,
-        "records": "—",
+        "status": "✅ Available",
+        "fields": 11,
+        "records": 1,
         "http": 200
       },
       {

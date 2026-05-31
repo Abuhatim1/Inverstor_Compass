@@ -1,0 +1,82 @@
+Add Filtered Allocation Summary inside Holdings Portfolio Allocation section.
+
+Before any change:
+Create checkpoint:
+BEFORE_FILTERED_ALLOCATION_SUMMARY
+
+Scope:
+Holdings page only.
+Do not modify valuation engine.
+Do not modify FIFO.
+Do not modify transactions.
+Do not modify accounts.
+Do not modify Holdings price refresh.
+Do not modify portfolio header logic.
+
+Problem:
+Portfolio Allocation filters currently change the chart and filtered asset table only.
+They do not show filtered totals such as market value, cost, and P&L.
+
+Required:
+When user applies filters in Portfolio Allocation section, calculate and display a compact summary for the currently filtered assets only.
+
+Show these metrics:
+
+1. Filtered Market Value
+- Sum of market value of filtered open holdings
+- In selected base currency
+
+2. Filtered Cost
+- Sum of cost basis of filtered open holdings
+- In selected base currency
+
+3. Filtered Unrealized P&L
+- Amount
+- Percentage
+
+4. Filtered Weight
+- Filtered market value / total portfolio open holdings market value
+
+5. Number of holdings included
+
+Important:
+- Use the same valuation data already used by Holdings table.
+- Do not duplicate valuation logic.
+- Do not recalculate prices separately.
+- Do not call yfinance or SAHMK.
+- Do not affect global portfolio header.
+
+UI placement:
+Place this summary directly below the Portfolio Allocation filters and above the chart.
+
+Mobile layout:
+Use compact KPI cards, 2 columns if possible:
+- Market Value
+- Cost
+- P&L
+- Weight
+
+Behavior:
+- If no filter is applied, summary equals all open holdings.
+- If filters are applied, summary reflects only filtered holdings.
+- If zero holdings match, show:
+  "No holdings match current filters."
+
+Filtered table:
+Keep the existing filtered table below the chart.
+
+Export:
+When exporting allocation table, include the filtered summary at the top of the exported CSV if practical. If not practical, leave export unchanged for now.
+
+Tests:
+FAS-01 No filter summary equals total open holdings.
+FAS-02 Market filter summary includes only selected market.
+FAS-03 Sector filter summary includes only selected sector.
+FAS-04 Asset filter summary includes only selected assets.
+FAS-05 Filtered weight equals filtered MV / total MV.
+FAS-06 Filtered P&L amount and % are correct.
+FAS-07 Global portfolio header remains unchanged.
+FAS-08 Full suite PASS.
+
+Expected:
+Filtered Allocation Summary appears in Holdings page and updates dynamically with filters, without changing valuation engine or portfolio totals.

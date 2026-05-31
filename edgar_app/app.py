@@ -2118,6 +2118,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             "Sector":  getattr(_h, "sector",  "Other"),
             "CCY":     _r.local_currency,
             "_mv":     _r.base_market_value,
+            "_cb":     _r.base_cost_basis,
             "_wt":     _r.invested_weight_pct,
         })
 
@@ -2198,6 +2199,43 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     if _filt.empty:
         st.info("No holdings match the selected filters. Use the Reset button to clear.", icon="🔍")
         return
+
+    # ── Filtered Allocation Summary ───────────────────────────────────────────
+    _fas_mv       = _filt["_mv"].sum()
+    _fas_cb       = _filt["_cb"].sum()
+    _fas_pnl      = _fas_mv - _fas_cb
+    _fas_pnl_pct  = (_fas_pnl / _fas_cb * 100) if _fas_cb > 0 else 0.0
+    _total_mv_all = getattr(val, "holdings_value_base", _fas_mv)
+    _fas_weight   = (_fas_mv / _total_mv_all * 100) if _total_mv_all > 0 else 0.0
+    _fas_n        = len(_filt)
+    _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
+    _pnl_sign     = "+" if _fas_pnl >= 0 else ""
+
+    with st.container():
+        _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
+        _sm1.metric(
+            f"Market Value ({base_ccy})",
+            f"{_fas_mv:,.0f}",
+        )
+        _sm2.metric(
+            f"Cost ({base_ccy})",
+            f"{_fas_cb:,.0f}",
+        )
+        _sm3.metric(
+            f"Unrealized P&L ({base_ccy})",
+            f"{_pnl_sign}{_fas_pnl:,.0f}",
+            delta=f"{_pnl_sign}{_fas_pnl_pct:.1f}%",
+            delta_color=_pnl_color,
+        )
+        _sm4.metric(
+            "Weight",
+            f"{_fas_weight:.1f}%",
+            help="Filtered MV ÷ total open holdings MV",
+        )
+        _sm5.metric(
+            "Holdings",
+            str(_fas_n),
+        )
 
     # ── Aggregate for pie ─────────────────────────────────────────────────────
     _agg = (
