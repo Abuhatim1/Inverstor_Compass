@@ -1,0 +1,181 @@
+Before implementing any code:
+
+1. Review and proofread this request against the current codebase.
+2. Do not execute immediately.
+3. First provide a short implementation assessment covering:
+   - Whether the request is architecturally sound
+   - Whether it is MVP-appropriate or too early
+   - Whether it affects data integrity
+   - Whether it affects valuation, accounts, transactions, FIFO, cash balances, or price routing
+   - Whether it may duplicate existing logic
+   - Whether there is a simpler or safer implementation path
+   - Which files/functions will likely be touched
+   - What regression tests are needed
+4. If you identify a better approach, recommend it before coding.
+5. If the request introduces unnecessary complexity, propose a simpler MVP-safe alternative.
+6. Wait for my explicit approval before implementation.
+7. After approval, create checkpoint:
+   BEFORE_MOVE_ALLOCATION_TO_ALLOCATION_TAB
+8. After implementation, run relevant tests and full regression suite.
+9. Report:
+   - What changed
+   - What files were touched
+   - What was intentionally not changed
+   - Test results
+   - Any remaining risks
+
+====================================================
+TASK
+====================================================
+
+Move Portfolio Allocation from Holdings into a dedicated Allocation tab.
+
+Objective:
+Separate operational holdings management from analytical allocation analysis.
+
+Holdings should be an operational page.
+Allocation should be an analytical page.
+
+====================================================
+DO NOT MODIFY
+====================================================
+
+Do not modify:
+- valuation engine calculations
+- FIFO accounting
+- transaction engine
+- accounts engine
+- cash balance logic
+- holdings price refresh
+- market_data_router
+- SAHMK routing
+- SAHMK discovery
+- performance engine
+- test runner history storage
+- portfolio header logic
+
+====================================================
+REQUIRED CHANGE
+====================================================
+
+1. Create a new main tab:
+
+📊 Allocation
+
+2. Move the entire existing Portfolio Allocation section from Holdings into the new Allocation tab.
+
+Move as-is:
+- Chart view selector
+- Filters
+- Filtered Allocation Summary
+- Allocation chart
+- Export Table CSV button
+- Filtered holdings table
+
+3. Remove Portfolio Allocation from Holdings page completely.
+
+4. Holdings page should remain focused only on:
+- holdings table
+- row selection/action bar
+- refresh prices
+- download CSV
+- bulk upload
+- add new position
+- market open/closed status if already existing
+
+====================================================
+VALUATION DATA RULE
+====================================================
+
+Allocation tab must use the same centralized valuation data already used by Holdings.
+
+Preferred approach:
+Create a small shared cached valuation loader, for example:
+
+@st.cache_data(ttl=30)
+def _load_valuation_bundle(base_ccy: str):
+    # load holdings
+    # load accounts
+    # load FX rates
+    # calculate portfolio valuation once
+    # return holdings, accounts, valuation, fx_rates
+
+Both render_holdings_tab() and render_allocation_tab() should use this shared valuation bundle.
+
+Purpose:
+- Avoid duplicated valuation calls
+- Ensure Holdings and Allocation see identical valuation data
+- Avoid silent mismatch between tabs
+- Reduce unnecessary file I/O and FX lookups
+
+Important:
+Do not change the valuation formula itself.
+Only centralize loading/calling if safe.
+
+If shared cached loader introduces risk, explain first and wait for approval.
+
+====================================================
+ALLOCATION TAB RULES
+====================================================
+
+Allocation tab must:
+- respect selected base currency
+- use existing allocation logic
+- use pre-computed valuation data
+- not call yfinance
+- not call SAHMK
+- not refresh prices
+- not update holdings
+- not update transactions
+- not update accounts
+- not mutate portfolio state
+
+Keep current allocation behavior unchanged except for location.
+
+====================================================
+HOLDINGS PAGE RULES
+====================================================
+
+Holdings page must not render:
+- Portfolio Allocation header
+- Chart view selector
+- Allocation filters
+- Allocation chart
+- Allocation summary
+- Allocation filtered table
+
+Holdings should remain operational only.
+
+====================================================
+TESTS
+====================================================
+
+Add or update regression tests:
+
+ALLOC-01 Allocation tab exists.
+ALLOC-02 Holdings page no longer renders Portfolio Allocation.
+ALLOC-03 Allocation tab renders chart view selector.
+ALLOC-04 Allocation tab renders filters.
+ALLOC-05 Allocation tab renders filtered summary.
+ALLOC-06 Allocation tab renders chart.
+ALLOC-07 Allocation tab renders filtered table.
+ALLOC-08 Allocation values match centralized valuation data.
+ALLOC-09 Base currency switch updates Allocation values.
+ALLOC-10 Holdings valuation unchanged.
+ALLOC-11 Full suite PASS.
+
+If shared cached valuation loader is implemented, add:
+
+ALLOC-12 Holdings and Allocation use same valuation bundle.
+ALLOC-13 No duplicate independent valuation logic is introduced.
+
+====================================================
+SUCCESS CRITERIA
+====================================================
+
+Expected result:
+- Holdings becomes operational only.
+- Allocation becomes a dedicated analytical tab.
+- Allocation uses the same valuation source as Holdings.
+- No accounting, valuation, price refresh, transaction, cash, or portfolio total behavior changes.
+- Full regression suite passes.
