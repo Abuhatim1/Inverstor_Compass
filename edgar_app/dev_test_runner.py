@@ -4501,56 +4501,59 @@ def _cat_alloc_qp() -> list[TestResult]:
 
     def qp01():
         ok = (
-            "alloc_qp_saudi" in _section_fn and
+            "alloc_qp_radio" in _section_fn and
             '["Saudi"]' in _section_fn and
             "alloc_ms_market" in _section_fn
         )
         return (
-            "Saudi preset button sets alloc_ms_market = ['Saudi']",
+            "Saudi preset (radio) sets alloc_ms_market = ['Saudi']",
             f"found={ok}",
             ok,
         )
 
     def qp02():
         ok = (
-            "alloc_qp_us" in _section_fn and
+            "alloc_qp_radio" in _section_fn and
             '["US"]' in _section_fn and
             "alloc_ms_market" in _section_fn
         )
         return (
-            "US preset button sets alloc_ms_market = ['US']",
+            "US preset (radio) sets alloc_ms_market = ['US']",
             f"found={ok}",
             ok,
         )
 
     def qp03():
         ok = (
-            "alloc_qp_all" in _section_fn and
+            "alloc_qp_radio" in _section_fn and
             'pop("alloc_ms_market"' in _section_fn
         )
         return (
-            "All preset button pops alloc_ms_market",
+            "All preset (radio) pops alloc_ms_market",
             f"found={ok}",
             ok,
         )
 
     def qp04():
-        chart_view_pos  = _section_fn.find("alloc_chart_view")
-        preset_pos      = _section_fn.find("alloc_qp_saudi")
+        chart_view_pos = _section_fn.find("alloc_chart_view")
+        preset_pos     = _section_fn.find("alloc_qp_radio")
         ok = preset_pos != -1 and chart_view_pos != -1 and preset_pos < chart_view_pos
         return (
-            "Preset buttons appear before Chart view selector in source order",
+            "Preset radio appears before Chart view selector in source order",
             f"preset_pos={preset_pos}, chart_view_pos={chart_view_pos}, before={ok}",
             ok,
         )
 
     def qp05():
-        import re
-        rerun_count = len(re.findall(r"alloc_qp_(?:saudi|us|all).*?st\.rerun\(\)",
-                                     _section_fn, re.DOTALL))
+        preset_start = _section_fn.find("alloc_qp_radio")
+        preset_end   = _section_fn.find("alloc_chart_view")
+        if preset_start == -1 or preset_end == -1:
+            return ("Preset block found for rerun check", "block not found", False)
+        preset_block = _section_fn[preset_start:preset_end]
+        rerun_count  = preset_block.count("st.rerun()")
         ok = rerun_count >= 3
         return (
-            "Each of the 3 preset buttons calls st.rerun() after state mutation",
+            "Preset radio block calls st.rerun() for each of the 3 options",
             f"rerun_calls_found={rerun_count}",
             ok,
         )
@@ -4560,7 +4563,7 @@ def _cat_alloc_qp() -> list[TestResult]:
             "upsert_holding(", "delete_holding(", "update_current_price(",
             "record_transaction(", "upsert_account(", "update_account_cash(",
         ]
-        preset_block_start = _section_fn.find("alloc_qp_saudi")
+        preset_block_start = _section_fn.find("alloc_qp_radio")
         preset_block_end   = _section_fn.find("alloc_chart_view")
         if preset_block_start == -1 or preset_block_end == -1:
             return ("Preset block found for mutation check", "block not found", False)
@@ -4614,11 +4617,11 @@ def _cat_alloc_qp() -> list[TestResult]:
         )
 
     _tests = [
-        ("ALLOC-QP-01", "Saudi preset button sets alloc_ms_market = ['Saudi']",             "P0", True,  qp01),
-        ("ALLOC-QP-02", "US preset button sets alloc_ms_market = ['US']",                   "P0", True,  qp02),
-        ("ALLOC-QP-03", "All preset button pops alloc_ms_market",                           "P0", True,  qp03),
-        ("ALLOC-QP-04", "Preset buttons placed above Chart view selector",                  "P0", True,  qp04),
-        ("ALLOC-QP-05", "Each preset button calls st.rerun() after state mutation",         "P0", True,  qp05),
+        ("ALLOC-QP-01", "Saudi preset (radio) sets alloc_ms_market = ['Saudi']",            "P0", True,  qp01),
+        ("ALLOC-QP-02", "US preset (radio) sets alloc_ms_market = ['US']",                  "P0", True,  qp02),
+        ("ALLOC-QP-03", "All preset (radio) pops alloc_ms_market",                          "P0", True,  qp03),
+        ("ALLOC-QP-04", "Preset radio placed above Chart view selector",                    "P0", True,  qp04),
+        ("ALLOC-QP-05", "Preset radio block calls st.rerun() for each of the 3 options",   "P0", True,  qp05),
         ("ALLOC-QP-06", "Preset block does not mutate holdings/accounts/transactions",      "P0", True,  qp06),
         ("ALLOC-QP-07", "Market filter logic correct for Saudi, US, and All presets",       "P0", True,  qp07),
         ("ALLOC-QP-08", "All ALLOC-QP-01–07 consistent (meta)",                            "P0", True,  qp08),
@@ -4667,36 +4670,34 @@ def _cat_alloc_ui() -> list[TestResult]:
     _section_fn = _fn_body(_app_src, "_render_allocation_section")
 
     def ui01():
-        ok = "st.columns(3)" in _section_fn and "alloc_qp_saudi" in _section_fn
+        ok = "alloc_qp_radio" in _section_fn and "horizontal=True" in _section_fn
         return (
-            "Quick preset row uses st.columns(3) — no vertical stacking by code",
+            "Quick presets use st.radio(horizontal=True) — single native row",
             f"found={ok}",
             ok,
         )
 
     def ui02():
-        ok = "alloc_qp_saudi" in _section_fn and '["Saudi"]' in _section_fn
-        return ("Saudi preset sets alloc_ms_market = ['Saudi']", f"found={ok}", ok)
+        ok = "alloc_qp_radio" in _section_fn and '["Saudi"]' in _section_fn
+        return ("Saudi preset (radio) sets alloc_ms_market = ['Saudi']", f"found={ok}", ok)
 
     def ui03():
-        ok = "alloc_qp_us" in _section_fn and '["US"]' in _section_fn
-        return ("US preset sets alloc_ms_market = ['US']", f"found={ok}", ok)
+        ok = "alloc_qp_radio" in _section_fn and '["US"]' in _section_fn
+        return ("US preset (radio) sets alloc_ms_market = ['US']", f"found={ok}", ok)
 
     def ui04():
-        ok = "alloc_qp_all" in _section_fn and 'pop("alloc_ms_market"' in _section_fn
-        return ("All preset pops alloc_ms_market", f"found={ok}", ok)
+        ok = "alloc_qp_radio" in _section_fn and 'pop("alloc_ms_market"' in _section_fn
+        return ("All preset (radio) pops alloc_ms_market", f"found={ok}", ok)
 
     def ui05():
-        fmt_pos = _section_fn.find("_fmt_compact")
-        if fmt_pos == -1:
-            return ("KPI 2-2-1 layout check", "fmt_compact not found", False)
-        kpi_area = _section_fn[fmt_pos:]
-        col2_count = len(_re.findall(r"st\.columns\(2\)", kpi_area))
-        solo_holdings = 'st.metric("Holdings"' in kpi_area or "st.metric('Holdings'" in kpi_area
-        ok = col2_count >= 2 and solo_holdings
+        has_grid  = "fas-kpi-grid" in _section_fn
+        has_cards = _section_fn.count("fas-kpi-card") >= 5
+        has_html  = "unsafe_allow_html=True" in _section_fn
+        has_kpipc = "_kpi_pc" in _section_fn          # locally-scoped colour var
+        ok = has_grid and has_cards and has_html and has_kpipc
         return (
-            "KPI summary uses 2-col rows + solo Holdings (2-2-1 layout)",
-            f"st.columns(2) count={col2_count}, solo_holdings={solo_holdings}",
+            "KPI summary uses HTML flex grid (fas-kpi-grid, ≥5 cards, _kpi_pc local)",
+            f"grid={has_grid}, cards={has_cards}, html={has_html}, kpi_pc={has_kpipc}",
             ok,
         )
 

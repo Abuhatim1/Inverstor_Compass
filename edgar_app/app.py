@@ -191,6 +191,21 @@ st.markdown(
     .gh-val-xs  { font-size: 1rem;    color: #6b7280;   line-height: 1.4; }
     .gh-pct     { font-size: 0.82rem; font-weight: 500; }
 
+    /* ── Filtered Allocation Summary KPI cards ───────────────────────────
+       Pure-HTML flex grid — bypasses Streamlit column system entirely.
+       Portrait  (<640 px): min-width 42% → 2-per-row → 2-2-1 for 5 cards.
+       Landscape (≥640 px): min-width 0  → all 5 in one row.
+    ─────────────────────────────────────────────────────────────────── */
+    .fas-kpi-grid { display:flex; flex-wrap:wrap; gap:0.5rem 1.5rem; margin:0.5rem 0 1rem; }
+    .fas-kpi-card { flex:1; min-width:42%; }
+    .fas-kpi-lbl  { font-size:0.72rem; color:#6b7280; margin-bottom:2px; }
+    .fas-kpi-val  { font-size:1.35rem; font-weight:700; line-height:1.15; }
+    .fas-kpi-pct  { font-size:0.78rem; font-weight:600; border-radius:999px;
+                    padding:2px 7px; display:inline-block; margin-top:3px; }
+    @media (min-width: 640px) {
+        .fas-kpi-card { min-width:0; }
+    }
+
     /* ── Header — compact on narrow landscape phones (≤768 px) ─────────── */
     @media (max-width: 768px) {
         /* Drop the Arabic name; keep the compass icon only */
@@ -2158,23 +2173,29 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _all_ccys_u    = sorted(_df["CCY"].unique().tolist())
     _all_companies = sorted(_df["Company"].unique().tolist())
 
-    # ── Quick market presets ──────────────────────────────────────────────────
-    _qp1, _qp2, _qp3 = st.columns(3)
-    with _qp1:
-        if st.button("🇸🇦 Saudi", key="alloc_qp_saudi", use_container_width=True,
-                     help="Show Saudi market holdings only"):
-            st.session_state["alloc_ms_market"] = ["Saudi"]
-            st.rerun()
-    with _qp2:
-        if st.button("🇺🇸 US", key="alloc_qp_us", use_container_width=True,
-                     help="Show US market holdings only"):
-            st.session_state["alloc_ms_market"] = ["US"]
-            st.rerun()
-    with _qp3:
-        if st.button("🌐 All", key="alloc_qp_all", use_container_width=True,
-                     help="Clear market filter — show all holdings"):
-            st.session_state.pop("alloc_ms_market", None)
-            st.rerun()
+    # ── Quick market presets — horizontal radio (portrait-safe) ──────────────
+    _cur_mkt    = st.session_state.get("alloc_ms_market", [])
+    _qp_options = ["🇸🇦 Saudi", "🇺🇸 US", "🌐 All"]
+    _qp_default = ("🇸🇦 Saudi" if _cur_mkt == ["Saudi"]
+                   else "🇺🇸 US" if _cur_mkt == ["US"]
+                   else "🌐 All")
+    _qp_choice  = st.radio(
+        "Quick Preset",
+        _qp_options,
+        index=_qp_options.index(_qp_default),
+        horizontal=True,
+        label_visibility="collapsed",
+        key="alloc_qp_radio",
+    )
+    if _qp_choice == "🇸🇦 Saudi" and _cur_mkt != ["Saudi"]:
+        st.session_state["alloc_ms_market"] = ["Saudi"]
+        st.rerun()
+    elif _qp_choice == "🇺🇸 US" and _cur_mkt != ["US"]:
+        st.session_state["alloc_ms_market"] = ["US"]
+        st.rerun()
+    elif _qp_choice == "🌐 All" and _cur_mkt:
+        st.session_state.pop("alloc_ms_market", None)
+        st.rerun()
 
     # ── Chart view ────────────────────────────────────────────────────────────
     _view = st.selectbox(
@@ -2255,25 +2276,37 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.0f}"
 
-    # Row 1 — Market Value | Cost
-    _kr1, _kr2 = st.columns(2)
-    _kr1.metric(f"Market Value ({base_ccy})", _fmt_compact(_fas_mv))
-    _kr2.metric(f"Cost ({base_ccy})",          _fmt_compact(_fas_cb))
-    # Row 2 — Unrealized P&L | Weight
-    _kr3, _kr4 = st.columns(2)
-    _kr3.metric(
-        f"Unrealized P&L ({base_ccy})",
-        f"{_pnl_sign}{_fmt_compact(_fas_pnl)}",
-        delta=f"{_pnl_sign}{_fas_pnl_pct:.1f}%",
-        delta_color=_pnl_color,
-    )
-    _kr4.metric(
-        "Weight",
-        f"{_fas_weight:.1f}%",
-        help="Filtered MV ÷ total open holdings MV",
-    )
-    # Row 3 — Holdings (full width)
-    st.metric("Holdings", str(_fas_n))
+    # ── KPI grid — pure HTML flex, portrait-safe ─────────────────────────────
+    # _kpi_pc is defined locally (NOT _pc which belongs to render_global_header)
+    _kpi_pc = "#22c55e" if _fas_pnl >= 0 else "#ef4444"
+    _arrow  = "↑"      if _fas_pnl >= 0 else "↓"
+    _pct_bg = "#dcfce7" if _fas_pnl >= 0 else "#fee2e2"
+    _pct_fg = "#15803d" if _fas_pnl >= 0 else "#b91c1c"
+    st.markdown(f"""
+<div class="fas-kpi-grid">
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Market Value ({base_ccy})</div>
+    <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}</div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Cost ({base_ccy})</div>
+    <div class="fas-kpi-val">{_fmt_compact(_fas_cb)}</div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">P&amp;L ({base_ccy})</div>
+    <div class="fas-kpi-val" style="color:{_kpi_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}</div>
+    <div><span class="fas-kpi-pct" style="background:{_pct_bg};color:{_pct_fg};">{_arrow} {_pnl_sign}{_fas_pnl_pct:.1f}%</span></div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Weight</div>
+    <div class="fas-kpi-val">{_fas_weight:.1f}%</div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Holdings</div>
+    <div class="fas-kpi-val">{_fas_n}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     # ── Aggregate for pie ─────────────────────────────────────────────────────
     _agg = (
