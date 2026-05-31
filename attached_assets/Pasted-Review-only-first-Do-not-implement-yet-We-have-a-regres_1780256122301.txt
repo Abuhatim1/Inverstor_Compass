@@ -1,0 +1,72 @@
+Review only first. Do not implement yet.
+
+We have a regression after splitting Allocations from Holdings.
+
+Symptoms:
+1. In Holdings, the “+ Add New Position” button opens the edit/add modal on the first click, but the modal closes immediately.
+2. After that, clicking the button does not work again.
+3. If the user switches to another tab and returns to Holdings, the same behavior repeats: modal opens briefly then closes immediately.
+4. The swipe gesture in Holdings also stopped working smoothly from the first trial.
+
+Important constraints:
+- Do not change valuation logic.
+- Do not change holdings calculation logic.
+- Do not change allocation calculation logic.
+- Do not duplicate holdings/allocation data.
+- Do not redesign the UI.
+- Fix only the state/event-handling regression.
+- Keep Allocations fully separated from Holdings.
+- Holdings must remain the source for positions; Allocations must remain a derived analytics view.
+
+Please inspect:
+- Holdings tab/component
+- Allocation tab/component
+- Add/Edit position modal state
+- tab navigation state
+- mobile swipe gesture handler
+- any click-away / overlay / onBlur / rerun logic
+- any shared session_state keys between holdings and allocation
+
+Likely root causes to check:
+1. The modal open state is being reset during rerender.
+2. The Add New Position button uses the same session_state key as another widget.
+3. Allocation split introduced duplicate or conflicting keys.
+4. The modal close handler is triggered immediately by event bubbling.
+5. A swipe/touch/click-away handler is catching the first tap.
+6. Tab switching resets holdings UI state incorrectly.
+7. The gesture layer overlaps the Add New Position button or modal overlay.
+
+Required fix approach:
+- Create dedicated, unique state keys for holdings modal:
+  - holdings_modal_open
+  - holdings_modal_mode
+  - holdings_edit_position_id
+- Do not reuse allocation keys.
+- Opening the modal should only set holdings_modal_open = true.
+- Closing the modal should happen only from explicit Cancel, Save, or X close action.
+- Do not close the modal from unrelated rerenders, tab changes, or allocation refresh.
+- Prevent event propagation from the Add button and modal content if applicable.
+- Ensure swipe gesture is disabled while modal is open.
+- Ensure swipe handler does not capture simple taps on action buttons.
+- Add a small movement threshold before triggering swipe, so normal taps are not interpreted as swipes.
+- Use stable widget keys for buttons/cards inside Holdings.
+- Do not regenerate random keys on each rerender.
+
+Required regression tests:
+HLD-UI-01: Click “+ Add New Position” once; modal stays open.
+HLD-UI-02: Close modal using Cancel/X; modal closes.
+HLD-UI-03: Save new position; modal closes only after successful save.
+HLD-UI-04: Switch to Allocations and back; Add New Position still works.
+HLD-UI-05: Swipe in Holdings works on first attempt.
+HLD-UI-06: Tapping Add/Edit/Delete buttons is not interpreted as swipe.
+HLD-UI-07: Allocation tab still reads derived holdings data correctly.
+HLD-UI-08: No change to valuation, allocation, FX, or risk calculations.
+
+Before coding, provide:
+- Root cause found
+- Files/functions affected
+- Exact state keys involved
+- Minimal fix plan
+- Confirmation that no valuation/allocation calculation logic will be touched
+
+Wait for my approval before implementation.
