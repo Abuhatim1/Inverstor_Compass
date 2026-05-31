@@ -323,29 +323,17 @@ st.markdown(
        LANDSCAPE PHONES / SMALL TABLETS  ≤ 1024 px + landscape orientation
        ══════════════════════════════════════════════════════════════════════ */
     @media (max-width: 1024px) and (orientation: landscape) {
-        /* Tighter page top margin */
-        .block-container { padding-top: 0.1rem !important; }
-
-        /* Sticky header — reduce offset (landscape toolbar ~30 px) and padding */
+        .block-container { padding-top: 0.15rem !important; }
         [data-testid="stHorizontalBlock"]:has(.bousala-appbar) {
-            top:            1.9rem  !important;
-            padding-top:    1px     !important;
-            padding-bottom: 1px     !important;
+            padding-top:    2px !important;
+            padding-bottom: 2px !important;
         }
-
-        /* Shrink brand: hide name, reduce SVG to 22 px */
-        .bousala-appbar .ba-name { display: none !important; }
-        .bousala-appbar svg      { width: 22px !important; height: 22px !important; }
-        .bousala-appbar          { padding: 0 !important; gap: 6px !important; }
-
-        /* KPI strip — single row, tight gap, compact sizes */
-        .gh-kpi-row { gap: 1.1rem !important; flex-wrap: nowrap !important; }
-        .gh-lbl     { font-size: 0.58rem !important; line-height: 1.1 !important; }
-        .gh-val-big { font-size: 0.92rem !important; }
-        .gh-val-med { font-size: 0.78rem !important; }
-        .gh-val-sm  { font-size: 0.7rem  !important; }
-        .gh-val-xs  { font-size: 0.65rem !important; }
-        .gh-pct     { font-size: 0.6rem  !important; }
+        .bousala-appbar svg { width: 32px !important; height: 32px !important; }
+        .gh-kpi-row { gap: 1.4rem !important; flex-wrap: nowrap !important; }
+        .gh-val-big { font-size: 1.4rem !important; }
+        .gh-val-med { font-size: 1.1rem !important; }
+        .gh-val-sm  { font-size: 0.95rem !important; }
+        .gh-val-xs  { font-size: 0.82rem !important; }
     }
 
     /* ── Compact selectbox inside header ────────────────────────────────── */
