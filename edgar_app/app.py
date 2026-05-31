@@ -2740,10 +2740,10 @@ def render_holdings_tab(bundle: dict) -> None:
             if st.button("➕ Add New Position", key="open_add_new_btn",
                          type="primary", use_container_width=True,
                          help="Open a single new position with a BUY transaction."):
-                # Cannot call _dlg_add_new() directly here — it is defined below
-                # this code block, and Python marks it as local (UnboundLocalError).
-                # Set a flag; the dialog is opened after its definition executes.
-                st.session_state["_open_dlg_add_new"] = True
+                # Cannot call _dlg_add_new() directly here — it is defined below.
+                # Use a PERSISTENT flag (not one-shot .pop) so the dialog stays
+                # open across reruns until the user explicitly Cancel / Save / X.
+                st.session_state["holdings_modal_open"] = True
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
@@ -2812,6 +2812,9 @@ def render_holdings_tab(bundle: dict) -> None:
     def _dlg_add_new():
         from ticker_validator import validate_yahoo_ticker, suggest_saudi_ticker
         from portfolio.holdings import normalize_ticker as _ntk
+
+        # Mark dialog as alive this run (used by the call site to detect X close)
+        st.session_state["_hm_alive"] = True
 
         # ── Mode selector ─────────────────────────────────────────────────────
         _ad_mode = st.radio(
@@ -3166,12 +3169,13 @@ def render_holdings_tab(bundle: dict) -> None:
                                 _ad_tk_clean, _ad_price,
                                 source="yfinance" if _yahoo_ok else "manual",
                             )
-                        # Clear dialog state
+                        # Clear dialog state (including the persistent open flag)
                         _keys_to_clear = [
                             "ahn_validation", "ahn_ticker_input", "ahn_tk_confirm",
                             "ahn_name", "ahn_cost", "ahn_price", "ahn_qty",
                             "ahn_ccy", "ahn_type", "ahn_market", "ahn_sector",
                             "ahn_acct_id", "ahn_has_tk", "ahn_exsym", "ahn_mode",
+                            "holdings_modal_open",
                         ]
                         for _k in _keys_to_clear:
                             st.session_state.pop(_k, None)
@@ -3188,6 +3192,7 @@ def render_holdings_tab(bundle: dict) -> None:
             if st.button("Cancel", key="ahn_cancel", use_container_width=True):
                 for _k in ("ahn_validation", "ahn_ticker_input"):
                     st.session_state.pop(_k, None)
+                st.session_state.pop("holdings_modal_open", None)
                 st.rerun()
 
     # ── Dialogs + action bar ─────────────────────────────────────────────────
@@ -3380,9 +3385,13 @@ def render_holdings_tab(bundle: dict) -> None:
                 if st.button("Cancel", use_container_width=True):
                     st.rerun()
 
-        # ── Open Add New dialog if flagged by the toolbar button ─────────────
-        if st.session_state.pop("_open_dlg_add_new", False):
+        # ── Open Add New dialog (persistent flag — survives reruns until close) ──
+        if st.session_state.get("holdings_modal_open", False):
             _dlg_add_new()
+            # If the dialog body did NOT mark itself alive this run, the user
+            # closed it with the X button — clear the flag so it doesn't reopen.
+            if not st.session_state.pop("_hm_alive", False):
+                st.session_state.pop("holdings_modal_open", None)
 
         # ── Dialog: Edit ─────────────────────────────────────────────────────
         @st.dialog("✏️ Edit Holding")
@@ -3882,7 +3891,15 @@ def render_holdings_tab(bundle: dict) -> None:
         with _ec2:
             if st.button("➕ Add New Position", key="open_add_new_empty_btn",
                          type="primary", use_container_width=True):
-                _dlg_add_new()
+                # Set persistent flag instead of calling directly, so the dialog
+                # survives reruns triggered by widget interactions inside it.
+                st.session_state["holdings_modal_open"] = True
+        # Persistent open check for the empty-portfolio path (mirrors the
+        # holdings-exist path above; _dlg_add_new is defined at function scope).
+        if st.session_state.get("holdings_modal_open", False):
+            _dlg_add_new()
+            if not st.session_state.pop("_hm_alive", False):
+                st.session_state.pop("holdings_modal_open", None)
 
 
 def render_allocation_tab(bundle: dict) -> None:

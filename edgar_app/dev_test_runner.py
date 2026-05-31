@@ -3315,23 +3315,38 @@ def _cat_add() -> list[TestResult]:
 
     def add01():
         """
-        Simulate the session-state flag mechanism introduced to fix the
-        UnboundLocalError.  The flag is set, popped, and the dialog function
-        is callable — verified by importing and inspecting the decorated
-        upsert_holding path rather than calling the Streamlit dialog directly
-        (which requires a running server).
+        Persistent holdings_modal_open flag: set by button, survives a rerun
+        (get returns True after set), and is cleared explicitly (not consumed
+        by pop on the first read).
+
+        Phase-1 fix: replaced one-shot .pop("_open_dlg_add_new") with
+        persistent .get("holdings_modal_open") so the @st.dialog function
+        is called on every rerun while the modal should stay open.
         """
         import streamlit as st
-        # Replicate: button sets flag → later pop fires
-        st.session_state["_open_dlg_add_new"] = True
-        flag_was_set   = st.session_state.get("_open_dlg_add_new", False)
-        flag_after_pop = st.session_state.pop("_open_dlg_add_new", False)
-        flag_cleared   = "_open_dlg_add_new" not in st.session_state
+        # Old key must be absent from the codebase (regression guard)
+        old_key_absent = "_open_dlg_add_new" not in st.session_state
 
-        ok = flag_was_set and flag_after_pop and flag_cleared
+        # New key: set → still readable on next simulated rerun → explicit clear
+        st.session_state["holdings_modal_open"] = True
+        flag_after_set  = st.session_state.get("holdings_modal_open", False)
+        flag_after_get  = st.session_state.get("holdings_modal_open", False)  # still True
+        st.session_state.pop("holdings_modal_open", None)
+        flag_after_clear = st.session_state.get("holdings_modal_open", False)
+
+        ok = (
+            old_key_absent
+            and flag_after_set
+            and flag_after_get          # persistent: still True after first get
+            and not flag_after_clear    # explicit clear works
+        )
         return (
-            "flag set=True, pop=True, cleared=True",
-            f"set={flag_was_set}, pop={flag_after_pop}, cleared={flag_cleared}",
+            "persistent flag: set=True, get×2=True, explicit_clear→False; old key absent",
+            (
+                f"old_key_absent={old_key_absent}, "
+                f"after_set={flag_after_set}, after_get={flag_after_get}, "
+                f"after_clear={flag_after_clear}"
+            ),
             ok,
         )
 
@@ -4756,6 +4771,144 @@ def _cat_alloc_ui() -> list[TestResult]:
     return results
 
 
+def _cat_hld_ui() -> list[TestResult]:
+    """
+    HLD-UI: Holdings modal open/close state-management tests (Phase-1 fix).
+
+    HLD-UI-01  holdings_modal_open flag replaces one-shot _open_dlg_add_new.
+    HLD-UI-02  Cancel handler clears holdings_modal_open before st.rerun().
+    HLD-UI-03  Save handler includes holdings_modal_open in _keys_to_clear.
+    HLD-UI-04  Empty-portfolio button sets flag (not direct call); persistent
+               check present inside the if-not-holdings block.
+    """
+    import re as _re
+    import pathlib as _pl
+
+    CAT = "Holdings UI"
+    results: list[TestResult] = []
+    _src = _pl.Path(__file__).parent / "app.py"
+    _text = _src.read_text(encoding="utf-8")
+
+    def hld_ui_01():
+        """
+        The toolbar Add New Position button must use holdings_modal_open (new
+        persistent key), and the old one-shot _open_dlg_add_new key must not
+        appear anywhere in app.py.
+        """
+        old_key_gone = "_open_dlg_add_new" not in _text
+        new_key_set  = 'st.session_state["holdings_modal_open"] = True' in _text
+        # The call-site must use .get() not .pop()
+        get_pattern  = bool(_re.search(
+            r'st\.session_state\.get\(["\']holdings_modal_open["\']',
+            _text,
+        ))
+        pop_pattern_bad = bool(_re.search(
+            r'st\.session_state\.pop\(["\']holdings_modal_open["\'][^)]*\)\s*[,)]?\s*:\s*\n?\s*_dlg_add_new',
+            _text,
+        ))
+        ok = old_key_gone and new_key_set and get_pattern and not pop_pattern_bad
+        return (
+            "old key absent; new key set; call-site uses .get(); no direct .pop()->call pattern",
+            (
+                f"old_key_gone={old_key_gone}, new_key_set={new_key_set}, "
+                f"get_pattern={get_pattern}, pop_bad={pop_pattern_bad}"
+            ),
+            ok,
+        )
+
+    def hld_ui_02():
+        """
+        The Cancel button handler inside _dlg_add_new must pop/clear
+        holdings_modal_open before calling st.rerun().
+        """
+        # Find the cancel block and check ordering
+        cancel_block = _re.search(
+            r'key=["\']ahn_cancel["\'].*?st\.rerun\(\)',
+            _text,
+            _re.DOTALL,
+        )
+        if not cancel_block:
+            return ("cancel block found", "cancel block NOT found in app.py", False)
+        block_text = cancel_block.group(0)
+        clears_flag = "holdings_modal_open" in block_text
+        # Ensure clear comes before rerun (flag appears before st.rerun)
+        flag_pos  = block_text.find("holdings_modal_open")
+        rerun_pos = block_text.find("st.rerun()")
+        ordered_correctly = (flag_pos != -1) and (flag_pos < rerun_pos)
+        ok = clears_flag and ordered_correctly
+        return (
+            "Cancel handler clears holdings_modal_open before st.rerun()",
+            f"clears_flag={clears_flag}, ordered_correctly={ordered_correctly}",
+            ok,
+        )
+
+    def hld_ui_03():
+        """
+        The Save success block in _dlg_add_new must include 'holdings_modal_open'
+        in the _keys_to_clear list so the modal does not reopen after a save.
+        """
+        # Look for the _keys_to_clear list that contains the ahn_ keys
+        keys_block = _re.search(
+            r'_keys_to_clear\s*=\s*\[.*?holdings_modal_open.*?\]',
+            _text,
+            _re.DOTALL,
+        )
+        ok = keys_block is not None
+        return (
+            "'holdings_modal_open' present in _keys_to_clear list in save handler",
+            f"found={'yes' if ok else 'no (MISSING)'}",
+            ok,
+        )
+
+    def hld_ui_04():
+        """
+        The empty-portfolio Add New Position button must set the persistent flag
+        (not call _dlg_add_new() directly), and a persistent open-check block
+        must exist inside the if-not-holdings section.
+        """
+        # Check: empty-portfolio button sets the flag
+        empty_btn_sets_flag = bool(_re.search(
+            r'key=["\']open_add_new_empty_btn["\'].*?holdings_modal_open.*?=.*?True',
+            _text,
+            _re.DOTALL,
+        ))
+        # Check: no direct _dlg_add_new() call immediately after the empty button
+        # (the old pattern was: button click → _dlg_add_new() in same branch)
+        direct_call_in_btn = bool(_re.search(
+            r'key=["\']open_add_new_empty_btn["\'][^}]{0,120}_dlg_add_new\(\)',
+            _text,
+            _re.DOTALL,
+        ))
+        # Check: persistent check block present after the empty-portfolio columns
+        empty_persistent_check = bool(_re.search(
+            r'if not holdings:.*?st\.session_state\.get\(["\']holdings_modal_open',
+            _text,
+            _re.DOTALL,
+        ))
+        ok = empty_btn_sets_flag and not direct_call_in_btn and empty_persistent_check
+        return (
+            "empty-portfolio button sets flag; no direct call; persistent check present",
+            (
+                f"sets_flag={empty_btn_sets_flag}, "
+                f"direct_call={direct_call_in_btn}, "
+                f"persistent_check={empty_persistent_check}"
+            ),
+            ok,
+        )
+
+    _tests = [
+        ("HLD-UI-01", "holdings_modal_open replaces one-shot _open_dlg_add_new",           "P0", True, hld_ui_01),
+        ("HLD-UI-02", "Cancel handler clears holdings_modal_open before st.rerun()",        "P0", True, hld_ui_02),
+        ("HLD-UI-03", "Save handler includes holdings_modal_open in _keys_to_clear",        "P0", True, hld_ui_03),
+        ("HLD-UI-04", "Empty-portfolio button uses flag; persistent check in empty block",  "P0", True, hld_ui_04),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app.render_holdings_tab", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4766,7 +4919,7 @@ def run_all_tests() -> TestReport:
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
         + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
-        + _cat_alloc_ui()
+        + _cat_alloc_ui() + _cat_hld_ui()
     )
 
     punch_list: list[PunchListItem] = []
