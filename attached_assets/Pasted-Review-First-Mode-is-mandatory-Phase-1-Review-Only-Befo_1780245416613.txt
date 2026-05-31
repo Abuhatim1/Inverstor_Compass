@@ -1,0 +1,191 @@
+Review First Mode is mandatory.
+
+Phase 1 — Review Only
+
+Before implementing any code:
+
+1. Review this request against the current codebase and architecture.
+2. Do not implement immediately.
+3. Provide an implementation assessment covering:
+
+* Business value
+* User value
+* Technical complexity
+* Data integrity impact
+* Existing architecture impact
+* MVP suitability
+* Long-term maintainability
+* Scalability impact
+* Simpler alternatives
+* Files/functions likely to be affected
+* Required regression tests
+
+4. Classify this request:
+
+* Tier 1 MVP Critical
+* Tier 2 Important but Later
+* Tier 3 Nice to Have
+
+5. Identify:
+
+* Risks
+* Hidden dependencies
+* Possible regressions
+* Possible duplicate logic
+* Any impact on valuation/accounting/FIFO/transactions/FX
+
+6. Recommend:
+
+* Recommended
+* Recommended with modifications
+* Not recommended at current phase
+
+7. Stop after the review.
+
+Do NOT:
+
+* Modify code
+* Create files
+* Create checkpoint
+* Run migrations
+* Implement changes
+
+Wait for explicit approval.
+
+Implementation may begin only after I write:
+
+Proceed with implementation
+
+====================================================
+REQUEST TO REVIEW
+
+Feature:
+Allocation Quick Presets
+
+Objective:
+Add three small preset buttons inside the Allocation tab to quickly apply common market filters.
+
+Presets:
+
+1. Saudi
+    Applies:
+
+* Market = Saudi
+
+2. US
+    Applies:
+
+* Market = US
+
+3. All
+    Clears market filter and shows all holdings.
+
+Purpose:
+These buttons are shortcuts only. They must behave exactly as if the user manually selected the same Market filter.
+
+====================================================
+SCOPE
+
+Allocation tab only.
+
+Do not modify:
+
+* Holdings tab
+* valuation engine
+* FX engine
+* accounts
+* transactions
+* FIFO
+* market_data_router
+* SAHMK
+* Yahoo price refresh
+* performance engine
+* test runner history
+
+====================================================
+UI REQUIREMENTS
+
+Place buttons near the top of the Allocation tab:
+
+[Saudi] [US] [All]
+
+Recommended placement:
+Below “Portfolio Allocation”
+and above “Chart View”
+
+Mobile:
+
+* Compact
+* Touch friendly
+* No horizontal scrolling
+* Prefer one row if possible
+
+====================================================
+BEHAVIOR
+
+Saudi button:
+
+* Set existing Market filter to Saudi only
+* Refresh allocation summary
+* Refresh chart
+* Refresh filtered table
+
+US button:
+
+* Set existing Market filter to US only
+* Refresh allocation summary
+* Refresh chart
+* Refresh filtered table
+
+All button:
+
+* Clear Market filter
+* Return to full portfolio view
+* Refresh allocation summary
+* Refresh chart
+* Refresh filtered table
+
+====================================================
+ARCHITECTURE RULES
+
+* Use existing allocation filter state.
+* Do not create a new filtering engine.
+* Do not create new valuation logic.
+* Do not duplicate portfolio calculations.
+* Do not call yfinance or SAHMK.
+* Do not mutate holdings, transactions, accounts, or prices.
+* The buttons are only shortcuts for the existing Market filter.
+
+====================================================
+TESTS TO PROPOSE
+
+ALLOC-QP-01
+Saudi preset filters Market = Saudi.
+
+ALLOC-QP-02
+US preset filters Market = US.
+
+ALLOC-QP-03
+All preset clears Market filter.
+
+ALLOC-QP-04
+Allocation summary updates correctly after preset selection.
+
+ALLOC-QP-05
+Chart updates correctly after preset selection.
+
+ALLOC-QP-06
+Filtered table updates correctly after preset selection.
+
+ALLOC-QP-07
+Base currency behavior remains unchanged.
+
+ALLOC-QP-08
+Full regression suite remains PASS.
+
+====================================================
+IMPORTANT
+
+Do not implement yet.
+
+First provide review and recommendation only.
