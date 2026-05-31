@@ -4269,6 +4269,201 @@ def _cat_fas() -> list[TestResult]:
     return results
 
 
+def _cat_alloc() -> list[TestResult]:
+    """
+    ALLOC: Move Portfolio Allocation to dedicated Allocation tab.
+
+    ALLOC-01  render_allocation_tab() function exists in app.py.
+    ALLOC-02  render_holdings_tab() does not call _render_allocation_section.
+    ALLOC-03  _render_allocation_section contains chart view selector.
+    ALLOC-04  _render_allocation_section contains filter controls.
+    ALLOC-05  _render_allocation_section contains Filtered Allocation Summary.
+    ALLOC-06  _render_allocation_section contains allocation chart.
+    ALLOC-07  _render_allocation_section contains filtered holdings table.
+    ALLOC-08  render_allocation_tab() reads val from bundle dict.
+    ALLOC-09  render_allocation_tab() reads base_ccy from bundle dict.
+    ALLOC-10  render_holdings_tab() reads val from bundle dict (not independent).
+    ALLOC-11  Full suite PASS (meta — all prior ALLOCs consistent).
+    ALLOC-12  Both tab renderers accept bundle parameter, not zero-argument.
+    ALLOC-13  No independent calculate_portfolio_valuation inside render_holdings_tab
+              or render_allocation_tab (only _load_valuation_bundle may call it).
+    """
+    import os as _os
+
+    CAT = "Allocation Tab"
+    results: list[TestResult] = []
+
+    app_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "app.py")
+    with open(app_path, encoding="utf-8") as _fh:
+        _app_src = _fh.read()
+
+    def _fn_body(src: str, fn_name: str) -> str:
+        """
+        Extract the source body of the first top-level def matching fn_name.
+        Returns everything from 'def fn_name' up to (but not including) the
+        next top-level 'def ' or end of file.
+        """
+        import re
+        pat = re.compile(rf"^def {re.escape(fn_name)}\b", re.MULTILINE)
+        m = pat.search(src)
+        if not m:
+            return ""
+        start = m.start()
+        nxt = re.search(r"^def ", src[start + 1:], re.MULTILINE)
+        end = start + 1 + nxt.start() if nxt else len(src)
+        return src[start:end]
+
+    _alloc_fn   = _fn_body(_app_src, "render_allocation_tab")
+    _holdings_fn = _fn_body(_app_src, "render_holdings_tab")
+    _section_fn  = _fn_body(_app_src, "_render_allocation_section")
+
+    def alloc01():
+        ok = "def render_allocation_tab(" in _app_src
+        return (
+            "render_allocation_tab() function defined in app.py",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc02():
+        ok = "_render_allocation_section" not in _holdings_fn
+        return (
+            "_render_allocation_section not called inside render_holdings_tab",
+            f"absent={ok}",
+            ok,
+        )
+
+    def alloc03():
+        ok = (
+            "radio(" in _section_fn or
+            "selectbox(" in _section_fn or
+            "chart_view" in _section_fn or
+            "alloc_view" in _section_fn or
+            "Chart View" in _section_fn or
+            "chart type" in _section_fn.lower()
+        )
+        return (
+            "_render_allocation_section contains chart view selector widget",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc04():
+        ok = "multiselect(" in _section_fn
+        return (
+            "_render_allocation_section contains multiselect filter control",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc05():
+        ok = "Filtered Allocation Summary" in _section_fn
+        return (
+            "_render_allocation_section contains 'Filtered Allocation Summary'",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc06():
+        ok = (
+            "go.Pie(" in _section_fn or
+            "go.Bar(" in _section_fn or
+            "go.Treemap(" in _section_fn or
+            "plotly" in _section_fn.lower()
+        )
+        return (
+            "_render_allocation_section contains plotly chart",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc07():
+        ok = "st.dataframe(" in _section_fn
+        return (
+            "_render_allocation_section contains st.dataframe (filtered holdings table)",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc08():
+        ok = 'bundle["val"]' in _alloc_fn or "bundle['val']" in _alloc_fn
+        return (
+            "render_allocation_tab reads val from bundle dict",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc09():
+        ok = 'bundle["base_ccy"]' in _alloc_fn or "bundle['base_ccy']" in _alloc_fn
+        return (
+            "render_allocation_tab reads base_ccy from bundle dict",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc10():
+        ok = 'bundle["val"]' in _holdings_fn or "bundle['val']" in _holdings_fn
+        return (
+            "render_holdings_tab reads val from bundle dict (not independent call)",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc11():
+        sub_fns = [alloc01, alloc02, alloc03, alloc04, alloc05,
+                   alloc06, alloc07, alloc08, alloc09, alloc10]
+        results_sub = [fn() for fn in sub_fns]
+        ok = all(r[2] for r in results_sub)
+        failing = [sub_fns[i].__name__ for i, r in enumerate(results_sub) if not r[2]]
+        return (
+            "all ALLOC-01–10 sub-checks consistent",
+            f"ok={ok}" + (f", failing={failing}" if not ok else ""),
+            ok,
+        )
+
+    def alloc12():
+        holdings_has_bundle = "bundle: dict" in _holdings_fn
+        alloc_has_bundle    = "bundle: dict" in _alloc_fn
+        ok = holdings_has_bundle and alloc_has_bundle
+        return (
+            "both render_holdings_tab and render_allocation_tab accept bundle parameter",
+            f"holdings={holdings_has_bundle}, allocation={alloc_has_bundle}",
+            ok,
+        )
+
+    def alloc13():
+        CALL = "calculate_portfolio_valuation("
+        in_holdings = CALL in _holdings_fn
+        in_alloc    = CALL in _alloc_fn
+        ok = not in_holdings and not in_alloc
+        return (
+            "no independent calculate_portfolio_valuation inside either render tab function",
+            f"in_holdings={in_holdings}, in_alloc={in_alloc}",
+            ok,
+        )
+
+    _tests = [
+        ("ALLOC-01", "render_allocation_tab() function exists in app.py",                        "P0", True,  alloc01),
+        ("ALLOC-02", "render_holdings_tab() does not call _render_allocation_section",            "P0", True,  alloc02),
+        ("ALLOC-03", "_render_allocation_section contains chart view selector",                   "P0", True,  alloc03),
+        ("ALLOC-04", "_render_allocation_section contains filter controls",                       "P0", True,  alloc04),
+        ("ALLOC-05", "_render_allocation_section contains Filtered Allocation Summary",           "P0", True,  alloc05),
+        ("ALLOC-06", "_render_allocation_section contains allocation chart",                      "P0", True,  alloc06),
+        ("ALLOC-07", "_render_allocation_section contains filtered holdings table",               "P0", True,  alloc07),
+        ("ALLOC-08", "render_allocation_tab reads val from bundle",                               "P0", True,  alloc08),
+        ("ALLOC-09", "render_allocation_tab reads base_ccy from bundle",                          "P0", True,  alloc09),
+        ("ALLOC-10", "render_holdings_tab reads val from bundle (not independent call)",          "P0", True,  alloc10),
+        ("ALLOC-11", "All ALLOC-01–10 sub-checks consistent (meta)",                              "P0", True,  alloc11),
+        ("ALLOC-12", "Both tab renderers accept bundle parameter",                                "P0", True,  alloc12),
+        ("ALLOC-13", "No independent valuation call inside either render tab function",           "P0", True,  alloc13),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app.render_allocation_tab", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4278,7 +4473,7 @@ def run_all_tests() -> TestReport:
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
-        + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas()
+        + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc()
     )
 
     punch_list: list[PunchListItem] = []

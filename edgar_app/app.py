@@ -2447,8 +2447,42 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     )
 
 
-def render_holdings_tab() -> None:
-    """Actual Holdings + Transactions tab."""
+def _load_valuation_bundle(base_ccy: str) -> dict:
+    """
+    Compute portfolio valuation once per Streamlit re-run and return a shared
+    bundle consumed by both render_holdings_tab() and render_allocation_tab().
+
+    Avoids duplicate file I/O, FX lookups, and valuation arithmetic, and
+    guarantees both tabs see identical data within the same script run.
+    No @st.cache_data needed — Streamlit re-runs the full script on every
+    interaction, so computing once at the top level per run is the natural
+    and safe pattern.
+    """
+    from portfolio import load_holdings
+    from portfolio.accounts import load_accounts as _bvb_accts
+    from fx_rates import get_rates_for_holdings
+    from portfolio.valuation import calculate_portfolio_valuation
+
+    holdings  = load_holdings()
+    accounts  = _bvb_accts()
+    all_ccys  = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
+    fx        = get_rates_for_holdings(all_ccys, base_ccy) if all_ccys else {}
+    manual_fx = [c for c, r in fx.items() if r.source == "default" and c != base_ccy]
+    val       = calculate_portfolio_valuation(holdings, accounts, base_ccy, fx_rates=fx)
+    wt_map    = {r.ticker: r.invested_weight_pct for r in val.per_holding}
+    return {
+        "base_ccy":   base_ccy,
+        "holdings":   holdings,
+        "accounts":   accounts,
+        "fx":         fx,
+        "manual_fx":  manual_fx,
+        "val":        val,
+        "wt_map":     wt_map,
+    }
+
+
+def render_holdings_tab(bundle: dict) -> None:
+    """Actual Holdings tab — operational view (table, prices, actions)."""
     from portfolio import (
         ASSET_TYPES, CURRENCIES, DEFAULT_SECTORS, MARKETS,
         delete_holding, soft_delete_holding,
@@ -2460,23 +2494,18 @@ def render_holdings_tab() -> None:
     import pandas as pd
     from datetime import date
 
-    # Base currency comes from the global header selector above all tabs
-    _base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    # Valuation bundle computed once in the main UI; shared with Allocation tab
+    _base_ccy     = bundle["base_ccy"]
+    holdings      = bundle["holdings"]
+    _all_accounts = bundle["accounts"]
+    _fx           = bundle["fx"]
+    _manual_fx    = bundle["manual_fx"]
+    _val          = bundle["val"]
+    _wt_map       = bundle["wt_map"]
 
-    holdings  = load_holdings()
     watchlist = load_portfolio()
 
-    from fx_rates import get_rates_for_holdings, refresh_fx_rates
-    from portfolio.valuation import calculate_portfolio_valuation
-    from portfolio.accounts import load_accounts as _load_accts
-
-    _all_ccys    = list({getattr(h, "currency", "USD") for h in holdings.values()}) if holdings else []
-    _fx          = get_rates_for_holdings(_all_ccys, _base_ccy) if _all_ccys else {}
-    _manual_fx   = [c for c, r in _fx.items() if r.source == "default" and c != _base_ccy]
-    _all_accounts = _load_accts()          # kept for table display + edit dialog
-    _val         = calculate_portfolio_valuation(holdings, _all_accounts, _base_ccy, fx_rates=_fx)
-    # Per-holding weight map (invested weight, not including cash)
-    _wt_map    = {r.ticker: r.invested_weight_pct for r in _val.per_holding}
+    from fx_rates import refresh_fx_rates
 
     def _mv_base(h) -> float:
         ccy  = getattr(h, "currency", _base_ccy)
@@ -2696,9 +2725,6 @@ def render_holdings_tab() -> None:
                                 update_current_price(tk, new_p, source="manual")
                                 st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
-
-        # ── Portfolio Allocation ───────────────────────────────────────────────
-        _render_allocation_section(_val, holdings, _base_ccy)
 
     # ── Account helpers (needed by all dialogs, including Add New) ───────────
     from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
@@ -3787,6 +3813,29 @@ def render_holdings_tab() -> None:
             if st.button("➕ Add New Position", key="open_add_new_empty_btn",
                          type="primary", use_container_width=True):
                 _dlg_add_new()
+
+
+def render_allocation_tab(bundle: dict) -> None:
+    """
+    📊 Allocation tab — analytical view of portfolio allocation.
+
+    Uses the shared valuation bundle computed once per re-run in the main UI.
+    Renders the full _render_allocation_section (chart view selector, filters,
+    filtered summary, chart, export CSV, filtered table) without calling any
+    external API or mutating any portfolio state.
+    """
+    holdings = bundle["holdings"]
+    val      = bundle["val"]
+    base_ccy = bundle["base_ccy"]
+
+    if not holdings:
+        st.info(
+            "No holdings yet. Add a position in **💼 Holdings** first.",
+            icon="💡",
+        )
+        return
+
+    _render_allocation_section(val, holdings, base_ccy)
 
 
 def render_accounts_tab() -> None:
@@ -6502,11 +6551,12 @@ with st.sidebar:
 
 render_global_header()
 
-(tab_holdings, tab_closed, tab_accounts, tab_transactions, tab_cash,
+(tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions, tab_cash,
  tab_decisions, tab_risk, tab_command,
  tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
  tab_test, tab_discovery) = st.tabs([
     "💼 Holdings",
+    "📊 Allocation",
     "📁 Closed Holdings",
     "💳 Accounts",
     "🔁 Transactions",
@@ -6523,8 +6573,13 @@ render_global_header()
     "🔍 SAHMK Discovery",
 ])
 
+_shared_bundle = _load_valuation_bundle(st.session_state.get("global_base_ccy", "SAR"))
+
 with tab_holdings:
-    render_holdings_tab()
+    render_holdings_tab(_shared_bundle)
+
+with tab_allocation:
+    render_allocation_tab(_shared_bundle)
 
 with tab_closed:
     render_closed_holdings_tab()
