@@ -2142,7 +2142,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _all_companies = sorted(_df["Company"].unique().tolist())
 
     # ── Quick market presets ──────────────────────────────────────────────────
-    _qp1, _qp2, _qp3, _qp_rest = st.columns([1, 1, 1, 3])
+    _qp1, _qp2, _qp3 = st.columns(3)
     with _qp1:
         if st.button("🇸🇦 Saudi", key="alloc_qp_saudi", use_container_width=True,
                      help="Show Saudi market holdings only"):
