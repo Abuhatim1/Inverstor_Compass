@@ -202,6 +202,10 @@ st.markdown(
         .gh-val-sm   { font-size: 0.9rem  !important; }
         .gh-val-xs   { font-size: 0.8rem  !important; }
         .gh-pct      { font-size: 0.7rem  !important; }
+        /* Prevent Streamlit from stacking narrow columns — lets 2- and 3-col
+           rows stay horizontal on portrait phones (min-width default ~200 px
+           causes wrapping at small viewport widths). */
+        [data-testid="column"] { min-width: 0 !important; }
     }
 
     /* ── Tab bar — always horizontally scrollable, never wraps ──────────── */
@@ -2251,31 +2255,25 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.0f}"
 
-    with st.container():
-        _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
-        _sm1.metric(
-            f"Market Value ({base_ccy})",
-            _fmt_compact(_fas_mv),
-        )
-        _sm2.metric(
-            f"Cost ({base_ccy})",
-            _fmt_compact(_fas_cb),
-        )
-        _sm3.metric(
-            f"Unrealized P&L ({base_ccy})",
-            f"{_pnl_sign}{_fmt_compact(_fas_pnl)}",
-            delta=f"{_pnl_sign}{_fas_pnl_pct:.1f}%",
-            delta_color=_pnl_color,
-        )
-        _sm4.metric(
-            "Weight",
-            f"{_fas_weight:.1f}%",
-            help="Filtered MV ÷ total open holdings MV",
-        )
-        _sm5.metric(
-            "Holdings",
-            str(_fas_n),
-        )
+    # Row 1 — Market Value | Cost
+    _kr1, _kr2 = st.columns(2)
+    _kr1.metric(f"Market Value ({base_ccy})", _fmt_compact(_fas_mv))
+    _kr2.metric(f"Cost ({base_ccy})",          _fmt_compact(_fas_cb))
+    # Row 2 — Unrealized P&L | Weight
+    _kr3, _kr4 = st.columns(2)
+    _kr3.metric(
+        f"Unrealized P&L ({base_ccy})",
+        f"{_pnl_sign}{_fmt_compact(_fas_pnl)}",
+        delta=f"{_pnl_sign}{_fas_pnl_pct:.1f}%",
+        delta_color=_pnl_color,
+    )
+    _kr4.metric(
+        "Weight",
+        f"{_fas_weight:.1f}%",
+        help="Filtered MV ÷ total open holdings MV",
+    )
+    # Row 3 — Holdings (full width)
+    st.metric("Holdings", str(_fas_n))
 
     # ── Aggregate for pie ─────────────────────────────────────────────────────
     _agg = (

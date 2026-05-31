@@ -4630,6 +4630,131 @@ def _cat_alloc_qp() -> list[TestResult]:
     return results
 
 
+def _cat_alloc_ui() -> list[TestResult]:
+    """
+    ALLOC-UI: Allocation tab mobile UI layout optimisation.
+
+    ALLOC-UI-01  Quick preset row uses st.columns(3) — no vertical stacking by code.
+    ALLOC-UI-02  Saudi preset still sets alloc_ms_market = ['Saudi'].
+    ALLOC-UI-03  US preset still sets alloc_ms_market = ['US'].
+    ALLOC-UI-04  All preset still pops alloc_ms_market.
+    ALLOC-UI-05  KPI summary uses 2-2-1 layout (two st.columns(2) rows + solo Holdings).
+    ALLOC-UI-06  KPI values use compact formatter (_fmt_compact).
+    ALLOC-UI-07  KPI values reference filtered data (_fas_mv, _fas_cb, _fas_pnl, _fas_weight, _fas_n).
+    ALLOC-UI-08  CSS media query prevents column stacking (min-width: 0) on mobile.
+    ALLOC-UI-09  Full regression suite passes (meta).
+    """
+    import os as _os
+    import re as _re
+
+    CAT = "Allocation Mobile UI"
+    results: list[TestResult] = []
+
+    app_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "app.py")
+    with open(app_path, encoding="utf-8") as _fh:
+        _app_src = _fh.read()
+
+    def _fn_body(src: str, fn_name: str) -> str:
+        pat = _re.compile(rf"^def {_re.escape(fn_name)}\b", _re.MULTILINE)
+        m = pat.search(src)
+        if not m:
+            return ""
+        start = m.start()
+        nxt = _re.search(r"^def ", src[start + 1:], _re.MULTILINE)
+        end = start + 1 + nxt.start() if nxt else len(src)
+        return src[start:end]
+
+    _section_fn = _fn_body(_app_src, "_render_allocation_section")
+
+    def ui01():
+        ok = "st.columns(3)" in _section_fn and "alloc_qp_saudi" in _section_fn
+        return (
+            "Quick preset row uses st.columns(3) — no vertical stacking by code",
+            f"found={ok}",
+            ok,
+        )
+
+    def ui02():
+        ok = "alloc_qp_saudi" in _section_fn and '["Saudi"]' in _section_fn
+        return ("Saudi preset sets alloc_ms_market = ['Saudi']", f"found={ok}", ok)
+
+    def ui03():
+        ok = "alloc_qp_us" in _section_fn and '["US"]' in _section_fn
+        return ("US preset sets alloc_ms_market = ['US']", f"found={ok}", ok)
+
+    def ui04():
+        ok = "alloc_qp_all" in _section_fn and 'pop("alloc_ms_market"' in _section_fn
+        return ("All preset pops alloc_ms_market", f"found={ok}", ok)
+
+    def ui05():
+        fmt_pos = _section_fn.find("_fmt_compact")
+        if fmt_pos == -1:
+            return ("KPI 2-2-1 layout check", "fmt_compact not found", False)
+        kpi_area = _section_fn[fmt_pos:]
+        col2_count = len(_re.findall(r"st\.columns\(2\)", kpi_area))
+        solo_holdings = 'st.metric("Holdings"' in kpi_area or "st.metric('Holdings'" in kpi_area
+        ok = col2_count >= 2 and solo_holdings
+        return (
+            "KPI summary uses 2-col rows + solo Holdings (2-2-1 layout)",
+            f"st.columns(2) count={col2_count}, solo_holdings={solo_holdings}",
+            ok,
+        )
+
+    def ui06():
+        ok = "_fmt_compact" in _section_fn and "_fmt_compact(_fas_mv)" in _section_fn
+        return ("KPI values use compact formatter (_fmt_compact)", f"found={ok}", ok)
+
+    def ui07():
+        required = ["_fas_mv", "_fas_cb", "_fas_pnl", "_fas_weight", "_fas_n"]
+        missing = [k for k in required if k not in _section_fn]
+        ok = not missing
+        return (
+            "KPI values reference filtered data (_fas_mv/cb/pnl/weight/n)",
+            f"missing={missing}",
+            ok,
+        )
+
+    def ui08():
+        ok = (
+            "max-width: 768px" in _app_src
+            and '[data-testid="column"]' in _app_src
+            and "min-width: 0" in _app_src
+        )
+        return (
+            "CSS media query includes [data-testid=column] min-width: 0 for mobile",
+            f"found={ok}",
+            ok,
+        )
+
+    def ui09():
+        sub = [ui01, ui02, ui03, ui04, ui05, ui06, ui07, ui08]
+        outcomes = [fn() for fn in sub]
+        ok = all(o[2] for o in outcomes)
+        failing = [sub[i].__name__ for i, o in enumerate(outcomes) if not o[2]]
+        return (
+            "All ALLOC-UI-01–08 consistent (meta)",
+            f"ok={ok}" + (f", failing={failing}" if not ok else ""),
+            ok,
+        )
+
+    _tests = [
+        ("ALLOC-UI-01", "Quick preset row uses st.columns(3) — no vertical stacking",    "P0", True, ui01),
+        ("ALLOC-UI-02", "Saudi preset still sets alloc_ms_market = ['Saudi']",            "P0", True, ui02),
+        ("ALLOC-UI-03", "US preset still sets alloc_ms_market = ['US']",                 "P0", True, ui03),
+        ("ALLOC-UI-04", "All preset still pops alloc_ms_market",                         "P0", True, ui04),
+        ("ALLOC-UI-05", "KPI summary uses 2-2-1 layout (two st.columns(2) + Holdings)",  "P0", True, ui05),
+        ("ALLOC-UI-06", "KPI values use compact formatter (_fmt_compact)",               "P0", True, ui06),
+        ("ALLOC-UI-07", "KPI values reference filtered data",                            "P0", True, ui07),
+        ("ALLOC-UI-08", "CSS prevents column stacking on mobile (min-width: 0)",         "P0", True, ui08),
+        ("ALLOC-UI-09", "All ALLOC-UI-01–08 consistent (meta)",                         "P0", True, ui09),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._render_allocation_section", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4640,6 +4765,7 @@ def run_all_tests() -> TestReport:
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
         + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
+        + _cat_alloc_ui()
     )
 
     punch_list: list[PunchListItem] = []
