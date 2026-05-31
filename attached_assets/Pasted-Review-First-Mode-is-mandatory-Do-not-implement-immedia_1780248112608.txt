@@ -1,0 +1,179 @@
+Review First Mode is mandatory.
+
+Do not implement immediately.
+
+First review this UI issue and provide a short assessment:
+- confirm the issue
+- identify the exact UI functions likely affected
+- confirm no calculation/data logic needs to change
+- confirm tests needed
+- wait for my approval before implementation
+
+Implementation may begin only after I write:
+Proceed with implementation
+
+====================================================
+REQUEST TO REVIEW
+====================================================
+
+Feature:
+Allocation mobile UI optimization.
+
+Current issue:
+The new Allocation Quick Presets work functionally, but the portrait mobile layout wastes too much vertical space.
+
+Problems:
+1. Quick Presets are stacked vertically:
+   Saudi
+   US
+   All
+
+2. KPI Summary is stacked vertically:
+   Market Value
+   Cost
+   Unrealized P&L
+   Weight
+   Holdings
+
+This makes the Allocation tab too long on mobile.
+
+====================================================
+OBJECTIVE
+====================================================
+
+Optimize portrait mobile layout only.
+
+This is UI layout optimization only.
+
+Do not change:
+- calculations
+- valuation engine
+- FX engine
+- allocation filtering logic
+- holdings data
+- accounts data
+- transactions
+- FIFO
+- price routing
+- SAHMK
+- Yahoo refresh
+- test runner history
+
+====================================================
+REQUIRED CHANGE 1 — QUICK PRESETS
+====================================================
+
+Replace the vertical preset buttons with one compact horizontal row.
+
+Current:
+[Saudi]
+[US]
+[All]
+
+Required:
+[🇸🇦 Saudi] [🇺🇸 US] [🌐 All]
+
+Rules:
+- Single row in portrait mode.
+- Equal width if possible.
+- Touch friendly.
+- No vertical stacking.
+- No horizontal scrolling.
+- Keep the same behavior exactly:
+  - Saudi sets Market = Saudi
+  - US sets Market = US
+  - All clears Market filter
+
+Do not create new filter logic.
+Use the existing Market filter state only.
+
+====================================================
+REQUIRED CHANGE 2 — KPI SUMMARY
+====================================================
+
+Convert the filtered KPI summary from vertical stacking into compact cards.
+
+Current portrait layout is too tall.
+
+Required portrait layout:
+
+Row 1:
+Market Value | Cost
+
+Row 2:
+Unrealized P&L | Weight
+
+Row 3:
+Holdings
+
+Rules:
+- Compact spacing.
+- Clear labels.
+- Values remain readable.
+- Keep P&L percentage badge.
+- Do not change any formula.
+- Do not change what the KPIs mean.
+- KPIs must still update based on current filters.
+- KPIs must still use selected global base currency.
+
+Landscape:
+Keep current horizontal KPI layout if it already works well.
+
+====================================================
+DATA INTEGRITY RULES
+====================================================
+
+This change must be UI-only.
+
+Do not modify:
+- calculate_portfolio_valuation()
+- valuation models
+- FX conversion logic
+- holdings.json structure
+- accounts.json structure
+- transactions
+- closed lots
+- market data router
+
+If you find calculation changes are needed, stop and report before coding.
+
+====================================================
+TESTS TO PROPOSE
+====================================================
+
+ALLOC-UI-01
+Quick presets render in one horizontal row on portrait.
+
+ALLOC-UI-02
+Saudi preset still filters Market = Saudi.
+
+ALLOC-UI-03
+US preset still filters Market = US.
+
+ALLOC-UI-04
+All preset still clears Market filter.
+
+ALLOC-UI-05
+KPI summary renders compactly in portrait.
+
+ALLOC-UI-06
+KPI values remain unchanged before/after layout change.
+
+ALLOC-UI-07
+KPI values update correctly when filters change.
+
+ALLOC-UI-08
+Landscape layout remains usable.
+
+ALLOC-UI-09
+Full regression suite remains PASS.
+
+====================================================
+SUCCESS CRITERIA
+====================================================
+
+- Preset buttons no longer consume three vertical rows.
+- KPI summary no longer consumes excessive vertical space.
+- Allocation tab becomes more mobile-friendly.
+- No valuation, accounting, filtering, or data behavior changes.
+- Full test suite passes.
