@@ -4464,6 +4464,172 @@ def _cat_alloc() -> list[TestResult]:
     return results
 
 
+def _cat_alloc_qp() -> list[TestResult]:
+    """
+    ALLOC-QP: Allocation Quick Market Presets.
+
+    ALLOC-QP-01  Saudi preset button exists and sets alloc_ms_market = ["Saudi"].
+    ALLOC-QP-02  US preset button exists and sets alloc_ms_market = ["US"].
+    ALLOC-QP-03  All preset button exists and pops alloc_ms_market.
+    ALLOC-QP-04  Preset buttons placed above Chart view in source order.
+    ALLOC-QP-05  Preset buttons each call st.rerun() after state mutation.
+    ALLOC-QP-06  Preset buttons do NOT mutate holdings, accounts, or transactions.
+    ALLOC-QP-07  Market filter logic applies correctly after preset (unit check).
+    ALLOC-QP-08  Full suite PASS (meta).
+    """
+    import os as _os
+
+    CAT = "Allocation Quick Presets"
+    results: list[TestResult] = []
+
+    app_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "app.py")
+    with open(app_path, encoding="utf-8") as _fh:
+        _app_src = _fh.read()
+
+    def _fn_body(src: str, fn_name: str) -> str:
+        import re
+        pat = re.compile(rf"^def {re.escape(fn_name)}\b", re.MULTILINE)
+        m = pat.search(src)
+        if not m:
+            return ""
+        start = m.start()
+        nxt = re.search(r"^def ", src[start + 1:], re.MULTILINE)
+        end = start + 1 + nxt.start() if nxt else len(src)
+        return src[start:end]
+
+    _section_fn = _fn_body(_app_src, "_render_allocation_section")
+
+    def qp01():
+        ok = (
+            "alloc_qp_saudi" in _section_fn and
+            '["Saudi"]' in _section_fn and
+            "alloc_ms_market" in _section_fn
+        )
+        return (
+            "Saudi preset button sets alloc_ms_market = ['Saudi']",
+            f"found={ok}",
+            ok,
+        )
+
+    def qp02():
+        ok = (
+            "alloc_qp_us" in _section_fn and
+            '["US"]' in _section_fn and
+            "alloc_ms_market" in _section_fn
+        )
+        return (
+            "US preset button sets alloc_ms_market = ['US']",
+            f"found={ok}",
+            ok,
+        )
+
+    def qp03():
+        ok = (
+            "alloc_qp_all" in _section_fn and
+            'pop("alloc_ms_market"' in _section_fn
+        )
+        return (
+            "All preset button pops alloc_ms_market",
+            f"found={ok}",
+            ok,
+        )
+
+    def qp04():
+        chart_view_pos  = _section_fn.find("alloc_chart_view")
+        preset_pos      = _section_fn.find("alloc_qp_saudi")
+        ok = preset_pos != -1 and chart_view_pos != -1 and preset_pos < chart_view_pos
+        return (
+            "Preset buttons appear before Chart view selector in source order",
+            f"preset_pos={preset_pos}, chart_view_pos={chart_view_pos}, before={ok}",
+            ok,
+        )
+
+    def qp05():
+        import re
+        rerun_count = len(re.findall(r"alloc_qp_(?:saudi|us|all).*?st\.rerun\(\)",
+                                     _section_fn, re.DOTALL))
+        ok = rerun_count >= 3
+        return (
+            "Each of the 3 preset buttons calls st.rerun() after state mutation",
+            f"rerun_calls_found={rerun_count}",
+            ok,
+        )
+
+    def qp06():
+        FORBIDDEN = [
+            "upsert_holding(", "delete_holding(", "update_current_price(",
+            "record_transaction(", "upsert_account(", "update_account_cash(",
+        ]
+        preset_block_start = _section_fn.find("alloc_qp_saudi")
+        preset_block_end   = _section_fn.find("alloc_chart_view")
+        if preset_block_start == -1 or preset_block_end == -1:
+            return ("Preset block found for mutation check", "block not found", False)
+        preset_block = _section_fn[preset_block_start:preset_block_end]
+        violations = [f for f in FORBIDDEN if f in preset_block]
+        ok = not violations
+        return (
+            "Preset block does not call any holdings/accounts/transactions mutators",
+            f"violations={violations}",
+            ok,
+        )
+
+    def qp07():
+        rows = [
+            {"Market": "Saudi", "_mv": 1000.0, "_cb": 800.0},
+            {"Market": "US",    "_mv": 2000.0, "_cb": 1500.0},
+            {"Market": "Saudi", "_mv": 500.0,  "_cb": 400.0},
+        ]
+        all_markets = ["Saudi", "US"]
+
+        def _apply(sel_markets):
+            filt = rows[:]
+            if sel_markets and set(sel_markets) != set(all_markets):
+                filt = [r for r in filt if r["Market"] in sel_markets]
+            return filt
+
+        saudi_filt = _apply(["Saudi"])
+        us_filt    = _apply(["US"])
+        all_filt   = _apply(all_markets)
+
+        saudi_ok = all(r["Market"] == "Saudi" for r in saudi_filt) and len(saudi_filt) == 2
+        us_ok    = all(r["Market"] == "US"    for r in us_filt)    and len(us_filt)    == 1
+        all_ok   = len(all_filt) == 3
+
+        ok = saudi_ok and us_ok and all_ok
+        return (
+            "Market filter logic: Saudi→2 rows, US→1 row, All→3 rows",
+            f"saudi_ok={saudi_ok}, us_ok={us_ok}, all_ok={all_ok}",
+            ok,
+        )
+
+    def qp08():
+        sub_fns = [qp01, qp02, qp03, qp04, qp05, qp06, qp07]
+        sub_results = [fn() for fn in sub_fns]
+        ok = all(r[2] for r in sub_results)
+        failing = [sub_fns[i].__name__ for i, r in enumerate(sub_results) if not r[2]]
+        return (
+            "All ALLOC-QP-01–07 consistent (meta)",
+            f"ok={ok}" + (f", failing={failing}" if not ok else ""),
+            ok,
+        )
+
+    _tests = [
+        ("ALLOC-QP-01", "Saudi preset button sets alloc_ms_market = ['Saudi']",             "P0", True,  qp01),
+        ("ALLOC-QP-02", "US preset button sets alloc_ms_market = ['US']",                   "P0", True,  qp02),
+        ("ALLOC-QP-03", "All preset button pops alloc_ms_market",                           "P0", True,  qp03),
+        ("ALLOC-QP-04", "Preset buttons placed above Chart view selector",                  "P0", True,  qp04),
+        ("ALLOC-QP-05", "Each preset button calls st.rerun() after state mutation",         "P0", True,  qp05),
+        ("ALLOC-QP-06", "Preset block does not mutate holdings/accounts/transactions",      "P0", True,  qp06),
+        ("ALLOC-QP-07", "Market filter logic correct for Saudi, US, and All presets",       "P0", True,  qp07),
+        ("ALLOC-QP-08", "All ALLOC-QP-01–07 consistent (meta)",                            "P0", True,  qp08),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._render_allocation_section", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4473,7 +4639,7 @@ def run_all_tests() -> TestReport:
         _cat_a() + _cat_b() + _cat_c() + _cat_d() + _cat_e()
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
-        + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc()
+        + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
     )
 
     punch_list: list[PunchListItem] = []

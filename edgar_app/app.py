@@ -2141,6 +2141,24 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _all_ccys_u    = sorted(_df["CCY"].unique().tolist())
     _all_companies = sorted(_df["Company"].unique().tolist())
 
+    # ── Quick market presets ──────────────────────────────────────────────────
+    _qp1, _qp2, _qp3, _qp_rest = st.columns([1, 1, 1, 3])
+    with _qp1:
+        if st.button("🇸🇦 Saudi", key="alloc_qp_saudi", use_container_width=True,
+                     help="Show Saudi market holdings only"):
+            st.session_state["alloc_ms_market"] = ["Saudi"]
+            st.rerun()
+    with _qp2:
+        if st.button("🇺🇸 US", key="alloc_qp_us", use_container_width=True,
+                     help="Show US market holdings only"):
+            st.session_state["alloc_ms_market"] = ["US"]
+            st.rerun()
+    with _qp3:
+        if st.button("🌐 All", key="alloc_qp_all", use_container_width=True,
+                     help="Clear market filter — show all holdings"):
+            st.session_state.pop("alloc_ms_market", None)
+            st.rerun()
+
     # ── Chart view ────────────────────────────────────────────────────────────
     _view = st.selectbox(
         "Chart view",
