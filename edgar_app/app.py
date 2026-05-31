@@ -191,6 +191,22 @@ st.markdown(
     .gh-val-xs  { font-size: 1rem;    color: #6b7280;   line-height: 1.4; }
     .gh-pct     { font-size: 0.82rem; font-weight: 500; }
 
+    /* ── Filtered Allocation Summary KPI cards ───────────────────────────
+       Pure-HTML flex grid — bypasses Streamlit column system so portrait
+       layout is always reliable.  Each card shrinks to fit; on portrait
+       min-width:42% forces 2-per-row; on wider screens all 5 sit in one row.
+    ──────────────────────────────────────────────────────────────────── */
+    .fas-kpi-grid { display:flex; flex-wrap:wrap; gap:0.5rem 1.5rem; margin:0.5rem 0 1rem; }
+    .fas-kpi-card { flex:1; min-width:42%; }
+    .fas-kpi-lbl  { font-size:0.72rem; color:#6b7280; margin-bottom:2px; }
+    .fas-kpi-val  { font-size:1.35rem; font-weight:700; line-height:1.15; }
+    .fas-kpi-pct  { font-size:0.78rem; font-weight:600; border-radius:999px;
+                    padding:2px 7px; display:inline-block; margin-top:3px; }
+    @media (min-width: 640px) {
+        /* Landscape / wider screens — all 5 cards on one row */
+        .fas-kpi-card { min-width:0; }
+    }
+
     /* ── Header — compact on narrow landscape phones (≤768 px) ─────────── */
     @media (max-width: 768px) {
         /* Drop the Arabic name; keep the compass icon only */
@@ -202,10 +218,12 @@ st.markdown(
         .gh-val-sm   { font-size: 0.9rem  !important; }
         .gh-val-xs   { font-size: 0.8rem  !important; }
         .gh-pct      { font-size: 0.7rem  !important; }
-        /* Prevent Streamlit from stacking narrow columns — lets 2- and 3-col
-           rows stay horizontal on portrait phones (min-width default ~200 px
-           causes wrapping at small viewport widths). */
-        [data-testid="column"] { min-width: 0 !important; }
+        /* Prevent Streamlit from stacking narrow columns.
+           Root cause: stHorizontalBlock uses flex-wrap:wrap + column
+           min-width ~200 px → columns wrap on portrait phones.
+           Fix: kill wrap on the parent and let columns shrink freely. */
+        [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+        [data-testid="column"] { min-width: 0 !important; flex: 1 !important; }
     }
 
     /* ── Tab bar — always horizontally scrollable, never wraps ──────────── */
@@ -2255,25 +2273,35 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.0f}"
 
-    # Row 1 — Market Value | Cost
-    _kr1, _kr2 = st.columns(2)
-    _kr1.metric(f"Market Value ({base_ccy})", _fmt_compact(_fas_mv))
-    _kr2.metric(f"Cost ({base_ccy})",          _fmt_compact(_fas_cb))
-    # Row 2 — Unrealized P&L | Weight
-    _kr3, _kr4 = st.columns(2)
-    _kr3.metric(
-        f"Unrealized P&L ({base_ccy})",
-        f"{_pnl_sign}{_fmt_compact(_fas_pnl)}",
-        delta=f"{_pnl_sign}{_fas_pnl_pct:.1f}%",
-        delta_color=_pnl_color,
-    )
-    _kr4.metric(
-        "Weight",
-        f"{_fas_weight:.1f}%",
-        help="Filtered MV ÷ total open holdings MV",
-    )
-    # Row 3 — Holdings (full width)
-    st.metric("Holdings", str(_fas_n))
+    # ── KPI grid — pure HTML flex so portrait layout is always reliable ──────
+    _arrow   = "↑" if _fas_pnl >= 0 else "↓"
+    _pct_bg  = "#dcfce7" if _fas_pnl >= 0 else "#fee2e2"
+    _pct_fg  = "#15803d" if _fas_pnl >= 0 else "#b91c1c"
+    st.markdown(f"""
+<div class="fas-kpi-grid">
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Market Value ({base_ccy})</div>
+    <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}</div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Cost ({base_ccy})</div>
+    <div class="fas-kpi-val">{_fmt_compact(_fas_cb)}</div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">P&amp;L ({base_ccy})</div>
+    <div class="fas-kpi-val" style="color:{_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}</div>
+    <div><span class="fas-kpi-pct" style="background:{_pct_bg};color:{_pct_fg};">{_arrow} {_pnl_sign}{_fas_pnl_pct:.1f}%</span></div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Weight</div>
+    <div class="fas-kpi-val">{_fas_weight:.1f}%</div>
+  </div>
+  <div class="fas-kpi-card">
+    <div class="fas-kpi-lbl">Holdings</div>
+    <div class="fas-kpi-val">{_fas_n}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     # ── Aggregate for pie ─────────────────────────────────────────────────────
     _agg = (
