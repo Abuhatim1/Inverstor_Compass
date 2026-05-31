@@ -191,6 +191,19 @@ st.markdown(
     .gh-val-xs  { font-size: 1rem;    color: #6b7280;   line-height: 1.4; }
     .gh-pct     { font-size: 0.82rem; font-weight: 500; }
 
+    /* ── Header — compact on narrow landscape phones (≤768 px) ─────────── */
+    @media (max-width: 768px) {
+        /* Drop the Arabic name; keep the compass icon only */
+        .bousala-appbar .ba-name { display: none !important; }
+        /* Tighten KPI strip gap and scale down the large numbers */
+        .gh-kpi-row  { gap: 0.9rem !important; }
+        .gh-val-big  { font-size: 1.35rem !important; }
+        .gh-val-med  { font-size: 1.05rem !important; }
+        .gh-val-sm   { font-size: 0.9rem  !important; }
+        .gh-val-xs   { font-size: 0.8rem  !important; }
+        .gh-pct      { font-size: 0.7rem  !important; }
+    }
+
     /* ── Tab bar — always horizontally scrollable, never wraps ──────────── */
     [data-testid="stTabs"] > div:first-child {
         overflow-x: auto !important;
