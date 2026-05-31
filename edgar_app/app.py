@@ -2242,19 +2242,28 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
     _pnl_sign     = "+" if _fas_pnl >= 0 else ""
 
+    def _fmt_compact(v: float) -> str:
+        """Round to nearest K or M for compact display; keep sign."""
+        av = abs(v)
+        if av >= 1_000_000:
+            return f"{v / 1_000_000:.1f}M"
+        if av >= 10_000:
+            return f"{v / 1_000:.0f}K"
+        return f"{v:,.0f}"
+
     with st.container():
         _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
         _sm1.metric(
             f"Market Value ({base_ccy})",
-            f"{_fas_mv:,.0f}",
+            _fmt_compact(_fas_mv),
         )
         _sm2.metric(
             f"Cost ({base_ccy})",
-            f"{_fas_cb:,.0f}",
+            _fmt_compact(_fas_cb),
         )
         _sm3.metric(
             f"Unrealized P&L ({base_ccy})",
-            f"{_pnl_sign}{_fas_pnl:,.0f}",
+            f"{_pnl_sign}{_fmt_compact(_fas_pnl)}",
             delta=f"{_pnl_sign}{_fas_pnl_pct:.1f}%",
             delta_color=_pnl_color,
         )
