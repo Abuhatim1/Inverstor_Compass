@@ -4687,15 +4687,16 @@ def _cat_alloc_ui() -> list[TestResult]:
         return ("All preset pops alloc_ms_market", f"found={ok}", ok)
 
     def ui05():
-        # KPI summary now rendered as a pure-HTML flex grid (fas-kpi-grid)
-        # bypassing Streamlit columns — check for the HTML class markers.
-        has_grid  = "fas-kpi-grid" in _section_fn
-        has_cards = _section_fn.count("fas-kpi-card") >= 5
-        has_html  = "unsafe_allow_html=True" in _section_fn
-        ok = has_grid and has_cards and has_html
+        fmt_pos = _section_fn.find("_fmt_compact")
+        if fmt_pos == -1:
+            return ("KPI 2-2-1 layout check", "fmt_compact not found", False)
+        kpi_area = _section_fn[fmt_pos:]
+        col2_count = len(_re.findall(r"st\.columns\(2\)", kpi_area))
+        solo_holdings = 'st.metric("Holdings"' in kpi_area or "st.metric('Holdings'" in kpi_area
+        ok = col2_count >= 2 and solo_holdings
         return (
-            "KPI summary uses HTML flex grid (fas-kpi-grid with ≥5 fas-kpi-card divs)",
-            f"has_grid={has_grid}, has_cards={has_cards}, has_html={has_html}",
+            "KPI summary uses 2-col rows + solo Holdings (2-2-1 layout)",
+            f"st.columns(2) count={col2_count}, solo_holdings={solo_holdings}",
             ok,
         )
 
