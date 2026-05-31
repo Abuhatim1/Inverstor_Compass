@@ -6187,6 +6187,14 @@ def render_global_header() -> str:
     _pc      = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
     _ps      = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
 
+    def _gh_fmt(v: float) -> str:
+        av = abs(v)
+        if av >= 1_000_000:
+            return f"{v / 1_000_000:.1f}M"
+        if av >= 10_000:
+            return f"{v / 1_000:.0f}K"
+        return f"{v:,.0f}"
+
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
         if _has:
@@ -6196,19 +6204,19 @@ def render_global_header() -> str:
                 # Portfolio value — largest
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Portfolio ({_base_ccy})</div>'
-                f'    <div class="gh-val-big">{_gh_val.total_portfolio_value_base:,.0f}</div>'
+                f'    <div class="gh-val-big">{_gh_fmt(_gh_val.total_portfolio_value_base)}</div>'
                 f'  </div>'
                 # P&L — medium-large, coloured
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Unrealized P&amp;L</div>'
                 f'    <div class="gh-val-med" style="color:{_pc}">'
-                f'      {_ps}{_gh_val.unrealized_pnl_base:,.0f} {_pct_html}'
+                f'      {_ps}{_gh_fmt(_gh_val.unrealized_pnl_base)} {_pct_html}'
                 f'    </div>'
                 f'  </div>'
                 # Cash — medium
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Cash</div>'
-                f'    <div class="gh-val-sm">{_gh_val.cash_value_base:,.0f}</div>'
+                f'    <div class="gh-val-sm">{_gh_fmt(_gh_val.cash_value_base)}</div>'
                 f'  </div>'
                 # Last refresh — small / muted
                 f'  <div class="gh-kpi">'
