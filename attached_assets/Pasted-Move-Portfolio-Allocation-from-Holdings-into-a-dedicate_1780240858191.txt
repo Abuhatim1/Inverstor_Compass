@@ -1,0 +1,72 @@
+Move Portfolio Allocation from Holdings into a dedicated Allocation tab.
+
+Before any change:
+Create checkpoint:
+BEFORE_MOVE_ALLOCATION_TO_ALLOCATION_TAB
+
+Do not modify:
+- valuation engine
+- FIFO
+- transactions
+- accounts
+- holdings price refresh
+- market_data_router
+- performance engine
+- SAHMK discovery
+- test runner history
+
+Scope:
+UI organization only.
+
+Required:
+
+1. Create a new main tab:
+📊 Allocation
+
+2. Move the entire existing Portfolio Allocation section from Holdings to the new Allocation tab, including:
+- Chart view selector
+- Filters
+- Filtered Allocation Summary
+- Allocation chart
+- Export Table CSV button
+- Filtered holdings table
+
+3. Remove Portfolio Allocation from Holdings page completely.
+
+4. Holdings page should only contain:
+- holdings table
+- row selection/action bar
+- refresh prices
+- download CSV
+- bulk upload
+- add new position
+- market open/closed status if already there
+
+5. Allocation tab must use the exact same existing allocation logic and centralized valuation data.
+Do not rewrite allocation calculations.
+
+6. Allocation tab must respect current base currency.
+
+7. Allocation tab must not call yfinance, SAHMK, or any external API directly.
+
+8. Allocation tab must not update holdings, accounts, transactions, or prices.
+
+9. Keep current Allocation behavior unchanged except for location.
+
+10. Add regression tests:
+ALLOC-01 Allocation tab exists.
+ALLOC-02 Holdings page no longer renders Portfolio Allocation.
+ALLOC-03 Allocation tab renders chart view selector.
+ALLOC-04 Allocation tab renders filters.
+ALLOC-05 Allocation tab renders filtered summary.
+ALLOC-06 Allocation tab renders chart.
+ALLOC-07 Allocation tab renders filtered table.
+ALLOC-08 Allocation values match centralized valuation data.
+ALLOC-09 Base currency switch updates Allocation values.
+ALLOC-10 Holdings valuation unchanged.
+ALLOC-11 Full suite PASS.
+
+Expected:
+Holdings becomes operational only.
+Allocation becomes a dedicated analytical tab.
+No accounting, valuation, price refresh, transaction, or portfolio total behavior changes.
