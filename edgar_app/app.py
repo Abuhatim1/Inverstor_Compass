@@ -2214,11 +2214,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 default=st.session_state.get("alloc_ms_sector", _all_sectors),
                 key="alloc_ms_sector",
             )
-            _sel_markets   = st.multiselect(
-                "Market", _all_markets,
-                default=st.session_state.get("alloc_ms_market", _all_markets),
-                key="alloc_ms_market",
-            )
+
         with _fc2:
             _sel_ccys_u    = st.multiselect(
                 "Currency", _all_ccys_u,

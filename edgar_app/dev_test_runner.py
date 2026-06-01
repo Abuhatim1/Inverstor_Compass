@@ -4909,6 +4909,65 @@ def _cat_hld_ui() -> list[TestResult]:
     return results
 
 
+def _cat_alloc_mkt() -> list[TestResult]:
+    """
+    ALLOC-MKT: Market multiselect removed from Filters panel (minimal UI simplification).
+
+    ALLOC-MKT-01  Market multiselect (key="alloc_ms_market") absent from Filters expander.
+    ALLOC-MKT-02  Filter chain still reads alloc_ms_market for market filtering (_sel_markets).
+    """
+    import pathlib as _pl
+
+    CAT = "Allocation Market Filter"
+    results: list[TestResult] = []
+    _src = _pl.Path(__file__).parent / "app.py"
+    _text = _src.read_text(encoding="utf-8")
+
+    # Isolate _render_allocation_section source
+    _start = _text.find("def _render_allocation_section(")
+    _end   = _text.find("\ndef ", _start + 1)
+    _section_fn = _text[_start:_end] if _start != -1 and _end != -1 else _text
+
+    def mkt01():
+        """
+        The Market multiselect widget with key='alloc_ms_market' must no longer
+        appear inside the Filters expander. The preset radio is the only Market UI.
+        """
+        # The multiselect used: st.multiselect(\n...\n key="alloc_ms_market"
+        # Check that no multiselect call uses key="alloc_ms_market"
+        import re as _re
+        pattern = r'st\.multiselect\([^)]*key\s*=\s*["\']alloc_ms_market["\']'
+        found = bool(_re.search(pattern, _section_fn, _re.DOTALL))
+        ok = not found
+        return (
+            "Market multiselect (key=alloc_ms_market) absent from Filters expander",
+            f"multiselect with alloc_ms_market key {'still present' if found else 'not found (correct)'}",
+            ok,
+        )
+
+    def mkt02():
+        """
+        The filter chain must still read alloc_ms_market from session state to
+        derive _sel_markets (the preset radio is the sole writer of this key).
+        """
+        ok = 'st.session_state.get("alloc_ms_market"' in _section_fn
+        return (
+            "Filter chain reads alloc_ms_market for market filtering",
+            f"session_state.get('alloc_ms_market') {'found' if ok else 'NOT FOUND'}",
+            ok,
+        )
+
+    _tests = [
+        ("ALLOC-MKT-01", "Market multiselect absent from Filters expander",           "P0", True, mkt01),
+        ("ALLOC-MKT-02", "Filter chain still reads alloc_ms_market for filtering",    "P0", True, mkt02),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._render_allocation_section", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4919,7 +4978,7 @@ def run_all_tests() -> TestReport:
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
         + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
-        + _cat_alloc_ui() + _cat_hld_ui()
+        + _cat_alloc_ui() + _cat_hld_ui() + _cat_alloc_mkt()
     )
 
     punch_list: list[PunchListItem] = []
