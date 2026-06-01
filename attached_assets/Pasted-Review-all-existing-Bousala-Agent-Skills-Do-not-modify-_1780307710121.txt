@@ -1,0 +1,162 @@
+Review all existing Bousala Agent Skills.
+
+Do not modify any files.
+
+Do not create new skills.
+
+Do not edit existing skills.
+
+Produce a read-only governance audit and consolidation plan only.
+
+────────────────────────────
+
+OBJECTIVES
+
+Evaluate:
+
+1. Which rules are duplicated across skills.
+2. Which skill should own each duplicated rule.
+3. Which duplicated rules should be removed later.
+4. Which rules must remain repeated because they serve as loading/index/reference rules.
+5. Any conflicts between skills.
+6. Any stale project-state information.
+7. Any missing high-risk governance rule.
+8. Any governance gaps that could realistically lead to future defects.
+
+────────────────────────────
+
+EXPECTED OWNERSHIP MODEL
+
+bousala-project-state
+
+Owns:
+
+* current project state
+* loading order
+* implemented modules
+* known limitations
+* roadmap status
+* current priorities
+
+bousala-architecture
+
+Owns:
+
+* Review First Mode
+* architecture principles
+* change management
+* implementation workflow
+* MVP priorities
+
+bousala-investment-domain
+
+Owns:
+
+* portfolio accounting
+* holdings
+* transactions
+* cash
+* valuation
+* FX
+* allocation
+* performance
+* risk
+
+bousala-safe-zones
+
+Owns:
+
+* protected areas
+* risk classification
+* escalation rules
+* minimal-change principle
+
+bousala-test-protocol
+
+Owns:
+
+* testing rules
+* regression requirements
+* test categories
+* completion criteria
+* developer test runner governance
+
+────────────────────────────
+
+AGENT CONTEXT EFFICIENCY ASSESSMENT
+
+In addition to governance review, evaluate the current skill architecture from a context-loading and token-efficiency perspective.
+
+For each skill assess:
+
+* usefulness
+* frequency of expected loading
+* risk reduction value
+* context/token overhead
+* maintenance burden
+
+Classify each skill as:
+
+* Essential
+* Valuable
+* Optional
+* Redundant
+
+Identify:
+
+1. Skills that provide high value with low context cost.
+2. Skills that provide high value but high context cost.
+3. Skills likely to be loaded frequently while contributing little value.
+4. Skills that duplicate information already owned elsewhere.
+5. Skills that should remain separate.
+6. Skills that should eventually be merged.
+
+────────────────────────────
+
+BALANCE ASSESSMENT
+
+Evaluate tradeoffs between:
+
+* Risk reduction
+* Output quality
+* Development velocity
+* Agent context efficiency
+* Long-term maintainability
+
+Specifically answer:
+
+1. Are the current Bousala skills likely to increase token consumption significantly?
+2. Is the current number of skills appropriate for the current MVP stage?
+3. What is the recommended maximum number of governance skills at the current project maturity level?
+4. Which skill provides the highest return on context investment?
+5. Which skill provides the lowest return on context investment?
+6. What governance information should remain in skills?
+7. What governance information should be moved to documentation instead of skills?
+
+────────────────────────────
+
+DELIVERABLES
+
+Provide:
+
+1. Duplication Matrix
+2. Conflict Matrix
+3. Governance Gap Analysis
+4. Context Efficiency Analysis
+5. Recommended Ownership Map
+6. Exact sections recommended for future removal or consolidation
+7. Risks if we do nothing
+8. Risks if we consolidate now
+9. Recommended maximum governance footprint
+10. Recommendation:
+
+* Keep current structure
+* Consolidate some skills
+* Split some skills
+* Reduce governance footprint
+
+Include rationale for every recommendation.
+
+Do not modify any files.
+
+Analysis only.
