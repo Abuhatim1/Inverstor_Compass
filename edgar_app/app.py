@@ -2166,11 +2166,8 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 
     _df = pd.DataFrame(_rows)
 
-    # ── Unique values for filters (defined before expander so reachable below) ─
-    _all_sectors   = sorted(_df["Sector"].unique().tolist())
+    # ── Market values (full set — needed for click-to-filter map) ────────────
     _all_markets   = sorted(_df["Market"].unique().tolist())
-    _all_ccys_u    = sorted(_df["CCY"].unique().tolist())
-    _all_companies = sorted(_df["Company"].unique().tolist())
 
     # ── Quick market presets — horizontal radio (portrait-safe) ──────────────
     _cur_mkt    = st.session_state.get("alloc_ms_market", [])
@@ -2195,6 +2192,33 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     elif _qp_choice == "🌐 All" and _cur_mkt:
         st.session_state.pop("alloc_ms_market", None)
         st.rerun()
+
+    # ── Market scope (sole source: quick preset radio) ────────────────────────
+    if _qp_choice == "🇸🇦 Saudi":
+        market_scope: list[str] | None = ["Saudi"]
+    elif _qp_choice == "🇺🇸 US":
+        market_scope = ["US"]
+    else:
+        market_scope = None  # All markets — no restriction
+
+    # Market-scoped base DataFrame — child filters operate within this scope
+    _mkt_df = _df[_df["Market"].isin(market_scope)] if market_scope else _df
+
+    # Child filter option lists scoped to active market preset
+    _all_sectors   = sorted(_mkt_df["Sector"].unique().tolist())
+    _all_ccys_u    = sorted(_mkt_df["CCY"].unique().tolist())
+    _all_companies = sorted(_mkt_df["Company"].unique().tolist())
+
+    # Purge stale child filter state — remove any stored values that no longer
+    # exist within the new market scope (prevents false "No holdings match" msg)
+    for _k, _valid in [
+        ("alloc_ms_sector", _all_sectors),
+        ("alloc_ms_ccy",    _all_ccys_u),
+        ("alloc_ms_asset",  _all_companies),
+    ]:
+        _stored = st.session_state.get(_k)
+        if _stored and not all(v in _valid for v in _stored):
+            st.session_state.pop(_k, None)
 
     # ── Chart view ────────────────────────────────────────────────────────────
     _view = st.selectbox(
@@ -2227,21 +2251,18 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 key="alloc_ms_asset",
             )
         if st.button("↺ Reset filters", key="alloc_reset_filters"):
-            for _k in ("alloc_ms_sector","alloc_ms_market","alloc_ms_ccy","alloc_ms_asset"):
+            for _k in ("alloc_ms_sector", "alloc_ms_ccy", "alloc_ms_asset"):
                 st.session_state.pop(_k, None)
             st.rerun()
-    # Read current selections (fall back to all if user hasn't interacted yet)
+    # Read current child selections (fall back to all scoped options)
     _sel_sectors   = st.session_state.get("alloc_ms_sector",   _all_sectors)
-    _sel_markets   = st.session_state.get("alloc_ms_market",   _all_markets)
     _sel_ccys_u    = st.session_state.get("alloc_ms_ccy",      _all_ccys_u)
     _sel_companies = st.session_state.get("alloc_ms_asset",    _all_companies)
 
-    # ── Apply filters ─────────────────────────────────────────────────────────
-    _filt = _df.copy()
+    # ── Apply filters — base is market-scoped; child filters applied on top ───
+    _filt = _mkt_df.copy()
     if _sel_sectors   and set(_sel_sectors)   != set(_all_sectors):
         _filt = _filt[_filt["Sector"].isin(_sel_sectors)]
-    if _sel_markets   and set(_sel_markets)   != set(_all_markets):
-        _filt = _filt[_filt["Market"].isin(_sel_markets)]
     if _sel_ccys_u    and set(_sel_ccys_u)    != set(_all_ccys_u):
         _filt = _filt[_filt["CCY"].isin(_sel_ccys_u)]
     if _sel_companies and set(_sel_companies) != set(_all_companies):
@@ -2388,8 +2409,8 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _ts_file    = datetime.now().strftime("%Y%m%d_%H%M")
     _slug       = _view.replace(" ", "_").lower()
     _active_filters: list[str] = []
+    if market_scope:                                _active_filters.append(f"Market: {', '.join(market_scope)}")
     if set(_sel_sectors)   != set(_all_sectors):   _active_filters.append(f"Sector: {', '.join(_sel_sectors)}")
-    if set(_sel_markets)   != set(_all_markets):   _active_filters.append(f"Market: {', '.join(_sel_markets)}")
     if set(_sel_ccys_u)    != set(_all_ccys_u):    _active_filters.append(f"CCY: {', '.join(_sel_ccys_u)}")
     if set(_sel_companies) != set(_all_companies): _active_filters.append(f"Assets: {len(_sel_companies)} selected")
     _filter_str = "; ".join(_active_filters) if _active_filters else "All holdings"

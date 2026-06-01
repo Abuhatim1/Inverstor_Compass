@@ -1,0 +1,116 @@
+Additional implementation requirements before proceeding:
+
+Before implementing, please explicitly confirm the following points.
+
+1. Purge stale child filter state before rendering widgets
+
+When Market preset changes between:
+
+* Saudi
+* US
+* All
+
+the child filter session state must be validated before rendering the multiselect widgets.
+
+Child filter keys:
+
+* alloc_ms_sector
+* alloc_ms_ccy
+* alloc_ms_asset
+
+If any stored selected value is no longer available within the new market-scoped option list, remove that session state key before rendering the widget.
+
+This purge must happen before the multiselect widgets are created, not after.
+
+Expected behavior:
+
+* If user switches from US to Saudi, any previously selected US-only asset is cleared automatically.
+* If user switches from Saudi to US, any previously selected Saudi-only asset is cleared automatically.
+* If user switches to All, valid selections may remain only if still valid under All.
+* No stale asset, sector, or currency selection should survive when it is outside the current market scope.
+
+2. Avoid false “No holdings match” message
+
+After changing Market preset, the app should not show:
+“No holdings match the selected filters”
+only because an old child filter selection remained in session state.
+
+The correct behavior is:
+
+* purge stale child filters first
+* then render scoped filter options
+* then apply filters
+* then show results
+
+3. Reset behavior must remain child-only
+
+The Reset filters button should clear only:
+
+* alloc_ms_sector
+* alloc_ms_ccy
+* alloc_ms_asset
+
+It must not change:
+
+* Saudi / US / All radio preset
+* base currency
+* valuation data
+* holdings data
+
+4. Market preset remains the parent scope
+
+Market preset is the only market selector.
+
+The hidden/removed Market multiselect must not be reintroduced.
+
+5. Add/verify regression tests
+
+Please add or verify tests covering:
+
+ALLOC-SCOPE-01
+Saudi preset limits Asset options to Saudi assets only.
+
+ALLOC-SCOPE-02
+US preset limits Asset options to US assets only.
+
+ALLOC-SCOPE-03
+All preset shows all valid assets.
+
+ALLOC-SCOPE-04
+Switching from US to Saudi purges stale US-only asset selections.
+
+ALLOC-SCOPE-05
+Switching from Saudi to US purges stale Saudi-only asset selections.
+
+ALLOC-SCOPE-06
+Reset clears child filters only and does not change Market preset.
+
+ALLOC-SCOPE-07
+No false “No holdings match” message appears after switching market if stale child filters were purged.
+
+ALLOC-SCOPE-08
+KPI summary updates correctly after market switch.
+
+ALLOC-SCOPE-09
+Chart and table update correctly after market switch.
+
+ALLOC-SCOPE-10
+Full regression suite remains PASS.
+
+6. Do not touch unrelated logic
+
+Do not modify:
+
+* valuation engine
+* FX engine
+* holdings data
+* accounts data
+* transactions
+* FIFO
+* price routing
+* SAHMK
+* Yahoo refresh
+* performance engine
+* main dashboard header
+
+This is only a filter-state integrity fix inside Allocation.

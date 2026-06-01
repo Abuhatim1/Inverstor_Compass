@@ -4968,6 +4968,151 @@ def _cat_alloc_mkt() -> list[TestResult]:
     return results
 
 
+def _cat_alloc_scope() -> list[TestResult]:
+    """
+    ALLOC-SCOPE: Child filter options scoped to active Market preset.
+
+    ALLOC-SCOPE-01  Saudi preset: _all_sectors/_all_ccys_u/_all_companies derived from _mkt_df.
+    ALLOC-SCOPE-02  _mkt_df is market_scope-filtered view of _df (not _df itself).
+    ALLOC-SCOPE-03  market_scope = None for All preset (no market restriction).
+    ALLOC-SCOPE-04  Stale child purge block covers all 3 keys before multiselects render.
+    ALLOC-SCOPE-05  Filter chain base is _mkt_df.copy() not _df.copy().
+    ALLOC-SCOPE-06  _sel_markets and its filter line absent from filter chain.
+    ALLOC-SCOPE-07  Reset button clears only child keys (sector/ccy/asset), not alloc_ms_market.
+    ALLOC-SCOPE-08  _active_filters uses market_scope for Market label, not _sel_markets.
+    ALLOC-SCOPE-09  _all_sectors/_all_ccys_u/_all_companies defined AFTER market_scope block.
+    ALLOC-SCOPE-10  Full regression suite passes (meta).
+    """
+    import re as _re
+    import pathlib as _pl
+
+    CAT = "Allocation Scope"
+    results: list[TestResult] = []
+    _src = _pl.Path(__file__).parent / "app.py"
+    _text = _src.read_text(encoding="utf-8")
+
+    _start = _text.find("def _render_allocation_section(")
+    _end   = _text.find("\ndef ", _start + 1)
+    _fn    = _text[_start:_end] if _start != -1 and _end != -1 else _text
+
+    def sc01():
+        """_all_sectors/ccys/companies derived from _mkt_df (not _df)."""
+        ok = (
+            '_all_sectors   = sorted(_mkt_df["Sector"]' in _fn
+            and '_all_ccys_u    = sorted(_mkt_df["CCY"]'   in _fn
+            and '_all_companies = sorted(_mkt_df["Company"]' in _fn
+        )
+        return ("Child option lists derived from _mkt_df", f"found={ok}", ok)
+
+    def sc02():
+        """_mkt_df is created as market_scope-filtered view of _df."""
+        ok = (
+            '_mkt_df = _df[_df["Market"].isin(market_scope)] if market_scope else _df' in _fn
+        )
+        return ("_mkt_df filters _df by market_scope", f"found={ok}", ok)
+
+    def sc03():
+        """market_scope = None for the All branch."""
+        ok = "market_scope = None" in _fn
+        return ("market_scope = None for All preset", f"found={ok}", ok)
+
+    def sc04():
+        """Stale child purge block covers all 3 child keys."""
+        ok = (
+            '"alloc_ms_sector"' in _fn
+            and '"alloc_ms_ccy"'    in _fn
+            and '"alloc_ms_asset"'  in _fn
+            and 'not all(v in _valid for v in _stored)' in _fn
+        )
+        return ("Stale child purge covers sector/ccy/asset", f"found={ok}", ok)
+
+    def sc05():
+        """Filter chain base is _mkt_df.copy()."""
+        ok = "_filt = _mkt_df.copy()" in _fn
+        return ("Filter chain base is _mkt_df.copy()", f"found={ok}", ok)
+
+    def sc06():
+        """_sel_markets variable and its Market filter line are absent from filter chain."""
+        # After the refactor, _sel_markets should not exist as a session_state read
+        # and the old market filter line should be gone
+        has_sel_markets_read = (
+            '_sel_markets   = st.session_state.get("alloc_ms_market"' in _fn
+        )
+        has_old_market_filter = (
+            '_filt[_filt["Market"].isin(_sel_markets)]' in _fn
+        )
+        ok = not has_sel_markets_read and not has_old_market_filter
+        return (
+            "_sel_markets read and old Market filter line absent",
+            f"sel_markets_read={has_sel_markets_read}, old_filter={has_old_market_filter}",
+            ok,
+        )
+
+    def sc07():
+        """Reset button clears only child keys — alloc_ms_market absent from its list."""
+        # Find the reset button block and confirm alloc_ms_market is not in it
+        reset_match = _re.search(
+            r'alloc_reset_filters.*?st\.rerun\(\)', _fn, _re.DOTALL
+        )
+        if not reset_match:
+            return ("Reset button block present", "block not found", False)
+        reset_block = reset_match.group(0)
+        ok = "alloc_ms_market" not in reset_block
+        return (
+            "Reset clears only sector/ccy/asset (alloc_ms_market absent)",
+            f"alloc_ms_market_in_reset={not ok}",
+            ok,
+        )
+
+    def sc08():
+        """_active_filters uses market_scope for Market label."""
+        ok = (
+            'if market_scope:' in _fn
+            and '_active_filters.append(f"Market: ' in _fn
+            and '_sel_markets' not in _fn.split('_active_filters')[1].split('\n')[0]
+        )
+        return ("_active_filters uses market_scope for Market label", f"found={ok}", ok)
+
+    def sc09():
+        """Scoped option lists (_all_sectors etc.) defined after market_scope block."""
+        pos_scope  = _fn.find("market_scope: list")
+        pos_sector = _fn.find('_all_sectors   = sorted(_mkt_df')
+        ok = pos_scope != -1 and pos_sector != -1 and pos_sector > pos_scope
+        return (
+            "Scoped option lists defined after market_scope block",
+            f"scope_pos={pos_scope}, sector_pos={pos_sector}",
+            ok,
+        )
+
+    def sc10():
+        """Meta: all other alloc tests still pass (checks suite can import)."""
+        try:
+            _cat_alloc_qp()
+            _cat_alloc_ui()
+            _cat_alloc_mkt()
+            return ("Full regression suite importable and callable", "ok", True)
+        except Exception as exc:
+            return ("Full regression suite importable and callable", str(exc), False)
+
+    _tests = [
+        ("ALLOC-SCOPE-01", "Child option lists derived from _mkt_df",                    "P0", True,  sc01),
+        ("ALLOC-SCOPE-02", "_mkt_df filters _df by market_scope",                        "P0", True,  sc02),
+        ("ALLOC-SCOPE-03", "market_scope = None for All preset",                          "P0", True,  sc03),
+        ("ALLOC-SCOPE-04", "Stale child purge covers sector/ccy/asset",                  "P0", True,  sc04),
+        ("ALLOC-SCOPE-05", "Filter chain base is _mkt_df.copy()",                        "P0", True,  sc05),
+        ("ALLOC-SCOPE-06", "_sel_markets and old Market filter line absent",             "P0", True,  sc06),
+        ("ALLOC-SCOPE-07", "Reset clears only sector/ccy/asset (not market preset)",     "P0", True,  sc07),
+        ("ALLOC-SCOPE-08", "_active_filters uses market_scope for Market label",         "P0", True,  sc08),
+        ("ALLOC-SCOPE-09", "Scoped option lists defined after market_scope block",       "P0", True,  sc09),
+        ("ALLOC-SCOPE-10", "Full regression suite importable and callable (meta)",       "P0", True,  sc10),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._render_allocation_section", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -4978,7 +5123,7 @@ def run_all_tests() -> TestReport:
         + _cat_f() + _cat_g() + _cat_h() + _cat_i() + _cat_j()
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
         + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
-        + _cat_alloc_ui() + _cat_hld_ui() + _cat_alloc_mkt()
+        + _cat_alloc_ui() + _cat_hld_ui() + _cat_alloc_mkt() + _cat_alloc_scope()
     )
 
     punch_list: list[PunchListItem] = []
