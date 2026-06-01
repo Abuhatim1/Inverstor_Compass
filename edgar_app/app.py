@@ -3559,7 +3559,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 icon="⚠️",
             )
             _conf_check = st.checkbox("I understand — this cannot be undone")
-            _conf_text  = st.text_input(f"Type  {dlg_h.ticker}  to confirm")
+            _conf_text  = st.text_input(f"Type `{dlg_h.ticker}` to confirm")
             _ready = _conf_check and _conf_text.strip().upper() == dlg_h.ticker.upper()
             _xb1, _xb2 = st.columns(2)
             with _xb1:

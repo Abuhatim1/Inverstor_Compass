@@ -2531,8 +2531,9 @@ def _cat_arch() -> list[TestResult]:
     def a03_02():
         SB = "__SBA03WX__"
         live = load_holdings()
-        if SB in live:
-            delete_holding(SB)
+        existing_aid = next((k for k, hh in live.items() if hh.ticker == SB), None)
+        if existing_aid:
+            delete_holding(existing_aid)
         try:
             h = upsert_holding(
                 SB,
@@ -2545,7 +2546,7 @@ def _cat_arch() -> list[TestResult]:
             )
             aid = getattr(h, "default_account_id", "")
             ok  = h is not None and aid == "sandbox_acct_id"
-            delete_holding(SB)   # cleanup — no transaction written
+            delete_holding(h.asset_id)   # cleanup — use asset_id, not ticker
             return (
                 "holding created; default_account_id preserved",
                 f"default_account_id={aid!r}",
@@ -2604,7 +2605,10 @@ def _cat_acc_ui() -> list[TestResult]:
     def _teardown_sandbox(ticker=_SB_TK, aid=_SB_AID):
         """Remove sandbox holding and account (best-effort)."""
         try:
-            delete_holding(ticker)
+            live = load_holdings()
+            h_aid = next((k for k, hh in live.items() if hh.ticker == ticker), None)
+            if h_aid:
+                delete_holding(h_aid)
         except Exception:
             pass
         try:
@@ -5800,23 +5804,33 @@ def _cat_asset_identity() -> list[TestResult]:
 
     def asset_id_06():
         """transaction_id is auto-generated and has TXN_ prefix."""
-        from portfolio.holdings import record_transaction
-        txn, _, err = record_transaction(
+        from portfolio.holdings import record_transaction, delete_holding
+        txn, holding, err = record_transaction(
             ticker="AAPL_AID06", side="BUY", quantity=5.0, price=150.0,
             company_name="Apple", account_id="acct1",
         )
         ok = (err is None) and txn_pat.match(txn.transaction_id) is not None
+        try:  # cleanup — remove sandbox holding by asset_id
+            if holding:
+                delete_holding(holding.asset_id)
+        except Exception:
+            pass
         return ("transaction_id generated with TXN_ prefix",
                 f"transaction_id={txn.transaction_id if txn else 'None'}", ok)
 
     def asset_id_07():
         """BUY transaction stores asset_id matching the created holding."""
-        from portfolio.holdings import record_transaction, load_holdings
+        from portfolio.holdings import record_transaction, delete_holding, load_holdings
         txn, holding, err = record_transaction(
             ticker="TSLA_TEST_ASSETID07", side="BUY", quantity=1.0, price=200.0,
             company_name="Tesla Test", account_id="acct1",
         )
         ok = (err is None) and txn.asset_id == holding.asset_id
+        try:  # cleanup — remove sandbox holding by asset_id
+            if holding:
+                delete_holding(holding.asset_id)
+        except Exception:
+            pass
         return ("txn.asset_id == holding.asset_id",
                 f"txn.asset_id={getattr(txn,'asset_id','?')}, "
                 f"holding.asset_id={getattr(holding,'asset_id','?')}", ok)
