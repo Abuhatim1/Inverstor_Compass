@@ -73,11 +73,17 @@ def _check_new_holding_account(existing: "Holding | None", account_id: str) -> s
 ASSET_TYPES: list[str] = [
     "Stock",
     "ETF",
-    "Fund",
-    "Commodity",
-    "Gold",
-    "Silver",
+    "REIT",
+    "Mutual Fund",
+    "Sukuk",
+    "Bond",
     "Cash",
+    "Precious Metal",
+    "Commodity",
+    "Real Estate",
+    "Private Equity",
+    "Private Asset",
+    "Crypto",
     "Other",
 ]
 

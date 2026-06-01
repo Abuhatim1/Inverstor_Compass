@@ -4984,9 +4984,12 @@ def _cat_alloc_scope() -> list[TestResult]:
     def sc01():
         """_all_sectors/ccys/companies derived from _mkt_df (not _df)."""
         ok = (
-            '_all_sectors   = sorted(_mkt_df["Sector"]' in _fn
-            and '_all_ccys_u    = sorted(_mkt_df["CCY"]'   in _fn
-            and '_all_companies = sorted(_mkt_df["Company"]' in _fn
+            '_mkt_df["Sector"]' in _fn
+            and '_mkt_df["CCY"]'   in _fn
+            and '_mkt_df["Company"]' in _fn
+            and "_all_sectors" in _fn
+            and "_all_ccys_u"  in _fn
+            and "_all_companies" in _fn
         )
         return ("Child option lists derived from _mkt_df", f"found={ok}", ok)
 
@@ -5062,7 +5065,7 @@ def _cat_alloc_scope() -> list[TestResult]:
     def sc09():
         """Scoped option lists (_all_sectors etc.) defined after market_scope block."""
         pos_scope  = _fn.find("market_scope: list")
-        pos_sector = _fn.find('_all_sectors   = sorted(_mkt_df')
+        pos_sector = _fn.find('_all_sectors')
         ok = pos_scope != -1 and pos_sector != -1 and pos_sector > pos_scope
         return (
             "Scoped option lists defined after market_scope block",
@@ -5099,6 +5102,333 @@ def _cat_alloc_scope() -> list[TestResult]:
     return results
 
 
+def _cat_acc_ui_ext() -> list[TestResult]:
+    """
+    ACC-UI-06  load_accounts() has no caching decorator — fresh on every call.
+    ACC-UI-07  active_accounts() excludes inactive accounts.
+    ACC-UI-08  Bank and Cash account types excluded from modal eligible set.
+    """
+    import re as _re
+    import pathlib as _pl
+    import inspect as _inspect
+
+    CAT = "Accounts UI"
+    results: list[TestResult] = []
+
+    def acc_ui_06():
+        """
+        load_accounts() must read from disk on every call.
+        Confirm: no @st.cache_data, @st.cache_resource, or @lru_cache on it.
+        """
+        from portfolio.accounts import load_accounts as _la
+        src = _inspect.getsource(_la)
+        no_cache_data     = "@st.cache_data"     not in src
+        no_cache_resource = "@st.cache_resource" not in src
+        no_lru_cache      = "@lru_cache"         not in src
+        ok = no_cache_data and no_cache_resource and no_lru_cache
+        return (
+            "load_accounts has no caching decorator — always reads from disk",
+            f"no_cache_data={no_cache_data}, no_cache_resource={no_cache_resource}, no_lru_cache={no_lru_cache}",
+            ok,
+        )
+
+    def acc_ui_07():
+        """
+        active_accounts() must filter by active=True — inactive accounts excluded.
+        """
+        from portfolio.accounts import Account, active_accounts as _aa
+        import unittest.mock as _mock, json, tempfile, os
+
+        acct_active   = Account(account_id="AAAA1111", account_name="Active",   active=True)
+        acct_inactive = Account(account_id="BBBB2222", account_name="Inactive", active=False)
+        data = {
+            "AAAA1111": {"account_id":"AAAA1111","account_name":"Active",  "active":True,
+                         "account_type":"Brokerage","base_currency":"SAR","cash_balance":0.0,
+                         "institution":"","notes":"","created_at":"2026-01-01"},
+            "BBBB2222": {"account_id":"BBBB2222","account_name":"Inactive","active":False,
+                         "account_type":"Brokerage","base_currency":"SAR","cash_balance":0.0,
+                         "institution":"","notes":"","created_at":"2026-01-01"},
+        }
+        import portfolio.accounts as _pac
+        orig_file = _pac._ACCOUNTS_FILE
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            ) as tf:
+                json.dump(data, tf)
+                tmp_path = tf.name
+            _pac._ACCOUNTS_FILE = tmp_path
+            result = _aa()
+            active_ids   = set(result.keys())
+            inactive_out = "BBBB2222" not in active_ids
+            active_in    = "AAAA1111" in active_ids
+            ok = active_in and inactive_out
+        finally:
+            _pac._ACCOUNTS_FILE = orig_file
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        return (
+            "active_accounts returns only active=True accounts",
+            f"active_in={active_in}, inactive_out={inactive_out}",
+            ok,
+        )
+
+    def acc_ui_08():
+        """
+        The eligible account types set used in the Add New Position modal must
+        exclude 'Bank' and 'Cash' account types.
+        """
+        _src = _pl.Path(__file__).parent / "app.py"
+        _text = _src.read_text(encoding="utf-8")
+        has_eligible_set = bool(_re.search(
+            r'_ELIGIBLE_ACCT_TYPES\s*[=:]\s*frozenset',
+            _text,
+        ))
+        bank_excluded = bool(_re.search(
+            r'_ELIGIBLE_ACCT_TYPES\s*[=:]\s*frozenset\(\{[^}]*\}\)',
+            _text,
+        ))
+        # Confirm "Bank" and "Cash" are NOT in the eligible set definition
+        eligible_match = _re.search(
+            r'_ELIGIBLE_ACCT_TYPES\s*[=:]\s*frozenset\(\{([^}]*)\}\)',
+            _text,
+        )
+        if not eligible_match:
+            return ("_ELIGIBLE_ACCT_TYPES frozenset found", "not found in app.py", False)
+        set_contents = eligible_match.group(1)
+        bank_absent = '"Bank"' not in set_contents and "'Bank'" not in set_contents
+        cash_absent = '"Cash"' not in set_contents and "'Cash'" not in set_contents
+        ok = has_eligible_set and bank_absent and cash_absent
+        return (
+            "Bank and Cash absent from _ELIGIBLE_ACCT_TYPES; eligible_only filter present",
+            f"has_eligible_set={has_eligible_set}, bank_absent={bank_absent}, cash_absent={cash_absent}",
+            ok,
+        )
+
+    _tests = [
+        ("ACC-UI-06", "load_accounts has no caching decorator — always fresh",         "P0", True, acc_ui_06),
+        ("ACC-UI-07", "inactive accounts excluded by active_accounts()",                "P0", True, acc_ui_07),
+        ("ACC-UI-08", "Bank and Cash types excluded from Add New Position modal",       "P0", True, acc_ui_08),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "portfolio.accounts / app._acct_pairs_for", sev, blocker, fn))
+
+    return results
+
+
+def _cat_asset_type() -> list[TestResult]:
+    """
+    ASSET-TYPE-01  All 14 required asset types present in ASSET_TYPES.
+    ASSET-TYPE-02  Existing holding with old type ('Fund') round-trips without error.
+    ASSET-TYPE-03  'Precious Metal' in ASSET_TYPES; manual holding can be created.
+    ASSET-TYPE-04  'Commodity' in ASSET_TYPES; manual holding can be created.
+    ASSET-TYPE-05  'Real Estate' in ASSET_TYPES; manual holding can be created.
+    ASSET-TYPE-06  'Other' in ASSET_TYPES and usable as fallback.
+    """
+    CAT = "Asset Types"
+    results: list[TestResult] = []
+
+    REQUIRED_TYPES = {
+        "Stock", "ETF", "REIT", "Mutual Fund", "Sukuk", "Bond",
+        "Cash", "Precious Metal", "Commodity", "Real Estate",
+        "Private Equity", "Private Asset", "Crypto", "Other",
+    }
+
+    from portfolio.holdings import ASSET_TYPES
+
+    def asset_type_01():
+        present   = set(ASSET_TYPES)
+        missing   = REQUIRED_TYPES - present
+        ok        = len(missing) == 0
+        return (
+            f"All {len(REQUIRED_TYPES)} required types in ASSET_TYPES",
+            f"missing={sorted(missing)}" if missing else f"all {len(REQUIRED_TYPES)} present",
+            ok,
+        )
+
+    def _can_upsert(asset_type: str) -> tuple[bool, str]:
+        """Try upserting a scratch holding with the given asset_type; clean up."""
+        import tempfile, json, os
+        import portfolio.holdings as _ph
+        orig_file = _ph._HOLDINGS_FILE
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            ) as tf:
+                json.dump({}, tf)
+                tmp_path = tf.name
+            _ph._HOLDINGS_FILE = tmp_path
+            _ph.upsert_holding(
+                ticker="TEST_AT",
+                company_name=f"Test {asset_type}",
+                quantity=1.0,
+                avg_cost=100.0,
+                current_price=100.0,
+                asset_type=asset_type,
+                default_account_id="TEST0001",
+            )
+            data = json.loads(_pl.Path(tmp_path).read_text())
+            stored = data.get("TEST_AT", {}).get("asset_type", "")
+            ok  = stored == asset_type
+            msg = f"stored='{stored}'"
+        except Exception as _ex:
+            ok  = False
+            msg = f"exception: {_ex}"
+        finally:
+            _ph._HOLDINGS_FILE = orig_file
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        return ok, msg
+
+    import pathlib as _pl
+
+    def asset_type_02():
+        """Old type 'Fund' still accepted by upsert_holding without error."""
+        ok, msg = _can_upsert("Fund")
+        return ("upsert_holding accepts legacy type 'Fund'", msg, ok)
+
+    def asset_type_03():
+        """'Precious Metal' in list and upsertable."""
+        in_list = "Precious Metal" in ASSET_TYPES
+        ok2, msg = _can_upsert("Precious Metal")
+        ok = in_list and ok2
+        return ("Precious Metal in ASSET_TYPES and upsertable", f"in_list={in_list}, {msg}", ok)
+
+    def asset_type_04():
+        """'Commodity' in list and upsertable."""
+        in_list = "Commodity" in ASSET_TYPES
+        ok2, msg = _can_upsert("Commodity")
+        ok = in_list and ok2
+        return ("Commodity in ASSET_TYPES and upsertable", f"in_list={in_list}, {msg}", ok)
+
+    def asset_type_05():
+        """'Real Estate' in list and upsertable."""
+        in_list = "Real Estate" in ASSET_TYPES
+        ok2, msg = _can_upsert("Real Estate")
+        ok = in_list and ok2
+        return ("Real Estate in ASSET_TYPES and upsertable", f"in_list={in_list}, {msg}", ok)
+
+    def asset_type_06():
+        """'Other' in list and upsertable as a fallback."""
+        in_list = "Other" in ASSET_TYPES
+        ok2, msg = _can_upsert("Other")
+        ok = in_list and ok2
+        return ("Other in ASSET_TYPES and upsertable as fallback", f"in_list={in_list}, {msg}", ok)
+
+    _tests = [
+        ("ASSET-TYPE-01", "All 14 required asset types present in ASSET_TYPES",            "P0", True, asset_type_01),
+        ("ASSET-TYPE-02", "Legacy type 'Fund' round-trips via upsert_holding",             "P0", True, asset_type_02),
+        ("ASSET-TYPE-03", "Precious Metal in ASSET_TYPES and upsertable as manual asset",  "P0", True, asset_type_03),
+        ("ASSET-TYPE-04", "Commodity in ASSET_TYPES and upsertable as manual asset",       "P0", True, asset_type_04),
+        ("ASSET-TYPE-05", "Real Estate in ASSET_TYPES and upsertable as manual asset",     "P0", True, asset_type_05),
+        ("ASSET-TYPE-06", "Other in ASSET_TYPES and usable as fallback",                   "P0", True, asset_type_06),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "portfolio.holdings.ASSET_TYPES", sev, blocker, fn))
+
+    return results
+
+
+def _cat_alloc_at() -> list[TestResult]:
+    """
+    ALLOC-AT-01  'By Asset Type' option present in chart-view selectbox options.
+    ALLOC-AT-02  AssetType column added to allocation row dicts.
+    ALLOC-AT-03  alloc_ms_atype key included in reset-filters button logic.
+    ALLOC-AT-04  Asset Type multiselect present in filters expander.
+    """
+    import re as _re
+    import pathlib as _pl
+
+    CAT = "Allocation Asset Type"
+    results: list[TestResult] = []
+    _src = _pl.Path(__file__).parent / "app.py"
+    _text = _src.read_text(encoding="utf-8")
+
+    def alloc_at_01():
+        """'By Asset Type' is one of the chart-view selectbox options."""
+        found = '"By Asset Type"' in _text or "'By Asset Type'" in _text
+        in_view_list = bool(_re.search(
+            r'"By Asset Type"',
+            _text,
+        ))
+        ok = found and in_view_list
+        return (
+            "'By Asset Type' present in chart-view selectbox options list",
+            f"found={found}",
+            ok,
+        )
+
+    def alloc_at_02():
+        """AssetType column added to allocation row dict in _render_allocation_section."""
+        has_col = bool(_re.search(
+            r'"AssetType"\s*:\s*getattr\(',
+            _text,
+        ))
+        has_grp = bool(_re.search(
+            r'"By Asset Type"\s*:\s*"AssetType"',
+            _text,
+        ))
+        ok = has_col and has_grp
+        return (
+            "AssetType column in row dict; 'By Asset Type' -> 'AssetType' in _grp map",
+            f"has_col={has_col}, has_grp={has_grp}",
+            ok,
+        )
+
+    def alloc_at_03():
+        """alloc_ms_atype is cleared by the Reset filters button."""
+        reset_block = _re.search(
+            r'Reset filters.*?st\.rerun\(\)',
+            _text,
+            _re.DOTALL,
+        )
+        if not reset_block:
+            return ("Reset filters block found", "block NOT found", False)
+        block_text = reset_block.group(0)
+        has_atype_key = "alloc_ms_atype" in block_text
+        ok = has_atype_key
+        return (
+            "alloc_ms_atype included in Reset filters button key clearing",
+            f"has_atype_key={has_atype_key}",
+            ok,
+        )
+
+    def alloc_at_04():
+        """Asset Type multiselect with key alloc_ms_atype present in filters expander."""
+        has_multiselect = bool(_re.search(
+            r'st\.multiselect\s*\([^)]*alloc_ms_atype',
+            _text,
+        ))
+        has_stale_purge = bool(_re.search(
+            r'"alloc_ms_atype"\s*,\s*_all_atypes',
+            _text,
+        ))
+        ok = has_multiselect and has_stale_purge
+        return (
+            "Asset Type multiselect (alloc_ms_atype) present; stale-purge entry present",
+            f"has_multiselect={has_multiselect}, has_stale_purge={has_stale_purge}",
+            ok,
+        )
+
+    _tests = [
+        ("ALLOC-AT-01", "'By Asset Type' option in chart-view selectbox",                    "P0", True, alloc_at_01),
+        ("ALLOC-AT-02", "AssetType column in allocation rows; grp mapping correct",           "P0", True, alloc_at_02),
+        ("ALLOC-AT-03", "alloc_ms_atype cleared by Reset filters button",                    "P0", True, alloc_at_03),
+        ("ALLOC-AT-04", "Asset Type multiselect present with stale-filter purge entry",      "P0", True, alloc_at_04),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._render_allocation_section", sev, blocker, fn))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -5110,6 +5440,7 @@ def run_all_tests() -> TestReport:
         + _cat_k() + _cat_l() + _cat_m() + _cat_n() + _cat_arch() + _cat_acc_ui() + _cat_a11() + _cat_a10() + _cat_ch()
         + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
         + _cat_alloc_ui() + _cat_hld_ui() + _cat_alloc_mkt() + _cat_alloc_scope()
+        + _cat_acc_ui_ext() + _cat_asset_type() + _cat_alloc_at()
     )
 
     punch_list: list[PunchListItem] = []

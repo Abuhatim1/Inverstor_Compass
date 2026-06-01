@@ -2143,14 +2143,15 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         if _r.base_market_value <= 0:
             continue
         _rows.append({
-            "Ticker":  _r.ticker,
-            "Company": getattr(_h, "company_name", _r.ticker) or _r.ticker,
-            "Market":  getattr(_h, "market",  "Other"),
-            "Sector":  getattr(_h, "sector",  "Other"),
-            "CCY":     _r.local_currency,
-            "_mv":     _r.base_market_value,
-            "_cb":     _r.base_cost_basis,
-            "_wt":     _r.invested_weight_pct,
+            "Ticker":    _r.ticker,
+            "Company":   getattr(_h, "company_name", _r.ticker) or _r.ticker,
+            "Market":    getattr(_h, "market",      "Other"),
+            "Sector":    getattr(_h, "sector",      "Other"),
+            "AssetType": getattr(_h, "asset_type",  "Other") or "Other",
+            "CCY":       _r.local_currency,
+            "_mv":       _r.base_market_value,
+            "_cb":       _r.base_cost_basis,
+            "_wt":       _r.invested_weight_pct,
         })
 
     if _excluded:
@@ -2205,9 +2206,10 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _mkt_df = _df[_df["Market"].isin(market_scope)] if market_scope else _df
 
     # Child filter option lists scoped to active market preset
-    _all_sectors   = sorted(_mkt_df["Sector"].unique().tolist())
-    _all_ccys_u    = sorted(_mkt_df["CCY"].unique().tolist())
-    _all_companies = sorted(_mkt_df["Company"].unique().tolist())
+    _all_sectors    = sorted(_mkt_df["Sector"].unique().tolist())
+    _all_ccys_u     = sorted(_mkt_df["CCY"].unique().tolist())
+    _all_companies  = sorted(_mkt_df["Company"].unique().tolist())
+    _all_atypes     = sorted(_mkt_df["AssetType"].unique().tolist())
 
     # Purge stale child filter state — remove any stored values that no longer
     # exist within the new market scope (prevents false "No holdings match" msg)
@@ -2215,6 +2217,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         ("alloc_ms_sector", _all_sectors),
         ("alloc_ms_ccy",    _all_ccys_u),
         ("alloc_ms_asset",  _all_companies),
+        ("alloc_ms_atype",  _all_atypes),
     ]:
         _stored = st.session_state.get(_k)
         if _stored and not all(v in _valid for v in _stored):
@@ -2223,11 +2226,16 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     # ── Chart view ────────────────────────────────────────────────────────────
     _view = st.selectbox(
         "Chart view",
-        ["By Asset", "By Sector", "By Market", "By Currency"],
+        ["By Asset", "By Asset Type", "By Sector", "By Market", "By Currency"],
         key="alloc_chart_view",
     )
-    _grp = {"By Asset": "Company", "By Sector": "Sector",
-            "By Market": "Market", "By Currency": "CCY"}[_view]
+    _grp = {
+        "By Asset":      "Company",
+        "By Asset Type": "AssetType",
+        "By Sector":     "Sector",
+        "By Market":     "Market",
+        "By Currency":   "CCY",
+    }[_view]
 
     # ── Multi-select filters (collapsible to keep the UI compact) ────────────
     with st.expander("🔍 Filters", expanded=False):
@@ -2237,6 +2245,11 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 "Sector", _all_sectors,
                 default=st.session_state.get("alloc_ms_sector", _all_sectors),
                 key="alloc_ms_sector",
+            )
+            _sel_atypes    = st.multiselect(
+                "Asset Type", _all_atypes,
+                default=st.session_state.get("alloc_ms_atype", _all_atypes),
+                key="alloc_ms_atype",
             )
 
         with _fc2:
@@ -2251,13 +2264,14 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 key="alloc_ms_asset",
             )
         if st.button("↺ Reset filters", key="alloc_reset_filters"):
-            for _k in ("alloc_ms_sector", "alloc_ms_ccy", "alloc_ms_asset"):
+            for _k in ("alloc_ms_sector", "alloc_ms_ccy", "alloc_ms_asset", "alloc_ms_atype"):
                 st.session_state.pop(_k, None)
             st.rerun()
     # Read current child selections (fall back to all scoped options)
     _sel_sectors   = st.session_state.get("alloc_ms_sector",   _all_sectors)
     _sel_ccys_u    = st.session_state.get("alloc_ms_ccy",      _all_ccys_u)
     _sel_companies = st.session_state.get("alloc_ms_asset",    _all_companies)
+    _sel_atypes    = st.session_state.get("alloc_ms_atype",    _all_atypes)
 
     # ── Apply filters — base is market-scoped; child filters applied on top ───
     _filt = _mkt_df.copy()
@@ -2267,6 +2281,8 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _filt = _filt[_filt["CCY"].isin(_sel_ccys_u)]
     if _sel_companies and set(_sel_companies) != set(_all_companies):
         _filt = _filt[_filt["Company"].isin(_sel_companies)]
+    if _sel_atypes    and set(_sel_atypes)    != set(_all_atypes):
+        _filt = _filt[_filt["AssetType"].isin(_sel_atypes)]
 
     if _filt.empty:
         st.info("No holdings match the selected filters. Use the Reset button to clear.", icon="🔍")
@@ -2365,16 +2381,18 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 
     # Render with click-to-filter; fall back gracefully on older Streamlit
     _ms_key_map = {
-        "By Asset":    "alloc_ms_asset",
-        "By Sector":   "alloc_ms_sector",
-        "By Market":   "alloc_ms_market",
-        "By Currency": "alloc_ms_ccy",
+        "By Asset":      "alloc_ms_asset",
+        "By Asset Type": "alloc_ms_atype",
+        "By Sector":     "alloc_ms_sector",
+        "By Market":     "alloc_ms_market",
+        "By Currency":   "alloc_ms_ccy",
     }
     _ms_all_map = {
-        "By Asset":    _all_companies,
-        "By Sector":   _all_sectors,
-        "By Market":   _all_markets,
-        "By Currency": _all_ccys_u,
+        "By Asset":      _all_companies,
+        "By Asset Type": _all_atypes,
+        "By Sector":     _all_sectors,
+        "By Market":     _all_markets,
+        "By Currency":   _all_ccys_u,
     }
     try:
         _chart_ev = st.plotly_chart(
@@ -2413,6 +2431,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     if set(_sel_sectors)   != set(_all_sectors):   _active_filters.append(f"Sector: {', '.join(_sel_sectors)}")
     if set(_sel_ccys_u)    != set(_all_ccys_u):    _active_filters.append(f"CCY: {', '.join(_sel_ccys_u)}")
     if set(_sel_companies) != set(_all_companies): _active_filters.append(f"Assets: {len(_sel_companies)} selected")
+    if set(_sel_atypes)    != set(_all_atypes):    _active_filters.append(f"Asset Type: {', '.join(_sel_atypes)}")
     _filter_str = "; ".join(_active_filters) if _active_filters else "All holdings"
 
     _report_bytes = None
@@ -2815,10 +2834,21 @@ def render_holdings_tab(bundle: dict) -> None:
     from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
     from portfolio.accounts import load_accounts as _load_accts_raw, update_account_cash as _upd_cash
 
-    def _acct_pairs_for(currency: str | None = None):
-        """Return [(account_id, Account)] for active accounts. Never raises."""
+    _ELIGIBLE_ACCT_TYPES = frozenset({"Brokerage", "Crypto", "Other"})
+
+    def _acct_pairs_for(currency: str | None = None, eligible_only: bool = False):
+        """Return [(account_id, Account)] for active accounts. Never raises.
+
+        eligible_only=True restricts to investment/brokerage-eligible account
+        types (Brokerage, Crypto, Other) — excludes Bank and Cash accounts
+        which cannot hold investment positions.
+        """
         try:
-            return list(_active_accts_fn(currency).items())
+            pairs = list(_active_accts_fn(currency).items())
+            if eligible_only:
+                pairs = [(aid, a) for aid, a in pairs
+                         if a.account_type in _ELIGIBLE_ACCT_TYPES]
+            return pairs
         except Exception:
             return []
 
@@ -3015,11 +3045,11 @@ def render_holdings_tab(bundle: dict) -> None:
                                         min_value=0.0, step=0.01, format="%.4f", key="ahn_price",
                                         help="Live price from Yahoo Finance — auto-filled after Validate.")
 
-        # ── Account (filtered by selected currency) ───────────────────────────
-        _pairs_ccy = _acct_pairs_for(currency=_ad_ccy)
-        _pairs_all = _acct_pairs_for()
+        # ── Account (filtered by currency, eligible types only) ──────────────
+        _pairs_ccy = _acct_pairs_for(currency=_ad_ccy, eligible_only=True)
+        _pairs_all = _acct_pairs_for(eligible_only=True)
         _use_pairs = _pairs_ccy if _pairs_ccy else _pairs_all
-        _acct_opts = {"": f"— no account —"}
+        _acct_opts = {"": "— no account —"}
         for _aid_k, _a_v in _use_pairs:
             _acct_opts[_aid_k] = _acct_dn(_a_v)
         if not _pairs_ccy and _pairs_all:
@@ -3031,7 +3061,14 @@ def render_holdings_tab(bundle: dict) -> None:
             key="ahn_acct_id",
         )
         if not _ad_aid:
-            st.warning("An account is required to open a position.", icon="⚠️")
+            if not _pairs_all:
+                st.warning(
+                    "No investment accounts found. Go to the **Accounts** tab "
+                    "and create a Brokerage account first.",
+                    icon="⚠️",
+                )
+            else:
+                st.warning("Select an account to continue.", icon="⚠️")
 
         # ── Fees / Date / Notes / Correction ─────────────────────────────────
         _tf1, _tf2 = st.columns(2)
@@ -3521,10 +3558,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 "currency", "account_name", "opening_quantity", "opening_price",
                 "current_market_price", "fees", "opening_date", "notes",
             ]
-            ALLOWED_ASSET_TYPES = {
-                "Stock", "ETF", "Fund", "Crypto", "Bond",
-                "Cash Equivalent", "Commodity", "Other",
-            }
+            ALLOWED_ASSET_TYPES = set(ASSET_TYPES)
             ALLOWED_CURRENCIES = set(CURRENCIES)
             DATE_FMT = "%Y/%m/%d"
 
