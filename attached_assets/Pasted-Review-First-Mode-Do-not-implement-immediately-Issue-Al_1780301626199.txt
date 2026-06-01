@@ -1,0 +1,80 @@
+Review First Mode.
+
+Do not implement immediately.
+
+Issue:
+Allocation Market preset is now the parent filter:
+- Saudi
+- US
+- All
+
+But child filters still show options from all markets.
+
+Example:
+When Market preset = Saudi, the Asset filter still allows US assets.
+When Market preset = US, the Asset filter still allows Saudi assets.
+This can create impossible filter combinations and shows:
+"No holdings match the selected filters."
+
+Also Reset filters should reset only child filters inside the current parent market scope.
+
+Required review:
+1. Confirm that Market preset should act as the parent scope.
+2. Confirm Sector / Currency / Asset filters should only show options available inside the selected Market scope.
+3. Confirm Reset filters should clear only child filters:
+   - Sector
+   - Currency
+   - Assets
+   but should NOT change the Market preset.
+4. Confirm no valuation, FX, holdings, accounts, transactions, or price logic needs to change.
+5. Identify affected function(s), likely _render_allocation_section().
+6. Propose minimal implementation only.
+
+Expected behavior:
+
+Case 1:
+Market = Saudi
+- Asset filter shows only Saudi assets.
+- Sector filter shows only sectors available in Saudi holdings.
+- Currency filter shows only currencies available in Saudi holdings.
+- Reset clears Sector/Currency/Assets only.
+- Market remains Saudi.
+
+Case 2:
+Market = US
+- Asset filter shows only US assets.
+- Sector filter shows only sectors available in US holdings.
+- Currency filter shows only currencies available in US holdings.
+- Reset clears Sector/Currency/Assets only.
+- Market remains US.
+
+Case 3:
+Market = All
+- Asset filter shows all assets.
+- Sector filter shows all sectors.
+- Currency filter shows all currencies.
+- Reset clears child filters only.
+- Market remains All.
+
+Important:
+Do not reintroduce Market multiselect.
+Do not modify valuation logic.
+Do not modify portfolio calculations.
+Do not modify holdings data.
+Do not modify account or transaction logic.
+Do not modify price routing.
+This is filter option scoping only.
+
+Tests to propose:
+ALLOC-SCOPE-01 Saudi preset limits Asset options to Saudi assets.
+ALLOC-SCOPE-02 US preset limits Asset options to US assets.
+ALLOC-SCOPE-03 All preset shows all assets.
+ALLOC-SCOPE-04 Reset clears child filters only.
+ALLOC-SCOPE-05 Reset does not change Market preset.
+ALLOC-SCOPE-06 Impossible cross-market asset selection cannot persist after market change.
+ALLOC-SCOPE-07 KPI summary updates correctly.
+ALLOC-SCOPE-08 Chart updates correctly.
+ALLOC-SCOPE-09 Table updates correctly.
+ALLOC-SCOPE-10 Full regression suite remains PASS.
+
+Stop after review. Wait for my approval before implementation.
