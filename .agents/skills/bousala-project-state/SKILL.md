@@ -1,0 +1,238 @@
+---
+name: bousala-project-state
+description: Persistent project memory and current-state reference for Bousala (Investor Compass). Load whenever architecture, implementation, testing, refactoring, portfolio accounting, market data, allocation, valuation, performance, risk, accounts, transactions, or roadmap decisions are discussed. Also triggers loading of all other Bousala skills.
+---
+
+# Bousala Project State
+
+## Purpose
+
+This skill provides the current state of the project and acts as the authoritative project-memory layer.
+
+The goal is to prevent architectural drift, duplicated logic, inconsistent assumptions, and loss of project context across Agent sessions.
+
+---
+
+## Mandatory Loading Rule
+
+Before any implementation task:
+
+1. Load:
+   - bousala-architecture
+   - bousala-investment-domain
+   - bousala-safe-zones
+   - bousala-test-protocol
+   - bousala-project-state
+
+2. Summarize relevant constraints.
+
+3. Produce implementation review.
+
+4. Wait for explicit approval.
+
+Implementation without this sequence is prohibited.
+
+---
+
+## Project Name
+
+Bousala (Investor Compass)
+
+---
+
+## Product Vision
+
+Investor-grade portfolio management platform.
+
+Primary objective:
+
+Provide trustworthy portfolio accounting, valuation, performance measurement, risk analytics, allocation analytics, and investment research.
+
+Accuracy is more important than feature count.
+
+---
+
+## Current Architecture Principles
+
+Single source of truth.
+
+Never duplicate calculations.
+
+Never bypass transaction history.
+
+All portfolio calculations must originate from transaction records.
+
+---
+
+## Portfolio Data Flow
+
+Transactions
+↓
+Holdings Engine
+↓
+Valuation Engine
+↓
+Allocation Engine
+↓
+Performance Engine
+↓
+Risk Engine
+↓
+Reporting Layer
+↓
+Dashboards
+
+---
+
+## Portfolio Accounting Rules
+
+Support:
+
+- Multiple portfolios
+- Multiple investment accounts
+- Multiple bank accounts
+- Multiple currencies
+- Cash balances
+- Cash transfers
+- Buy transactions
+- Sell transactions
+- Realized gains
+- Unrealized gains
+
+All calculations must remain auditable.
+
+---
+
+## Source Of Truth
+
+Transactions are the source of truth.
+
+Derived data includes:
+
+- Holdings
+- Allocation
+- Portfolio value
+- Performance
+- Risk metrics
+- Reports
+
+Derived data must never become an independent source of truth.
+
+---
+
+## Currency Rules
+
+Portfolio-level calculations must:
+
+1. Convert positions into base currency.
+2. Then calculate:
+   - Allocation
+   - Portfolio value
+   - Performance
+   - Risk metrics
+
+Never mix currencies directly.
+
+---
+
+## Market Data Architecture
+
+External providers must never be called directly by portfolio modules.
+
+All providers must be accessed through dedicated data layers.
+
+Examples:
+
+- Yahoo Finance Layer
+- SAHMK Layer
+- SEC Layer
+
+---
+
+## Current Market Data Strategy
+
+Primary:
+
+- Yahoo Finance
+
+Planned:
+
+- SAHMK Integration Layer
+
+Rule:
+
+Portfolio modules consume internal data services only.
+
+---
+
+## Current Development Stage
+
+Focus:
+
+Tier 1 MVP Critical Features
+
+Priority order:
+
+1. Data integrity
+2. Portfolio accounting
+3. Currency conversion
+4. Valuation consistency
+5. Holdings accuracy
+6. Buy/Sell workflows
+7. Account management
+8. Allocation analytics
+9. Performance analytics
+10. Risk analytics
+
+---
+
+## Safe Zones
+
+UI changes are preferred over engine changes.
+
+Whenever possible:
+
+- Modify presentation layer only.
+- Avoid touching valuation logic.
+- Avoid touching holdings logic.
+- Avoid touching transaction logic.
+
+---
+
+## Current Governance Rule
+
+Review First Mode is mandatory.
+
+Every implementation request must include:
+
+- Business value
+- User value
+- Technical complexity
+- Architecture impact
+- Data integrity impact
+- Files affected
+- Test impact
+- Risks
+- Recommendation
+
+Wait for approval before coding.
+
+---
+
+## Test Governance
+
+Test count must never decrease.
+
+Every meaningful change requires regression coverage.
+
+New tests must be registered in the project test runner.
+
+---
+
+## Current Long-Term Goal
+
+Build a reliable investor-grade portfolio management platform before adding advanced intelligence, automation, or research features.
+
+Reliability > Features
+Consistency > Speed
+Trust > Visual polish
