@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "an1enHjza2IlGkKhXPCGr"
+uri = "file://bousala_skills_governance_audit.pdf"
+type = "pdf"
+title = "Bousala Skills Governance Audit — Consolidation Plan"
