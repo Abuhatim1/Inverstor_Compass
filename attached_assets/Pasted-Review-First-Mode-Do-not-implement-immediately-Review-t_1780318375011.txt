@@ -1,0 +1,92 @@
+Review First Mode.
+
+Do not implement immediately.
+
+Review the following two issues and provide implementation assessment first.
+
+Issue 1 — New account not appearing in Add New Position modal
+
+Problem:
+When a new account is created in Accounts tab, it does not appear in the Account selector inside Holdings → Add New Position modal.
+
+Expected behavior:
+
+* Account selector must always load the latest active investment/trading accounts.
+* Newly created accounts must appear immediately without app restart.
+* Bank/cash-only accounts should not appear if the holding requires an investment/trading account.
+* If no eligible account exists, show a clear message.
+
+Likely root cause:
+
+* Account list is cached or loaded once into session_state.
+* Add New Position modal may use stale account options.
+
+Required:
+
+* Ensure Add New Position account selector reads current accounts from the same account source used by Accounts tab.
+* Refresh/reload eligible accounts before rendering the modal.
+* Do not duplicate account loading logic.
+* Do not change valuation, holdings, transactions, FIFO, or cash logic.
+
+Add tests:
+ACC-UI-06 Create new investment account appears in Add New Position account selector.
+ACC-UI-07 Inactive/deleted accounts do not appear.
+ACC-UI-08 Bank-only/cash-only accounts do not appear if not eligible.
+
+Issue 2 — Asset Type list is incomplete
+
+Problem:
+Asset type options do not cover all required asset classes.
+
+Required:
+Expand asset_type options to include at minimum:
+
+* Stock
+* ETF
+* REIT
+* Mutual Fund
+* Sukuk
+* Bond
+* Cash
+* Precious Metal
+* Commodity
+* Real Estate
+* Private Equity
+* Private Asset
+* Crypto
+* Other
+
+Rules:
+
+* This is classification metadata only.
+* Do not change valuation logic.
+* Do not change price routing.
+* Do not assume all asset types have live prices.
+* Manual/custom assets must still be supported.
+* Existing holdings with old asset_type values must remain valid.
+* If unknown, default to Other.
+
+Add tests:
+ASSET-TYPE-01 New asset type options appear in Add/Edit Holding.
+ASSET-TYPE-02 Existing holdings remain valid.
+ASSET-TYPE-03 Precious Metal can be added as manual/custom asset.
+ASSET-TYPE-04 Commodity can be added as manual/custom asset.
+ASSET-TYPE-05 Real Estate can be added as manual/custom asset.
+ASSET-TYPE-06 Other works as fallback.
+
+Restrictions:
+Do not modify:
+
+* valuation engine
+* FIFO
+* transaction engine
+* account cash logic
+* SAHMK
+* Yahoo
+* market_data_router
+* performance engine
+
+After review, stop and wait for approval.
+
+Implementation starts only after I write:
+Proceed with implementation.

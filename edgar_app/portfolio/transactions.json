@@ -31,5 +31,16 @@
     "recorded_at": "2026-05-29T12:32:02.480703",
     "account_id": "c38b4be4",
     "fees": 0.0
+  },
+  {
+    "ticker": "AAPL",
+    "side": "SELL",
+    "quantity": 0.001,
+    "price": 312.05999755859375,
+    "date": "2026-06-01",
+    "notes": "",
+    "recorded_at": "2026-06-01T11:26:49.604442",
+    "account_id": "3637b685",
+    "fees": 0.0
   }
 ]

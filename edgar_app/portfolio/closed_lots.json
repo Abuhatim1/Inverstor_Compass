@@ -1,0 +1,25 @@
+[
+  {
+    "lot_id": "57ff9d43-906",
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "currency": "USD",
+    "quantity": 0.001,
+    "buy_price": 312.51000977,
+    "sell_price": 312.05999756,
+    "buy_value": 0.31251001,
+    "sell_value": 0.31206,
+    "sell_fees": 0.0,
+    "realized_pnl": -0.00045001,
+    "realized_pnl_pct": -0.14,
+    "open_date": "2026-05-29",
+    "close_date": "2026-06-01",
+    "sell_txn_id": "2026-06-01T11:26:49.604442",
+    "account_id": "3637b685",
+    "notes": "",
+    "recorded_at": "2026-06-01T11:26:49.602344",
+    "voided": true,
+    "voided_at": "2026-06-01T11:27:34.290054",
+    "void_reason": "Reopened via UI"
+  }
+]
