@@ -8,7 +8,9 @@
     "notes": "",
     "recorded_at": "2026-05-29T11:22:27.406434",
     "account_id": "5cc295b7",
-    "fees": 0.0
+    "fees": 0.0,
+    "transaction_id": "TXN_e24ca7cb",
+    "asset_id": ""
   },
   {
     "ticker": "AAPL",
@@ -19,7 +21,9 @@
     "notes": "",
     "recorded_at": "2026-05-29T12:29:40.604675",
     "account_id": "c38b4be4",
-    "fees": 0.0
+    "fees": 0.0,
+    "transaction_id": "TXN_739b0a74",
+    "asset_id": ""
   },
   {
     "ticker": "AAPL",
@@ -30,7 +34,9 @@
     "notes": "",
     "recorded_at": "2026-05-29T12:32:02.480703",
     "account_id": "c38b4be4",
-    "fees": 0.0
+    "fees": 0.0,
+    "transaction_id": "TXN_b168d5c3",
+    "asset_id": ""
   },
   {
     "ticker": "AAPL",
@@ -41,6 +47,60 @@
     "notes": "",
     "recorded_at": "2026-06-01T11:26:49.604442",
     "account_id": "3637b685",
-    "fees": 0.0
+    "fees": 0.0,
+    "transaction_id": "TXN_fc3560a3",
+    "asset_id": ""
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-01",
+    "notes": "",
+    "recorded_at": "2026-06-01T15:34:52.589994",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_58108c14",
+    "asset_id": "AST_000052"
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-01",
+    "notes": "",
+    "recorded_at": "2026-06-01T15:34:52.601234",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_036503aa",
+    "asset_id": "AST_000053"
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-01",
+    "notes": "",
+    "recorded_at": "2026-06-01T15:35:29.226721",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_e7cb35af",
+    "asset_id": "AST_000052"
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-01",
+    "notes": "",
+    "recorded_at": "2026-06-01T15:35:29.232510",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_225f1076",
+    "asset_id": "AST_000053"
   }
 ]

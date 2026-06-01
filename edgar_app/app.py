@@ -2812,36 +2812,8 @@ def render_holdings_tab(bundle: dict) -> None:
             )
 
 
-        # ── Manual price update (untickered assets only) ───────────────────────
-        if manual_tickers:
-            with st.expander(
-                f"📝 Update manual prices ({len(manual_tickers)} asset(s))",
-                expanded=False,
-            ):
-                st.caption(
-                    "These assets have no Yahoo Finance ticker. "
-                    "Enter a price and click Save."
-                )
-                for tk in sorted(manual_tickers):
-                    h_m = holdings[tk]        # tk is asset_id
-                    mp_c1, mp_c2 = st.columns([3, 1])
-                    with mp_c1:
-                        new_p = st.number_input(
-                            f"{h_m.ticker}  ·  {h_m.company_name}",
-                            value=float(h_m.current_price or 0.0),
-                            min_value=0.0,
-                            step=0.01,
-                            format="%.4f",
-                            key=f"mp_manual_{tk}",
-                        )
-                    with mp_c2:
-                        st.write("")
-                        if st.button("Save", key=f"mp_save_{tk}",
-                                     use_container_width=True):
-                            if abs(new_p - float(h_m.current_price or 0.0)) > 1e-9:
-                                update_current_price(tk, new_p, source="manual")
-                                st.toast(f"{h_m.ticker} price updated to {new_p:.4f}", icon="💾")
-                            st.rerun()
+        # Manual assets share the same Edit dialog as all other assets.
+        # Price updates for untickered holdings are done via the ✏️ Edit button.
 
     # ── Account helpers (needed by all dialogs, including Add New) ───────────
     from portfolio.accounts import active_accounts as _active_accts_fn, account_display_name as _acct_dn
@@ -3041,9 +3013,9 @@ def render_holdings_tab(bundle: dict) -> None:
         # ── Core fields — driven entirely by session state keys ───────────────
         _fc1, _fc2 = st.columns(2)
         with _fc1:
-            _ad_tk     = st.text_input("Ticker / Asset ID", key="ahn_tk_confirm",
+            _ad_tk     = st.text_input("Ticker symbol", key="ahn_tk_confirm",
                                        help="Auto-filled after Validate. Edit if needed.")
-            _ad_name   = st.text_input("Company / Asset name", key="ahn_name")
+            _ad_name   = st.text_input("Asset name", key="ahn_name")
             _ad_type   = st.selectbox("Asset type",  ASSET_TYPES,     key="ahn_type")
             _ad_market = st.selectbox("Market",       MARKETS,         key="ahn_market")
             _ad_sector = st.selectbox("Sector",       DEFAULT_SECTORS, key="ahn_sector")
@@ -4647,7 +4619,7 @@ def render_thesis_memory_tab() -> None:
             # Auto-expand Core Thesis right after a fresh import.
             _recently_imported = (
                 st.session_state.get("last_saved_thesis_import", {})
-                    .get("ticker") == ticker
+                    .get("ticker") == h.ticker
             )
             edit_label = (
                 "✏️ Core Thesis & Scenarios" if c is not None
@@ -4661,7 +4633,7 @@ def render_thesis_memory_tab() -> None:
                 if c is not None:
                     _render_thesis_field_summary(c)
                 _render_core_thesis_form(
-                    ticker, h, c,
+                    h.ticker, h, c,
                     upsert_fn=upsert_core_thesis_fields,
                     delete_fn=delete_core_thesis,
                     time_horizons=TIME_HORIZONS,

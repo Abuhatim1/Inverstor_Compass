@@ -26,21 +26,61 @@ only available for US-listed equities that have been analysed via Filing Search.
 
 import json
 import os
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 
 
-def _gen_asset_id() -> str:
-    """Generate a short unique asset identifier (8-char UUID prefix)."""
-    return str(uuid.uuid4())[:8]
-
-
 # ── Storage ───────────────────────────────────────────────────────────────────
 
-_DIR              = os.path.dirname(__file__)
-_HOLDINGS_FILE    = os.path.join(_DIR, "holdings.json")
+_DIR               = os.path.dirname(__file__)
+_HOLDINGS_FILE     = os.path.join(_DIR, "holdings.json")
 _TRANSACTIONS_FILE = os.path.join(_DIR, "transactions.json")
+_COUNTER_FILE      = os.path.join(_DIR, "_asset_counter.json")
+
+
+# ── Asset-ID generation ───────────────────────────────────────────────────────
+
+_AST_ID_PAT = re.compile(r'^AST_\d{6}$')
+
+
+def _scan_max_asset_num() -> int:
+    """Scan holdings.json for the highest AST_NNNNNN sequence number.
+    Used to seed the counter when the counter file is absent."""
+    try:
+        if not os.path.exists(_HOLDINGS_FILE):
+            return 0
+        with open(_HOLDINGS_FILE, "r", encoding="utf-8") as _f:
+            raw = json.load(_f)
+        max_num = 0
+        for key in raw:
+            if _AST_ID_PAT.match(str(key)):
+                max_num = max(max_num, int(str(key)[4:]))
+        return max_num
+    except Exception:
+        return 0
+
+
+def _gen_asset_id() -> str:
+    """Generate a sequential asset identifier in AST_NNNNNN format.
+    Counter is persisted in _asset_counter.json next to holdings.json."""
+    try:
+        if os.path.exists(_COUNTER_FILE):
+            with open(_COUNTER_FILE, "r", encoding="utf-8") as _cf:
+                next_num = int(json.load(_cf).get("next", 1))
+        else:
+            next_num = _scan_max_asset_num() + 1
+    except Exception:
+        next_num = 1
+    asset_id = f"AST_{next_num:06d}"
+    try:
+        os.makedirs(_DIR or ".", exist_ok=True)
+        with open(_COUNTER_FILE, "w", encoding="utf-8") as _cf:
+            json.dump({"next": next_num + 1}, _cf)
+    except Exception:
+        pass
+    return asset_id
 
 
 # ── Ticker normalisation ───────────────────────────────────────────────────────
@@ -174,15 +214,17 @@ class Holding:
 @dataclass
 class Transaction:
     """One manual buy/sell record."""
-    ticker:      str
-    side:        str        # "BUY" | "SELL"
-    quantity:    float
-    price:       float
-    date:        str        # ISO date
-    notes:       str  = ""
-    recorded_at: str  = ""  # ISO timestamp
-    account_id:  str  = ""  # linked investment account (optional)
-    fees:        float = 0.0  # broker/custody fees
+    ticker:         str
+    side:           str         # "BUY" | "SELL"
+    quantity:       float
+    price:          float
+    date:           str         # ISO date
+    notes:          str   = ""
+    recorded_at:    str   = ""  # ISO timestamp
+    account_id:     str   = ""  # linked investment account (optional)
+    fees:           float = 0.0
+    transaction_id: str   = ""  # immutable; auto-generated at creation
+    asset_id:       str   = ""  # links to Holding.asset_id
 
 
 # ── Holdings persistence ──────────────────────────────────────────────────────
@@ -216,11 +258,11 @@ def load_holdings(path: str | None = None) -> dict[str, "Holding"]:
         try:
             filtered = {k: v for k, v in entry.items() if k in valid}
             # ── Backward-compatible migration ──────────────────────────────────
-            # Old format: key is the ticker symbol; entry has no "asset_id" field.
-            # New format: key is an 8-char alphanumeric asset_id.
+            # Old formats: ticker-keyed (no asset_id), or 8-char UUID asset_id.
+            # Current format: AST_NNNNNN sequential key.
             existing_id = filtered.get("asset_id", "")
-            if not existing_id or len(existing_id) != 8 or not existing_id.isalnum():
-                # Either missing or was set to the ticker string — generate a real one
+            if not existing_id or not _AST_ID_PAT.match(existing_id):
+                # Missing, old ticker-string, or old 8-char UUID — generate new ID
                 filtered["asset_id"] = _gen_asset_id()
                 needs_resave = True
             holding = Holding(**filtered)
@@ -267,6 +309,8 @@ def upsert_holding(
     default_account_id: str | None = None,
     # v3 market-provider fields
     exchange_symbol: str | None = None,
+    # Optional: override storage path (useful in tests)
+    path:            str | None = None,
 ) -> "Holding":
     """
     Insert or update one holding's fields.  None means 'don't change'.
@@ -280,8 +324,9 @@ def upsert_holding(
        generated asset_id.
 
     A new holding requires *default_account_id*; updates may omit it.
+    Pass *path* to target a specific file (useful in tests).
     """
-    holdings = load_holdings()
+    holdings = load_holdings(path=path)
 
     # ── Locate existing holding ────────────────────────────────────────────────
     if asset_id:
@@ -338,7 +383,7 @@ def upsert_holding(
         exchange_symbol=_pick(exchange_symbol, "exchange_symbol", ""),
     )
     holdings[_eff_asset_id] = new_holding
-    save_holdings(holdings)
+    save_holdings(holdings, path=path)
     return new_holding
 
 
@@ -435,6 +480,9 @@ def load_transactions() -> list[Transaction]:
             continue
         try:
             filtered = {k: v for k, v in entry.items() if k in valid}
+            # Back-fill transaction_id for old records that pre-date the field
+            if not filtered.get("transaction_id"):
+                filtered["transaction_id"] = "TXN_" + str(uuid.uuid4())[:8]
             out.append(Transaction(**filtered))
         except Exception:
             continue
@@ -584,6 +632,8 @@ def record_transaction(
         recorded_at=datetime.now().isoformat(),
         account_id=account_id,
         fees=float(fees),
+        transaction_id="TXN_" + str(uuid.uuid4())[:8],
+        asset_id=_eff_asset_id,
     )
     txns = load_transactions()
     txns.append(txn)

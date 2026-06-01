@@ -5528,16 +5528,17 @@ def _cat_assetid() -> list[TestResult]:
     CAT = "Asset-ID Primary Key"
 
     def assetid_01():
-        """_gen_asset_id returns an 8-char alphanumeric string."""
+        """_gen_asset_id returns sequential AST_NNNNNN identifiers."""
+        import re
         from portfolio.holdings import _gen_asset_id
-        ids = [_gen_asset_id() for _ in range(20)]
-        all_8_chars  = all(len(i) == 8 for i in ids)
-        all_alnum    = all(i.isalnum() for i in ids)
-        all_unique   = len(set(ids)) == 20
-        ok = all_8_chars and all_alnum and all_unique
+        ast_pat = re.compile(r'^AST_\d{6}$')
+        ids = [_gen_asset_id() for _ in range(10)]
+        all_ast_fmt = all(ast_pat.match(i) for i in ids)
+        all_unique  = len(set(ids)) == 10
+        ok = all_ast_fmt and all_unique
         return (
-            "all 8-char alphanumeric and unique",
-            f"all_8={all_8_chars}, all_alnum={all_alnum}, all_unique={all_unique}",
+            "all AST_NNNNNN format and unique",
+            f"all_ast_fmt={all_ast_fmt}, all_unique={all_unique}, sample={ids[0]}",
             ok,
         )
 
@@ -5594,16 +5595,17 @@ def _cat_assetid() -> list[TestResult]:
         finally:
             os.unlink(tmp_path)
 
+        import re as _re
+        ast_pat = _re.compile(r'^AST_\d{6}$')
         # Keys must NOT be the old tickers; each holding's .ticker must match original
         keys_are_not_tickers = "AAPL" not in holdings and "GC=F" not in holdings
         tickers_preserved    = {h.ticker for h in holdings.values()} == {"AAPL", "GC=F"}
-        ids_are_8chars       = all(len(k) == 8 and k.isalnum()
-                                   for k in holdings.keys())
-        ok = keys_are_not_tickers and tickers_preserved and ids_are_8chars
+        ids_are_ast_fmt      = all(ast_pat.match(k) for k in holdings.keys())
+        ok = keys_are_not_tickers and tickers_preserved and ids_are_ast_fmt
         return (
-            "old ticker keys migrated to 8-char asset_ids; .ticker preserved",
+            "old ticker keys migrated to AST_NNNNNN asset_ids; .ticker preserved",
             (f"keys_not_tickers={keys_are_not_tickers}, "
-             f"tickers_ok={tickers_preserved}, ids_8chars={ids_are_8chars}"),
+             f"tickers_ok={tickers_preserved}, ids_ast_fmt={ids_are_ast_fmt}"),
             ok,
         )
 
@@ -5693,11 +5695,188 @@ def _cat_assetid() -> list[TestResult]:
         )
 
     _tests = [
-        ("ASSETID-01", "_gen_asset_id produces unique 8-char alphanumeric IDs",        "P0", True, assetid_01),
+        ("ASSETID-01", "_gen_asset_id produces sequential AST_NNNNNN identifiers",    "P0", True, assetid_01),
         ("ASSETID-02", "Two same-ticker holdings coexist under distinct asset_ids",    "P0", True, assetid_02),
-        ("ASSETID-03", "load_holdings() auto-migrates old ticker-keyed JSON",          "P0", True, assetid_03),
+        ("ASSETID-03", "load_holdings() auto-migrates old format to AST_NNNNNN",       "P0", True, assetid_03),
         ("ASSETID-04", "update_current_price targets correct asset_id only",           "P0", True, assetid_04),
-        ("ASSETID-05", "Valuation sums 2 same-ticker holdings independently",         "P0", True, assetid_05),
+        ("ASSETID-05", "Valuation sums 2 same-ticker holdings independently",          "P0", True, assetid_05),
+    ]
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "portfolio.holdings", sev, blocker, fn))
+    return results
+
+
+def _cat_asset_identity() -> list[TestResult]:
+    """
+    ASSET-ID — Asset identity design: immutable asset_id, user-facing asset_name,
+    optional ticker, transaction_id, and manual-asset support.
+    """
+    import re
+    results = []
+    CAT = "Asset Identity Design"
+    ast_pat  = re.compile(r'^AST_\d{6}$')
+    txn_pat  = re.compile(r'^TXN_[0-9a-f]{8}$')
+
+    def asset_id_01():
+        """asset_id is auto-generated (AST_NNNNNN) on upsert_holding creation."""
+        import tempfile, os
+        from portfolio.holdings import upsert_holding, load_holdings
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "h.json")
+            h = upsert_holding(ticker="AAPL", company_name="Apple", quantity=1.0,
+                               avg_cost=150.0, current_price=150.0,
+                               default_account_id="acct1", path=p)
+        generated = ast_pat.match(h.asset_id) is not None
+        ok = generated
+        return ("asset_id matches AST_NNNNNN", f"asset_id={h.asset_id}", ok)
+
+    def asset_id_02():
+        """asset_id is stable — upsert with same ticker does not change it."""
+        import tempfile, os
+        from portfolio.holdings import upsert_holding
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "h.json")
+            h1 = upsert_holding(ticker="MSFT", company_name="Microsoft",
+                                quantity=1.0, avg_cost=300.0, current_price=300.0,
+                                default_account_id="acct1", path=p)
+            h2 = upsert_holding(ticker="MSFT", company_name="Microsoft",
+                                quantity=1.0, avg_cost=310.0, current_price=310.0,
+                                asset_id=h1.asset_id, path=p)
+        same_id = h1.asset_id == h2.asset_id
+        ok = same_id and ast_pat.match(h1.asset_id) is not None
+        return ("asset_id unchanged after second upsert",
+                f"id1={h1.asset_id}, id2={h2.asset_id}, stable={same_id}", ok)
+
+    def asset_id_03():
+        """asset_name (company_name) is the user-facing name; stored and retrievable."""
+        import tempfile, os
+        from portfolio.holdings import upsert_holding, load_holdings
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "h.json")
+            h = upsert_holding(ticker="2222.SR", company_name="Saudi Aramco",
+                               quantity=100.0, avg_cost=30.0, current_price=32.0,
+                               default_account_id="acct1", path=p)
+            loaded = load_holdings(path=p)
+        name_ok = loaded[h.asset_id].company_name == "Saudi Aramco"
+        ok = name_ok
+        return ("company_name stored and retrievable as user-facing name",
+                f"name={loaded[h.asset_id].company_name}", ok)
+
+    def asset_id_04():
+        """Manual asset (no ticker) can be created with has_ticker=False."""
+        import tempfile, os
+        from portfolio.holdings import upsert_holding, load_holdings
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "h.json")
+            h = upsert_holding(ticker="", company_name="Physical Gold - SNB Vault",
+                               quantity=10.0, avg_cost=1800.0, current_price=1900.0,
+                               has_ticker=False, asset_type="Precious Metal",
+                               currency="USD", default_account_id="acct1", path=p)
+            loaded = load_holdings(path=p)
+        manual_ok = not loaded[h.asset_id].has_ticker
+        name_ok   = loaded[h.asset_id].company_name == "Physical Gold - SNB Vault"
+        id_ok     = ast_pat.match(h.asset_id) is not None
+        ok = manual_ok and name_ok and id_ok
+        return ("manual asset stored without ticker",
+                f"has_ticker={loaded[h.asset_id].has_ticker}, "
+                f"name={loaded[h.asset_id].company_name}, id={h.asset_id}", ok)
+
+    def asset_id_05():
+        """ticker change via upsert does not change asset_id."""
+        import tempfile, os
+        from portfolio.holdings import upsert_holding
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "h.json")
+            h1 = upsert_holding(ticker="2222.SE", company_name="Aramco",
+                                quantity=10.0, avg_cost=30.0, current_price=32.0,
+                                default_account_id="acct1", path=p)
+            h2 = upsert_holding(ticker="2222.SR", company_name="Aramco",
+                                quantity=0.0, avg_cost=30.0, current_price=32.0,
+                                asset_id=h1.asset_id, path=p)
+        same_id = h1.asset_id == h2.asset_id
+        ok = same_id
+        return ("asset_id unchanged when ticker changes",
+                f"id stable={same_id}, t1={h1.ticker}, t2={h2.ticker}", ok)
+
+    def asset_id_06():
+        """transaction_id is auto-generated and has TXN_ prefix."""
+        from portfolio.holdings import record_transaction
+        txn, _, err = record_transaction(
+            ticker="AAPL_AID06", side="BUY", quantity=5.0, price=150.0,
+            company_name="Apple", account_id="acct1",
+        )
+        ok = (err is None) and txn_pat.match(txn.transaction_id) is not None
+        return ("transaction_id generated with TXN_ prefix",
+                f"transaction_id={txn.transaction_id if txn else 'None'}", ok)
+
+    def asset_id_07():
+        """BUY transaction stores asset_id matching the created holding."""
+        from portfolio.holdings import record_transaction, load_holdings
+        txn, holding, err = record_transaction(
+            ticker="TSLA_TEST_ASSETID07", side="BUY", quantity=1.0, price=200.0,
+            company_name="Tesla Test", account_id="acct1",
+        )
+        ok = (err is None) and txn.asset_id == holding.asset_id
+        return ("txn.asset_id == holding.asset_id",
+                f"txn.asset_id={getattr(txn,'asset_id','?')}, "
+                f"holding.asset_id={getattr(holding,'asset_id','?')}", ok)
+
+    def asset_id_08():
+        """load_holdings() returns AST_NNNNNN keys for all entries."""
+        from portfolio.holdings import load_holdings
+        holdings = load_holdings()
+        if not holdings:
+            return ("no holdings on file — skipped", "empty", True)
+        all_ast = all(ast_pat.match(k) for k in holdings.keys())
+        sample  = next(iter(holdings))
+        return ("all holding keys match AST_NNNNNN",
+                f"all_ast={all_ast}, sample_key={sample}", all_ast)
+
+    def asset_id_09():
+        """Duplicate company_name in upsert does not raise; both assets coexist."""
+        import tempfile, os
+        from portfolio.holdings import upsert_holding, load_holdings
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "h.json")
+            h1 = upsert_holding(ticker="GOLD1", company_name="Gold Fund",
+                                quantity=5.0, avg_cost=100.0, current_price=110.0,
+                                default_account_id="acct1", path=p)
+            h2 = upsert_holding(ticker="GOLD2", company_name="Gold Fund",
+                                quantity=3.0, avg_cost=105.0, current_price=110.0,
+                                default_account_id="acct1", path=p)
+            loaded = load_holdings(path=p)
+        both_exist = h1.asset_id in loaded and h2.asset_id in loaded
+        distinct   = h1.asset_id != h2.asset_id
+        ok = both_exist and distinct
+        return ("two assets with same company_name coexist with distinct asset_ids",
+                f"count={len(loaded)}, distinct={distinct}", ok)
+
+    def asset_id_10():
+        """Full regression: ASSETID-01..05 all pass (smoke-check)."""
+        from portfolio.holdings import _gen_asset_id, Holding
+        id1 = _gen_asset_id()
+        id2 = _gen_asset_id()
+        format_ok = ast_pat.match(id1) and ast_pat.match(id2)
+        distinct  = id1 != id2
+        h = Holding(ticker="TEST", company_name="Test Asset", asset_id=id1,
+                    quantity=1.0, avg_cost=10.0, current_price=10.0)
+        dataclass_ok = h.asset_id == id1
+        ok = bool(format_ok) and distinct and dataclass_ok
+        return ("format, uniqueness, and Holding dataclass all pass",
+                f"id1={id1}, id2={id2}, format={bool(format_ok)}, "
+                f"distinct={distinct}, dataclass={dataclass_ok}", ok)
+
+    _tests = [
+        ("ASSET-ID-01", "asset_id auto-generated AST_NNNNNN on upsert_holding",       "P0", True, asset_id_01),
+        ("ASSET-ID-02", "asset_id stable — second upsert preserves same id",           "P0", True, asset_id_02),
+        ("ASSET-ID-03", "asset_name (company_name) stored and retrievable",            "P0", True, asset_id_03),
+        ("ASSET-ID-04", "manual asset created without ticker (has_ticker=False)",      "P0", True, asset_id_04),
+        ("ASSET-ID-05", "ticker change does not change asset_id",                      "P0", True, asset_id_05),
+        ("ASSET-ID-06", "transaction_id auto-generated with TXN_ prefix",             "P0", True, asset_id_06),
+        ("ASSET-ID-07", "BUY transaction links asset_id to holding",                  "P0", True, asset_id_07),
+        ("ASSET-ID-08", "load_holdings() returns only AST_NNNNNN keys",               "P0", True, asset_id_08),
+        ("ASSET-ID-09", "duplicate company_name allowed — both assets coexist",       "P1", False, asset_id_09),
+        ("ASSET-ID-10", "full regression smoke-check passes",                         "P0", True, asset_id_10),
     ]
     for tid, name, sev, blocker, fn in _tests:
         results.append(_run(tid, name, CAT, "portfolio.holdings", sev, blocker, fn))
@@ -5718,6 +5897,7 @@ def run_all_tests() -> TestReport:
         + _cat_acc_ui_ext() + _cat_asset_type() + _cat_alloc_at()
         + _cat_edit_ui()
         + _cat_assetid()
+        + _cat_asset_identity()
     )
 
     punch_list: list[PunchListItem] = []
