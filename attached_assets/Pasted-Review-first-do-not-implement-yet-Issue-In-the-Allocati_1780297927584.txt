@@ -1,0 +1,81 @@
+Review first, do not implement yet.
+
+Issue:
+In the Allocation tab, there are two controls affecting the same market scope:
+1. Quick preset radio buttons: Saudi / US / All
+2. Detailed Market filter inside Filters panel
+
+This creates a conflict. Example:
+When I select All radio button, the old detailed Market filter may still contain Saudi, so the chart/table/export still show Saudi only.
+
+Decision:
+For MVP simplicity, remove/hide the detailed Market filter from Allocation tab only.
+The quick preset radio buttons must become the only market-scope control in Allocation.
+
+Important safety risk:
+Do not simply remove the Market filter UI while keeping its old state active.
+If session/filter state still stores Market = Saudi, then All preset may still behave like Saudi.
+This would create a hidden filter bug.
+
+Required behavior:
+- Saudi preset → show only Market = Saudi
+- US preset → show only Market = US
+- All preset → show all markets with no market restriction
+- Market filter must not appear inside Allocation detailed Filters panel
+- Old Market filter state must be cleared, ignored, or overwritten
+- Chart, KPI strip, table, and CSV export must all use the same final filtered dataset
+
+Implementation requirements:
+1. Locate Allocation tab/page filtering logic.
+2. Identify where detailed filters are stored, especially Market.
+3. On Allocation tab load, defensively remove/clear any old Market key from allocation detailed filter state.
+4. Before applying detailed filters, explicitly ignore/drop Market from the detailed filters dictionary/list.
+5. Create one single resolved market scope variable from the quick preset only.
+
+Suggested logic:
+
+if preset == "Saudi":
+    market_scope = ["Saudi"]
+elif preset == "US":
+    market_scope = ["US"]
+else:
+    market_scope = None  # All markets, no market filter
+
+6. Apply market_scope once when creating allocation_filtered_df.
+7. Apply remaining detailed filters after that, excluding Market.
+8. Ensure chart, KPI strip, allocation table, and CSV export all use allocation_filtered_df.
+9. Do not read Market from detailed filter state anywhere in Allocation after this change.
+10. Hide/remove only the Allocation Market filter UI.
+11. Do not remove the Market column from holdings data.
+12. Do not remove market logic from other tabs.
+
+Do not change:
+- Holdings table structure
+- Transactions
+- Valuation logic
+- Portfolio accounting
+- Database schema
+- Market column
+- Other tabs’ filters
+
+Regression tests required:
+ALLOC-01: Start with old state Market = Saudi, select All → all markets appear.
+ALLOC-02: Saudi preset → only Saudi holdings appear.
+ALLOC-03: US preset → only US holdings appear.
+ALLOC-04: All preset → Saudi + US + any other market appear.
+ALLOC-05: Refresh page while All selected → all markets still appear.
+ALLOC-06: Detailed Filters panel no longer shows Market.
+ALLOC-07: Sector and Currency filters still work.
+ALLOC-08: Chart, KPI strip, table, and CSV export all match the same filtered dataset.
+ALLOC-09: No valuation/calculation changes after filtering.
+ALLOC-10: No impact on Holdings tab or Closed Holdings tab.
+
+Please first provide:
+- Files likely affected
+- Functions likely affected
+- Current filter-state source
+- Proposed implementation plan
+- Risks
+- Test plan
+
+Wait for my approval before implementation.
