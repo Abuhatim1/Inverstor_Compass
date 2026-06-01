@@ -1,0 +1,106 @@
+Implement the Yahoo/Sahmk cross-reference ticker search ONLY inside the Watchlist module.
+
+Do not modify holdings, transactions, portfolio valuation, realized gain/loss, closed holdings, or asset_id logic used by actual holdings.
+
+Scope:
+- Build this first as a standalone Watchlist Search and Market Mapping feature.
+- The purpose is to test ticker discovery, Yahoo/Sahmk mapping, autocomplete search, and source priority before connecting it to real holdings.
+
+Create these tables:
+1. watchlist_market_assets
+- watchlist_asset_id
+- canonical_asset_name
+- asset_class
+- market
+- exchange
+- currency
+- country
+- sector
+- is_active
+- created_at
+- updated_at
+
+2. watchlist_ticker_cross_reference
+- watchlist_cross_ref_id
+- watchlist_asset_id
+- platform_name: Yahoo, Sahmk, Manual, Other
+- platform_ticker_symbol
+- platform_asset_name
+- exchange
+- currency
+- data_source_priority
+- is_primary_source
+- last_verified_at
+- is_active
+
+3. watchlist_market_assets_staging
+- staging_id
+- source_name
+- platform_ticker_symbol
+- platform_asset_name
+- exchange
+- market
+- currency
+- asset_class
+- sector
+- import_batch_id
+- match_status
+- matched_watchlist_asset_id
+- review_required
+- created_at
+
+Watchlist search behavior:
+- Add an autocomplete search field in the Watchlist page.
+- Search by Yahoo ticker, Sahmk ticker, local ticker, canonical asset name, platform asset name, or partial name.
+- Display result as:
+  Canonical Asset Name — Market — Currency
+  Yahoo: ticker if available
+  Sahmk: ticker if available
+  Primary Source: source name
+
+Selection behavior:
+- When selected, add the asset only to the Watchlist.
+- Store watchlist_asset_id in the watchlist item.
+- Do not create or modify holding asset_id.
+- Do not create transactions.
+- Do not affect actual portfolio positions.
+
+Price lookup priority inside Watchlist only:
+- For Saudi assets:
+  1. Try Sahmk ticker first.
+  2. If unavailable, fallback to Yahoo ticker.
+  3. If unavailable, show manual price required.
+
+- For US/global assets:
+  1. Try Yahoo ticker first.
+  2. If unavailable, check other linked source.
+  3. If unavailable, show manual price required.
+
+Admin page:
+Create a Watchlist Market Mapping admin section where the user can:
+- View mapped assets
+- Search by ticker or name
+- Add Yahoo ticker
+- Add Sahmk ticker
+- Link multiple platform tickers to one watchlist asset
+- Mark one ticker source as primary
+- Activate/deactivate mappings
+- Prevent duplicate active platform ticker mapping
+
+Important isolation rule:
+This feature must be fully isolated from the actual holdings architecture.
+No existing holdings, transactions, closed holdings, realized P/L, asset_id, or portfolio valuation code should be changed.
+
+Testing:
+After successful implementation, update the developer mode test runner and add tests for:
+- Watchlist search by Yahoo ticker
+- Watchlist search by Sahmk ticker
+- Watchlist search by asset name
+- One watchlist asset linked to multiple platform tickers
+- Duplicate active ticker prevention
+- Saudi watchlist price priority
+- Global watchlist price priority
+- Staging import
+- Fuzzy match review_required logic
+- No impact on holdings
+- No impact on transactions

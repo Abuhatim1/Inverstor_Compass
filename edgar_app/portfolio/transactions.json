@@ -180,5 +180,18 @@
     "fees": 0.0,
     "transaction_id": "TXN_e7a7a205",
     "asset_id": "AST_000196"
+  },
+  {
+    "ticker": "GC=F",
+    "side": "BUY",
+    "quantity": 16.08,
+    "price": 1956.0,
+    "date": "2020-06-01",
+    "notes": "",
+    "recorded_at": "2026-06-01T17:42:59.891363",
+    "account_id": "5356d109",
+    "fees": 0.0,
+    "transaction_id": "TXN_a453f748",
+    "asset_id": "AST_000017"
   }
 ]
