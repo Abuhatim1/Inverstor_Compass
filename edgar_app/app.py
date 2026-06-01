@@ -1488,7 +1488,7 @@ def render_portfolio_dashboard() -> None:
                     st.caption(f"Analyses run: {entry.analyses_count}")
 
                 # ── Promote to Holding (research-only watchlist; full workflow) ──
-                _wl_existing = holdings.get(ticker)
+                _wl_existing = next((h for h in holdings.values() if h.ticker == ticker), None)
                 if _wl_existing:
                     st.caption(
                         f"✅ Already held · {_wl_existing.quantity:g} shares @ "
@@ -2143,10 +2143,12 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     st.subheader("📊 Portfolio Allocation")
 
     # ── Build allocation rows from valuation engine ───────────────────────────
+    # holdings is keyed by asset_id (AST_NNNNNN); build a ticker→holding map
+    _h_by_ticker = {h.ticker: h for h in holdings.values()}
     _excluded: list[str] = []
     _rows: list[dict] = []
     for _r in val.per_holding:
-        _h = holdings.get(_r.ticker)
+        _h = _h_by_ticker.get(_r.ticker)
         if _h is None:
             continue
         if _r.missing_price or _r.missing_fx:
@@ -4783,7 +4785,9 @@ def _render_thesis_import_section(
 
         # ── No pending import → show upload form ─────────────────────────
         if pending is None:
-            tickers = sorted(holdings.keys())
+            # holdings keyed by asset_id; build ticker→asset_id map for display
+            _imp_aid_by_ticker = {(h.ticker or aid): aid for aid, h in holdings.items()}
+            tickers = sorted(_imp_aid_by_ticker.keys())
             if not tickers:
                 st.info("Add at least one holding first.")
                 return
@@ -4836,7 +4840,7 @@ def _render_thesis_import_section(
 
             if extract_clicked and uploaded is not None:
                 ticker_sel = t_choice
-                holding    = holdings[ticker_sel]
+                holding    = holdings[_imp_aid_by_ticker[ticker_sel]]
                 try:
                     with st.spinner("Extracting text from document…"):
                         text, kind = extract_text(uploaded.getvalue(), uploaded.name)
