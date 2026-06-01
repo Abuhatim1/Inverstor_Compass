@@ -26,8 +26,14 @@ only available for US-listed equities that have been analysed via Filing Search.
 
 import json
 import os
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
+
+
+def _gen_asset_id() -> str:
+    """Generate a short unique asset identifier (8-char UUID prefix)."""
+    return str(uuid.uuid4())[:8]
 
 
 # ── Storage ───────────────────────────────────────────────────────────────────
@@ -120,6 +126,7 @@ class Holding:
     """One actual position the user owns."""
     ticker:        str
     company_name:  str
+    asset_id:      str   = ""          # unique asset identifier (8-char UUID); generated at creation
     market:        str   = "US"        # "US" | "Saudi" | "UK" | "Europe" | "Asia" | "Other"
     sector:        str   = "Other"
     quantity:      float = 0.0
@@ -180,40 +187,66 @@ class Transaction:
 
 # ── Holdings persistence ──────────────────────────────────────────────────────
 
-def load_holdings() -> dict[str, "Holding"]:
-    """Load holdings from disk; return empty dict on missing or corrupt file."""
-    if not os.path.exists(_HOLDINGS_FILE):
+def load_holdings(path: str | None = None) -> dict[str, "Holding"]:
+    """
+    Load holdings from disk, keyed by asset_id.
+
+    Backward-compatible migration: old holdings.json files were keyed by ticker
+    with no asset_id field.  On first load those entries are transparently migrated
+    — a fresh 8-char asset_id is generated so the dict is consistently UUID-keyed.
+    Migrated data is written back to disk automatically (production path only).
+
+    Pass *path* to target a specific file (useful in tests).
+    """
+    filepath = path or _HOLDINGS_FILE
+    if not os.path.exists(filepath):
         return {}
     try:
-        with open(_HOLDINGS_FILE, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             raw: dict = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
     import dataclasses
     valid = {f.name for f in dataclasses.fields(Holding)}
     out: dict[str, Holding] = {}
-    for ticker, entry in raw.items():
+    needs_resave = False
+    for key, entry in raw.items():
         if not isinstance(entry, dict):
             continue
         try:
             filtered = {k: v for k, v in entry.items() if k in valid}
-            out[ticker] = Holding(**filtered)
+            # ── Backward-compatible migration ──────────────────────────────────
+            # Old format: key is the ticker symbol; entry has no "asset_id" field.
+            # New format: key is an 8-char alphanumeric asset_id.
+            existing_id = filtered.get("asset_id", "")
+            if not existing_id or len(existing_id) != 8 or not existing_id.isalnum():
+                # Either missing or was set to the ticker string — generate a real one
+                filtered["asset_id"] = _gen_asset_id()
+                needs_resave = True
+            holding = Holding(**filtered)
+            out[holding.asset_id] = holding
         except Exception:
             continue
+    # Write migrated data back only for the real file (not test temp paths)
+    if needs_resave and path is None:
+        save_holdings(out)
     return out
 
 
-def save_holdings(holdings: dict[str, "Holding"]) -> None:
-    os.makedirs(_DIR, exist_ok=True)
+def save_holdings(holdings: dict[str, "Holding"], path: str | None = None) -> None:
+    """Save holdings to disk, keyed by asset_id.  Pass *path* to override default file."""
+    filepath = path or _HOLDINGS_FILE
+    os.makedirs(os.path.dirname(filepath) or _DIR, exist_ok=True)
     payload = {}
-    for ticker, h in holdings.items():
-        payload[ticker] = asdict(h)
-    with open(_HOLDINGS_FILE, "w", encoding="utf-8") as f:
+    for asset_id, h in holdings.items():
+        payload[asset_id] = asdict(h)
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
 def upsert_holding(
-    ticker:          str,
+    ticker:          str = "",
+    asset_id:        str | None = None,    # supply to target a specific holding by asset_id
     company_name:    str | None = None,
     market:          str | None = None,
     sector:          str | None = None,
@@ -236,30 +269,55 @@ def upsert_holding(
     exchange_symbol: str | None = None,
 ) -> "Holding":
     """
-    Insert or update one holding's fields. None means 'don't change'.
+    Insert or update one holding's fields.  None means 'don't change'.
 
-    When creating a NEW holding (ticker not yet in holdings.json),
-    default_account_id must be supplied and non-empty — raises ValueError
-    otherwise.  Updates to existing holdings may omit it; the stored value
-    is preserved automatically.
+    Lookup order:
+    1. If *asset_id* is provided, look up the holding by that asset_id directly.
+    2. Otherwise scan holdings for the first entry whose .ticker matches *ticker*
+       (open position — qty > 0 — preferred, then any match).  This preserves
+       backward-compatible behaviour for callers that don't yet have an asset_id.
+    3. If no existing holding is found, a new one is created with a freshly
+       generated asset_id.
+
+    A new holding requires *default_account_id*; updates may omit it.
     """
     holdings = load_holdings()
-    existing = holdings.get(ticker)
+
+    # ── Locate existing holding ────────────────────────────────────────────────
+    if asset_id:
+        existing = holdings.get(asset_id)
+    elif ticker:
+        existing = next(
+            (h for h in holdings.values()
+             if h.ticker == ticker and h.quantity > 1e-9),
+            None,
+        ) or next(
+            (h for h in holdings.values() if h.ticker == ticker),
+            None,
+        )
+    else:
+        existing = None
+
+    # ── Effective identifiers ──────────────────────────────────────────────────
+    _eff_asset_id = (existing.asset_id if existing
+                     else (asset_id or _gen_asset_id()))
+    _eff_ticker   = ticker or (existing.ticker if existing else "UNKNOWN")
 
     def _pick(new, old_attr: str, default):
         if new is not None:
             return new
         return getattr(existing, old_attr) if existing else default
 
-    # ── Account-linkage enforcement ───────────────────────────────────────────
+    # ── Account-linkage enforcement ────────────────────────────────────────────
     _eff_aid = _pick(default_account_id, "default_account_id", "")
     err = _check_new_holding_account(existing, _eff_aid)
     if err:
         raise ValueError(err)
 
     new_holding = Holding(
-        ticker=ticker,
-        company_name=_pick(company_name, "company_name", ticker),
+        ticker=_eff_ticker,
+        asset_id=_eff_asset_id,
+        company_name=_pick(company_name, "company_name", _eff_ticker),
         market=_pick(market, "market", "US"),
         sector=_pick(sector, "sector", "Other"),
         quantity=_pick(quantity, "quantity", 0.0),
@@ -276,19 +334,19 @@ def upsert_holding(
         notes=_pick(notes, "notes", ""),
         price_source=_pick(price_source, "price_source", "manual"),
         price_date=_pick(price_date, "price_date", ""),
-        default_account_id=_eff_aid,          # preserved from existing or new value
+        default_account_id=_eff_aid,
         exchange_symbol=_pick(exchange_symbol, "exchange_symbol", ""),
     )
-    holdings[ticker] = new_holding
+    holdings[_eff_asset_id] = new_holding
     save_holdings(holdings)
     return new_holding
 
 
-def delete_holding(ticker: str) -> bool:
+def delete_holding(asset_id: str) -> bool:
     """Hard delete — removes the holding with no backup."""
     holdings = load_holdings()
-    if ticker in holdings:
-        del holdings[ticker]
+    if asset_id in holdings:
+        del holdings[asset_id]
         save_holdings(holdings)
         return True
     return False
@@ -297,7 +355,7 @@ def delete_holding(ticker: str) -> bool:
 _DELETED_HOLDINGS_FILE = os.path.join(_DIR, "deleted_holdings.json")
 
 
-def soft_delete_holding(ticker: str) -> bool:
+def soft_delete_holding(asset_id: str) -> bool:
     """
     Remove a holding from holdings.json and archive it in deleted_holdings.json
     with a deletion timestamp.
@@ -306,7 +364,7 @@ def soft_delete_holding(ticker: str) -> bool:
     Does NOT touch Research Watchlist, thesis data, or transaction history.
     """
     holdings = load_holdings()
-    if ticker not in holdings:
+    if asset_id not in holdings:
         return False
 
     # ── Archive ───────────────────────────────────────────────────────────────
@@ -321,9 +379,9 @@ def soft_delete_holding(ticker: str) -> bool:
     except (json.JSONDecodeError, OSError):
         archive = []
 
-    entry = asdict(holdings[ticker])
+    entry = asdict(holdings[asset_id])
     entry["_deleted_at"]       = datetime.now().isoformat()
-    entry["_original_ticker"]  = ticker
+    entry["_original_asset_id"] = asset_id
     archive.append(entry)
 
     os.makedirs(_DIR, exist_ok=True)
@@ -331,20 +389,29 @@ def soft_delete_holding(ticker: str) -> bool:
         json.dump(archive, f, indent=2, ensure_ascii=False)
 
     # ── Remove from live holdings ─────────────────────────────────────────────
-    del holdings[ticker]
+    del holdings[asset_id]
     save_holdings(holdings)
     return True
 
 
-def update_current_price(ticker: str, price: float, source: str = "manual") -> bool:
-    """Set the current price for one holding, with optional source label."""
-    holdings = load_holdings()
-    if ticker not in holdings:
+def update_current_price(
+    asset_id: str,
+    price: float,
+    source: str = "manual",
+    path: str | None = None,
+) -> bool:
+    """Update the stored current_price for the holding identified by *asset_id*.
+
+    Pass *path* to target a specific file (useful in tests).
+    Returns True if the holding was found and updated.
+    """
+    holdings = load_holdings(path=path)
+    if asset_id not in holdings:
         return False
-    holdings[ticker].current_price = float(price)
-    holdings[ticker].price_source  = source
-    holdings[ticker].price_date    = date.today().isoformat()
-    save_holdings(holdings)
+    holdings[asset_id].current_price = float(price)
+    holdings[asset_id].price_source  = source
+    holdings[asset_id].price_date    = date.today().isoformat()
+    save_holdings(holdings, path=path)
     return True
 
 
@@ -397,6 +464,8 @@ def record_transaction(
     sec_linked:   bool = False,
     account_id:   str = "",
     fees:         float = 0.0,
+    # Optional: supply to target a specific holding (bypasses ticker scan)
+    asset_id:     str | None = None,
 ) -> tuple["Transaction", "Holding | None", "str | None"]:
     """
     Record a buy/sell transaction AND update the corresponding holding.
@@ -404,6 +473,12 @@ def record_transaction(
     Returns (transaction, updated_holding, error_message).
     If error_message is not None, no state was changed.
     On SELL, also creates FIFO closed lots via closed_holdings.execute_sell_fifo.
+
+    Lookup order for the target holding:
+    1. If *asset_id* is given, look up holdings[asset_id] directly.
+    2. Otherwise scan for the first holding with h.ticker == ticker
+       (open position — qty > 0 — preferred, then any match).
+    3. If no existing holding is found on BUY, a new one is created.
     """
     ticker    = normalize_ticker(ticker)
     side      = side.upper()
@@ -415,7 +490,22 @@ def record_transaction(
         return None, None, "Price must be 0 or greater."
 
     holdings = load_holdings()
-    existing = holdings.get(ticker)
+
+    # ── Locate target holding ──────────────────────────────────────────────────
+    if asset_id:
+        existing = holdings.get(asset_id)
+    else:
+        existing = next(
+            (h for h in holdings.values()
+             if h.ticker == ticker and h.quantity > 1e-9),
+            None,
+        ) or next(
+            (h for h in holdings.values() if h.ticker == ticker),
+            None,
+        )
+
+    _eff_asset_id = (existing.asset_id if existing
+                     else (asset_id or _gen_asset_id()))
     sell_date = txn_date or date.today().isoformat()
 
     if side == "SELL":
@@ -445,7 +535,7 @@ def record_transaction(
 
         new_qty = max(0.0, existing.quantity - quantity)
         existing.quantity = new_qty
-        holdings[ticker] = existing
+        holdings[_eff_asset_id] = existing
         updated = existing
     else:  # BUY
         _acct_err = _check_new_holding_account(existing, account_id)
@@ -454,6 +544,7 @@ def record_transaction(
         if existing is None:
             updated = Holding(
                 ticker=ticker,
+                asset_id=_eff_asset_id,
                 company_name=company_name or ticker,
                 market=market,
                 sector=sector,
@@ -479,7 +570,7 @@ def record_transaction(
             if existing.current_price <= 0:
                 existing.current_price = price
             updated = existing
-        holdings[ticker] = updated
+        holdings[_eff_asset_id] = updated
 
     save_holdings(holdings)
 
@@ -518,8 +609,8 @@ def total_cost_basis(holdings: dict[str, Holding]) -> float:
 
 
 def portfolio_weights(holdings: dict[str, Holding]) -> dict[str, float]:
-    """Return per-ticker weight % based on market value. Sums to 100% (or 0)."""
+    """Return per-asset_id weight % based on market value. Sums to 100% (or 0)."""
     total = total_market_value(holdings)
     if total <= 0:
-        return {t: 0.0 for t in holdings}
-    return {t: (h.market_value / total) * 100.0 for t, h in holdings.items()}
+        return {aid: 0.0 for aid in holdings}
+    return {aid: (h.market_value / total) * 100.0 for aid, h in holdings.items()}

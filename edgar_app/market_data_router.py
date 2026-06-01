@@ -227,10 +227,10 @@ def refresh_holdings_prices(
     Never raises; failed holdings get RoutedPrice(price=None).
     """
     results: dict[str, RoutedPrice] = {}
-    for ticker, h in holdings.items():
+    for asset_id, h in holdings.items():
         try:
             routed = get_routed_price(
-                ticker            = ticker,
+                ticker            = h.ticker,          # use h.ticker, not the dict key (asset_id)
                 exchange_symbol   = getattr(h, "exchange_symbol", "") or "",
                 last_known_price  = float(getattr(h, "current_price", 0.0) or 0.0),
                 last_known_source = getattr(h, "price_source", "manual") or "manual",
@@ -238,5 +238,5 @@ def refresh_holdings_prices(
             )
         except Exception as exc:
             routed = RoutedPrice(price=None, provider=PROVIDER_MANUAL, error=str(exc))
-        results[ticker] = routed
+        results[asset_id] = routed            # key by asset_id (matches caller's dict key)
     return results

@@ -1,3 +1,4 @@
 - [Bousala test pattern conventions](bousala-test-patterns.md) — source-scan tests use exact strings; alignment changes in app.py break them; prefer substring patterns over full-line matches.
 - [Bousala ASSET_TYPES canonical source](bousala-asset-types.md) — ASSET_TYPES lives in portfolio/holdings.py; ALLOWED_ASSET_TYPES in bulk upload derives from it via set(ASSET_TYPES); keep in sync.
 - [Bousala eligible account types](bousala-eligible-accounts.md) — _ELIGIBLE_ACCT_TYPES = frozenset({"Brokerage","Crypto","Other"}); Bank and Cash excluded from holding position selector.
+- [Asset-ID primary key](asset-id-pk.md) — holdings.json keyed by 8-char UUID asset_id; load_holdings/save_holdings/update_current_price all accept path= for test isolation.

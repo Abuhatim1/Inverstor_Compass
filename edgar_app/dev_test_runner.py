@@ -5518,6 +5518,192 @@ def _cat_alloc_at() -> list[TestResult]:
     return results
 
 
+def _cat_assetid() -> list[TestResult]:
+    """
+    ASSETID — Asset-ID primary key migration tests.
+    Holdings are now keyed by an 8-char asset_id UUID prefix so that
+    multiple assets can share the same pricing ticker (e.g. two GC=F holdings).
+    """
+    results = []
+    CAT = "Asset-ID Primary Key"
+
+    def assetid_01():
+        """_gen_asset_id returns an 8-char alphanumeric string."""
+        from portfolio.holdings import _gen_asset_id
+        ids = [_gen_asset_id() for _ in range(20)]
+        all_8_chars  = all(len(i) == 8 for i in ids)
+        all_alnum    = all(i.isalnum() for i in ids)
+        all_unique   = len(set(ids)) == 20
+        ok = all_8_chars and all_alnum and all_unique
+        return (
+            "all 8-char alphanumeric and unique",
+            f"all_8={all_8_chars}, all_alnum={all_alnum}, all_unique={all_unique}",
+            ok,
+        )
+
+    def assetid_02():
+        """Two holdings with the same ticker but different asset_ids coexist."""
+        from portfolio.holdings import Holding, _gen_asset_id
+        aid1 = _gen_asset_id()
+        aid2 = _gen_asset_id()
+        h1 = Holding(ticker="GC=F", company_name="Gold Bank",     quantity=10.0,
+                     avg_cost=1800.0, current_price=1900.0, asset_id=aid1)
+        h2 = Holding(ticker="GC=F", company_name="Physical Gold", quantity=5.0,
+                     avg_cost=1850.0, current_price=1900.0, asset_id=aid2)
+        holdings = {aid1: h1, aid2: h2}
+        both_present = len(holdings) == 2
+        distinct_ids = aid1 != aid2
+        same_ticker  = h1.ticker == h2.ticker == "GC=F"
+        ok = both_present and distinct_ids and same_ticker
+        return (
+            "two GC=F holdings with distinct asset_ids coexist",
+            f"count={len(holdings)}, ids_distinct={distinct_ids}, same_ticker={same_ticker}",
+            ok,
+        )
+
+    def assetid_03():
+        """
+        load_holdings() auto-migrates old ticker-keyed JSON entries
+        (no asset_id field) so the resulting dict is keyed by asset_id
+        and each Holding.ticker still equals the original ticker.
+        """
+        import json, tempfile, os
+        from portfolio.holdings import load_holdings
+
+        old_data = {
+            "AAPL": {
+                "ticker": "AAPL", "company_name": "Apple", "market": "US",
+                "sector": "Technology", "quantity": 5.0, "avg_cost": 150.0,
+                "current_price": 180.0, "currency": "USD",
+            },
+            "GC=F": {
+                "ticker": "GC=F", "company_name": "Gold", "market": "US",
+                "sector": "Commodity", "quantity": 2.0, "avg_cost": 1800.0,
+                "current_price": 1900.0, "currency": "USD",
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as fh:
+            json.dump(old_data, fh)
+            tmp_path = fh.name
+
+        try:
+            holdings = load_holdings(path=tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
+        # Keys must NOT be the old tickers; each holding's .ticker must match original
+        keys_are_not_tickers = "AAPL" not in holdings and "GC=F" not in holdings
+        tickers_preserved    = {h.ticker for h in holdings.values()} == {"AAPL", "GC=F"}
+        ids_are_8chars       = all(len(k) == 8 and k.isalnum()
+                                   for k in holdings.keys())
+        ok = keys_are_not_tickers and tickers_preserved and ids_are_8chars
+        return (
+            "old ticker keys migrated to 8-char asset_ids; .ticker preserved",
+            (f"keys_not_tickers={keys_are_not_tickers}, "
+             f"tickers_ok={tickers_preserved}, ids_8chars={ids_are_8chars}"),
+            ok,
+        )
+
+    def assetid_04():
+        """
+        update_current_price(asset_id) targets the correct holding when two
+        holdings share the same ticker.
+        """
+        import json, tempfile, os
+        from portfolio.holdings import load_holdings, update_current_price
+
+        from portfolio.holdings import _gen_asset_id
+        aid1 = _gen_asset_id()
+        aid2 = _gen_asset_id()
+        initial_data = {
+            aid1: {
+                "ticker": "GC=F", "company_name": "Gold Bank", "market": "US",
+                "sector": "Commodity", "quantity": 10.0, "avg_cost": 1800.0,
+                "current_price": 1800.0, "currency": "USD",
+                "asset_id": aid1,
+            },
+            aid2: {
+                "ticker": "GC=F", "company_name": "Physical Gold", "market": "US",
+                "sector": "Commodity", "quantity": 5.0, "avg_cost": 1850.0,
+                "current_price": 1850.0, "currency": "USD",
+                "asset_id": aid2,
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as fh:
+            json.dump(initial_data, fh)
+            tmp_path = fh.name
+
+        try:
+            update_current_price(aid1, 2000.0, source="test", path=tmp_path)
+            holdings = load_holdings(path=tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
+        h1_price = holdings[aid1].current_price
+        h2_price = holdings[aid2].current_price
+        correct_target  = _near(h1_price, 2000.0, 0.001)
+        other_unchanged = _near(h2_price, 1850.0, 0.001)
+        ok = correct_target and other_unchanged
+        return (
+            "h1.price=2000.0; h2.price unchanged=1850.0",
+            f"h1.price={h1_price}, h2.price={h2_price}",
+            ok,
+        )
+
+    def assetid_05():
+        """
+        Portfolio valuation with two same-ticker holdings: each holding's
+        market value is computed independently; total MV is their sum.
+        """
+        from portfolio.holdings import Holding, _gen_asset_id
+        from portfolio.valuation import calculate_portfolio_valuation
+        from portfolio.accounts import Account
+
+        aid1 = _gen_asset_id()
+        aid2 = _gen_asset_id()
+        h1 = Holding(ticker="GC=F", company_name="Gold Bank",     quantity=10.0,
+                     avg_cost=1800.0, current_price=2000.0, asset_id=aid1,
+                     currency="USD")
+        h2 = Holding(ticker="GC=F", company_name="Physical Gold", quantity=5.0,
+                     avg_cost=1850.0, current_price=2000.0, asset_id=aid2,
+                     currency="USD")
+        holdings = {aid1: h1, aid2: h2}
+        account  = Account(
+            account_id="acct1", account_name="Sandbox", base_currency="USD",
+            cash_balance=0.0, active=True,
+        )
+        val = calculate_portfolio_valuation(
+            holdings, {"acct1": account}, "USD", fx_rates={},
+        )
+        # h1 MV = 10 * 2000 = 20000;  h2 MV = 5 * 2000 = 10000
+        exp_total = 30_000.0
+        act_total = val.holdings_value_base
+        two_rows  = len(val.per_holding) == 2
+        ok = _near(act_total, exp_total, 0.01) and two_rows
+        return (
+            f"total_MV={exp_total:.2f} from 2 independent rows",
+            f"total_MV={act_total:.2f}, rows={len(val.per_holding)}",
+            ok,
+        )
+
+    _tests = [
+        ("ASSETID-01", "_gen_asset_id produces unique 8-char alphanumeric IDs",        "P0", True, assetid_01),
+        ("ASSETID-02", "Two same-ticker holdings coexist under distinct asset_ids",    "P0", True, assetid_02),
+        ("ASSETID-03", "load_holdings() auto-migrates old ticker-keyed JSON",          "P0", True, assetid_03),
+        ("ASSETID-04", "update_current_price targets correct asset_id only",           "P0", True, assetid_04),
+        ("ASSETID-05", "Valuation sums 2 same-ticker holdings independently",         "P0", True, assetid_05),
+    ]
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "portfolio.holdings", sev, blocker, fn))
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -5531,6 +5717,7 @@ def run_all_tests() -> TestReport:
         + _cat_alloc_ui() + _cat_hld_ui() + _cat_alloc_mkt() + _cat_alloc_scope()
         + _cat_acc_ui_ext() + _cat_asset_type() + _cat_alloc_at()
         + _cat_edit_ui()
+        + _cat_assetid()
     )
 
     punch_list: list[PunchListItem] = []

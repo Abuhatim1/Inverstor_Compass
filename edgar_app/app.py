@@ -524,7 +524,8 @@ def _collect_all_tickers() -> list[str]:
     from portfolio import load_portfolio, load_holdings
     try:
         return sorted(
-            set(list(load_portfolio().keys()) + list(load_holdings().keys()))
+            set(list(load_portfolio().keys())
+                + [h.ticker for h in load_holdings().values()])
         )
     except Exception:
         return []
@@ -555,17 +556,23 @@ def _apply_prices_to_holdings(
     _h = holdings if holdings is not None else _lh()
     ok_list:   list[str] = []
     fail_list: list[str] = []
+    # Build ticker → [asset_id] reverse-map (holdings are now keyed by asset_id)
+    _by_ticker: dict[str, list[str]] = {}
+    for _aid, _hld in _h.items():
+        _by_ticker.setdefault(_hld.ticker, []).append(_aid)
     for ticker, md in fetched.items():
-        if ticker not in _h:
-            continue  # watchlist-only tickers are not written to holdings
-        try:
-            if md.is_ok and md.current_price:
-                update_current_price(ticker, float(md.current_price), source="yfinance")
-                ok_list.append(ticker)
-            else:
+        _aids = _by_ticker.get(ticker, [])
+        if not _aids:
+            continue  # watchlist-only ticker — not an actual holding
+        for _aid in _aids:
+            try:
+                if md.is_ok and md.current_price:
+                    update_current_price(_aid, float(md.current_price), source="yfinance")
+                    ok_list.append(ticker)
+                else:
+                    fail_list.append(ticker)
+            except Exception:
                 fail_list.append(ticker)
-        except Exception:
-            fail_list.append(ticker)
     return ok_list, fail_list
 
 
@@ -575,6 +582,7 @@ def _apply_routed_prices(
 ) -> tuple[list[str], list[str]]:
     """
     Write routed price results (from market_data_router) to holdings storage.
+    *routed* is keyed by asset_id (same keys that refresh_holdings_prices received).
     Records the actual provider ("SAHMK", "yfinance", "cached", "manual").
     Returns (ok_list, fail_list).
     """
@@ -582,17 +590,17 @@ def _apply_routed_prices(
     _h = holdings if holdings is not None else _lh()
     ok_list:   list[str] = []
     fail_list: list[str] = []
-    for ticker, rp in routed.items():
-        if ticker not in _h:
+    for asset_id, rp in routed.items():
+        if asset_id not in _h:
             continue
         try:
             if rp.is_ok and rp.price:
-                update_current_price(ticker, float(rp.price), source=rp.provider)
-                ok_list.append(ticker)
+                update_current_price(asset_id, float(rp.price), source=rp.provider)
+                ok_list.append(asset_id)
             else:
-                fail_list.append(ticker)
+                fail_list.append(asset_id)
         except Exception:
-            fail_list.append(ticker)
+            fail_list.append(asset_id)
     return ok_list, fail_list
 
 
@@ -1249,7 +1257,11 @@ def _dlg_promote_holding() -> None:
     _ptk = st.session_state.get("promo_tk", "")
 
     # ── Duplicate guard ───────────────────────────────────────────────────────
-    _existing = load_holdings().get(_ptk)
+    _existing = next(
+        (h for h in load_holdings().values()
+         if h.ticker == _ptk and h.quantity > 1e-9),
+        None,
+    )
     if _existing:
         st.info(
             f"**{_ptk}** is already in your Holdings "
@@ -1353,7 +1365,7 @@ def _dlg_promote_holding() -> None:
                     st.error(_err)
                 else:
                     if float(_pprice) > 0 and abs(float(_pprice) - float(_pcost)) > 1e-9:
-                        update_current_price(_ptk_clean, float(_pprice), source="yfinance")
+                        update_current_price(_h.asset_id, float(_pprice), source="yfinance")
                     if _paid:
                         try:
                             _promo_upd_cash(_paid, -_ptotal)
@@ -2575,7 +2587,7 @@ def _load_valuation_bundle(base_ccy: str) -> dict:
     fx        = get_rates_for_holdings(all_ccys, base_ccy) if all_ccys else {}
     manual_fx = [c for c, r in fx.items() if r.source == "default" and c != base_ccy]
     val       = calculate_portfolio_valuation(holdings, accounts, base_ccy, fx_rates=fx)
-    wt_map    = {r.ticker: r.invested_weight_pct for r in val.per_holding}
+    wt_map    = {r.asset_id: r.invested_weight_pct for r in val.per_holding}
     return {
         "base_ccy":   base_ccy,
         "holdings":   holdings,
@@ -2639,12 +2651,12 @@ def render_holdings_tab(bundle: dict) -> None:
         live_cache = get_all_from_session()
 
         # ── Build the holdings table ───────────────────────────────────────────
-        _mv_col       = f"MV ({_base_ccy})"
-        rows          = []
-        _ticker_order: list[str] = []
-        manual_tickers: list[str] = []
+        _mv_col         = f"MV ({_base_ccy})"
+        rows            = []
+        _asset_id_order: list[str] = []    # parallel to rows; tracks asset_id per row
+        manual_tickers:  list[str] = []    # asset_ids of holdings without live ticker
 
-        for ticker, h in sorted(holdings.items()):
+        for asset_id, h in sorted(holdings.items()):
             if h.quantity <= 1e-9:          # hide fully-closed positions
                 continue
             has_tk  = getattr(h, "has_ticker", True)
@@ -2655,35 +2667,36 @@ def render_holdings_tab(bundle: dict) -> None:
             pnl_pct = h.unrealized_pnl_pct
             status  = "🟢" if pnl_pct > 0.01 else ("🔴" if pnl_pct < -0.01 else "⚪")
 
-            norm_tk = _normalize_ticker(ticker)
-            md = live_cache.get(norm_tk) or live_cache.get(ticker)
+            norm_tk = _normalize_ticker(h.ticker)
+            md = live_cache.get(norm_tk) or live_cache.get(h.ticker)
 
             if not has_tk:
-                manual_tickers.append(ticker)
+                manual_tickers.append(asset_id)
 
             _src_raw   = getattr(h, "price_source", "manual") or "manual"
             _src_label = {"SAHMK": "SAHMK", "yfinance": "Yahoo",
                           "cached": "Cached", "manual": "Manual"}.get(
                 _src_raw, _src_raw.capitalize())
 
-            _aid       = getattr(h, "default_account_id", "") or ""
-            _acct_obj  = _all_accounts.get(_aid)
-            _acct_name = _acct_obj.account_name if _acct_obj else ("Unassigned" if not _aid else "Unknown")
+            _acct_id   = getattr(h, "default_account_id", "") or ""
+            _acct_obj  = _all_accounts.get(_acct_id)
+            _acct_name = _acct_obj.account_name if _acct_obj else ("Unassigned" if not _acct_id else "Unknown")
 
-            _ticker_order.append(ticker)
+            _asset_id_order.append(asset_id)
             rows.append({
-                " ":        status,
-                "Company":  h.company_name or ticker,
-                "Ticker":   ticker,
-                "Qty":      round(h.quantity, 4),
-                "Avg Cost": round(h.avg_cost, 4),
-                "Price":    round(h.current_price, 4),
-                _mv_col:    mv_base,
-                "P&L %":    round(pnl_pct, 2),
-                "Wt %":     round(_wt_map.get(ticker, 0.0), 1),
-                "CCY":      ccy,
-                "Src":      _src_label,
-                "Account":  _acct_name,
+                " ":         status,
+                "Company":   h.company_name or h.ticker,
+                "Ticker":    h.ticker,
+                "Qty":       round(h.quantity, 4),
+                "Avg Cost":  round(h.avg_cost, 4),
+                "Price":     round(h.current_price, 4),
+                _mv_col:     mv_base,
+                "P&L %":     round(pnl_pct, 2),
+                "Wt %":      round(_wt_map.get(asset_id, 0.0), 1),
+                "CCY":       ccy,
+                "Src":       _src_label,
+                "Account":   _acct_name,
+                "_asset_id": asset_id,       # hidden; used by CSV export & action bar
             })
 
         _tbl_sel = st.dataframe(
@@ -2718,13 +2731,14 @@ def render_holdings_tab(bundle: dict) -> None:
                          help="Fetch live prices (SAHMK → Yahoo Finance → cached)."):
                 from market_data_router import refresh_holdings_prices as _rr
                 _has_tk_holdings = {
-                    t: h for t, h in holdings.items()
+                    aid: h for aid, h in holdings.items()
                     if getattr(h, "has_ticker", True)
                 }
                 with st.spinner(f"Fetching {len(_has_tk_holdings)} price(s)…"):
                     _routed = _rr(_has_tk_holdings, force=True)
                 # Also update yfinance session cache for the debug tab
-                _ticker_map = {_normalize_ticker(t): t for t in _has_tk_holdings}
+                _ticker_map = {_normalize_ticker(h.ticker): aid
+                               for aid, h in _has_tk_holdings.items()}
                 _fetched_norm = refresh_all_prices(list(_ticker_map.keys()), force=False)
                 save_to_session(_fetched_norm)
                 _ok_list, _fail_list = _apply_routed_prices(_routed, holdings)
@@ -2743,11 +2757,10 @@ def render_holdings_tab(bundle: dict) -> None:
                 "opening_quantity,avg_cost,current_price,market_value,unrealized_pnl_pct\n"
             )
             for _r in rows:
-                _tk2 = _r["Ticker"]
-                _hh  = holdings.get(_tk2)
+                _hh  = holdings.get(_r.get("_asset_id", ""))
                 if _hh:
                     _csv_buf.write(
-                        f"{_tk2},"
+                        f"{_hh.ticker},"
                         f"{_hh.company_name},"
                         f"{getattr(_hh,'asset_type','Stock')},"
                         f"{getattr(_hh,'market','US')},"
@@ -2810,11 +2823,11 @@ def render_holdings_tab(bundle: dict) -> None:
                     "Enter a price and click Save."
                 )
                 for tk in sorted(manual_tickers):
-                    h_m = holdings[tk]
+                    h_m = holdings[tk]        # tk is asset_id
                     mp_c1, mp_c2 = st.columns([3, 1])
                     with mp_c1:
                         new_p = st.number_input(
-                            f"{tk}  ·  {h_m.company_name}",
+                            f"{h_m.ticker}  ·  {h_m.company_name}",
                             value=float(h_m.current_price or 0.0),
                             min_value=0.0,
                             step=0.01,
@@ -2827,7 +2840,7 @@ def render_holdings_tab(bundle: dict) -> None:
                                      use_container_width=True):
                             if abs(new_p - float(h_m.current_price or 0.0)) > 1e-9:
                                 update_current_price(tk, new_p, source="manual")
-                                st.toast(f"{tk} price updated to {new_p:.4f}", icon="💾")
+                                st.toast(f"{h_m.ticker} price updated to {new_p:.4f}", icon="💾")
                             st.rerun()
 
     # ── Account helpers (needed by all dialogs, including Add New) ───────────
@@ -3090,18 +3103,19 @@ def render_holdings_tab(bundle: dict) -> None:
             ),
         )
 
-        # ── Duplicate guard ───────────────────────────────────────────────────
+        # ── Duplicate guard (soft warning — duplicate tickers are allowed) ────
         _ad_tk_clean = _ad_tk.strip().replace(" ", "_").upper()
         _ad_tk_norm  = _ntk(_ad_tk_clean) if _ad_tk_clean else ""
-        _open_norms  = {_ntk(k) for k, h in holdings.items() if h.quantity > 1e-9}
+        _open_norms  = {_ntk(h.ticker) for h in holdings.values() if h.quantity > 1e-9}
         _is_dup      = bool(_ad_tk_clean and _ad_tk_norm in _open_norms)
 
         if _is_dup:
-            st.error(
-                f"**{_ad_tk_clean}** already has an open position.  \n"
-                "Use that row's **Buy / Edit / Sell** actions to modify it. "
-                "A new position can only be opened once the existing one is fully closed.",
-                icon="🚫",
+            st.warning(
+                f"A holding with ticker **{_ad_tk_clean}** already exists.  "
+                "You are opening a **separate** asset with the same price ticker — "
+                "this is allowed (e.g. Gold Bank Account vs. Physical Gold). "
+                "Use the existing row's **Buy More** action to add to an existing position.",
+                icon="⚠️",
             )
 
         # ── Real-time cost / cash calculation ─────────────────────────────────
@@ -3138,10 +3152,9 @@ def render_holdings_tab(bundle: dict) -> None:
         _xb1, _xb2 = st.columns(2)
         with _xb1:
             _btn_label = "✅ Record Buy Transaction" if _is_buy_mode else "✅ Record Holding"
-            # Cash check blocks only Mode B; Mode A is always allowed
+            # Cash check blocks only Mode B; duplicate tickers now allowed
             _submit_disabled = (
                 not _ad_tk_clean
-                or _is_dup
                 or not _ad_aid
                 or (_is_buy_mode and not _cash_ok)
             )
@@ -3172,9 +3185,9 @@ def render_holdings_tab(bundle: dict) -> None:
                             account_id=_ad_aid, fees=float(_ad_fees),
                         )
                         if not _err:
-                            # Persist extra metadata
+                            # Persist extra metadata — target by asset_id to avoid ambiguity
                             upsert_holding(
-                                ticker=_ad_tk_clean,
+                                asset_id=_h2.asset_id,
                                 sec_linked=_sec_linked,
                                 price_source="yfinance" if _yahoo_ok else "manual",
                                 price_date=date.today().isoformat(),
@@ -3189,7 +3202,7 @@ def render_holdings_tab(bundle: dict) -> None:
                     else:
                         # ── Mode A: Record existing holding — no transaction,
                         #           no cash debit ─────────────────────────────
-                        upsert_holding(
+                        _h2 = upsert_holding(
                             ticker=_ad_tk_clean,
                             company_name=_ad_name.strip() or _ad_tk_clean,
                             market=_ad_market,
@@ -3215,7 +3228,7 @@ def render_holdings_tab(bundle: dict) -> None:
                         # Apply live price if it differs from the cost basis
                         if _ad_price > 0 and abs(_ad_price - float(_ad_cost)) > 1e-9:
                             update_current_price(
-                                _ad_tk_clean, _ad_price,
+                                _h2.asset_id, _ad_price,
                                 source="yfinance" if _yahoo_ok else "manual",
                             )
                         # Clear dialog state
@@ -3253,7 +3266,7 @@ def render_holdings_tab(bundle: dict) -> None:
             _d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _d_pairs]
             _d_ids    = [""] + [aid for aid, _ in _d_pairs]
             st.caption(
-                f"**{dlg_ticker}** · {dlg_h.company_name}  "
+                f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
                 f"| {dlg_h.quantity:,.4f} shares @ avg {dlg_h.avg_cost:.4f} {_d_ccy}"
             )
             if not _d_pairs:
@@ -3317,7 +3330,7 @@ def render_holdings_tab(bundle: dict) -> None:
                              disabled=not _cash_ok):
                     try:
                         _t, _h2, _e = record_transaction(
-                            ticker=dlg_ticker, side="BUY",
+                            ticker=dlg_h.ticker, asset_id=dlg_ticker, side="BUY",
                             quantity=float(_d_qty), price=float(_d_price),
                             txn_date=_d_date.isoformat() if _d_date else None,
                             notes=_d_notes,
@@ -3337,7 +3350,7 @@ def render_holdings_tab(bundle: dict) -> None:
                                 except Exception:
                                     pass
                             st.toast(
-                                f"Bought {_d_qty:.4f} × {dlg_ticker} @ {_d_price:.4f}  "
+                                f"Bought {_d_qty:.4f} × {dlg_h.ticker} @ {_d_price:.4f}  "
                                 f"· New avg cost: {_h2.avg_cost:.4f}",
                                 icon="✅",
                             )
@@ -3357,7 +3370,7 @@ def render_holdings_tab(bundle: dict) -> None:
             _d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _d_pairs]
             _d_ids    = [""] + [aid for aid, _ in _d_pairs]
             st.caption(
-                f"**{dlg_ticker}** · {dlg_h.company_name}  "
+                f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
                 f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
             )
             _d_full = st.checkbox("Close full position", value=True)
@@ -3403,7 +3416,7 @@ def render_holdings_tab(bundle: dict) -> None:
                         _final_qty = _d_avail if _d_full else float(_d_qty)
                         _d_aid = _d_ids[_d_acct]
                         _t, _h2, _e = record_transaction(
-                            ticker=dlg_ticker, side="SELL",
+                            ticker=dlg_h.ticker, asset_id=dlg_ticker, side="SELL",
                             quantity=_final_qty, price=float(_d_price),
                             txn_date=_d_date.isoformat() if _d_date else None,
                             notes=_d_notes,
@@ -3421,7 +3434,7 @@ def render_holdings_tab(bundle: dict) -> None:
                             _rpnl = (_d_price - dlg_h.avg_cost) * _final_qty
                             _fully = _h2.quantity <= 1e-9
                             st.toast(
-                                f"{'Closed' if _fully else 'Sold'} {_final_qty:,.4f} × {dlg_ticker} "
+                                f"{'Closed' if _fully else 'Sold'} {_final_qty:,.4f} × {dlg_h.ticker} "
                                 f"@ {_d_price:.4f}  · P&L: {_rpnl:+,.2f} {_d_ccy}",
                                 icon="✅",
                             )
@@ -3443,7 +3456,7 @@ def render_holdings_tab(bundle: dict) -> None:
         def _dlg_edit(dlg_ticker: str, dlg_h):
             from portfolio.accounts import load_accounts as _ed_load_accts, account_display_name as _ed_acct_dn
             st.caption(
-                f"**{dlg_ticker}** — direct field correction.  "
+                f"**{dlg_h.ticker}** — direct field correction.  "
                 "Transaction history is not affected."
             )
 
@@ -3542,7 +3555,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 ):
                     try:
                         upsert_holding(
-                            ticker=dlg_ticker,
+                            asset_id=dlg_ticker,
                             company_name=_e_name or None,
                             quantity=float(_e_qty),
                             avg_cost=float(_e_avg),
@@ -3555,7 +3568,7 @@ def render_holdings_tab(bundle: dict) -> None:
                             exchange_symbol=_e_exsym.strip() or None,
                             default_account_id=_e_aid,
                         )
-                        st.toast(f"{dlg_ticker} updated", icon="💾")
+                        st.toast(f"{dlg_h.ticker} updated", icon="💾")
                         st.rerun()
                     except Exception as _ex:
                         st.error(f"Edit failed — {_ex}")
@@ -3567,13 +3580,13 @@ def render_holdings_tab(bundle: dict) -> None:
         @st.dialog("🗑️ Delete Holding")
         def _dlg_delete(dlg_ticker: str, dlg_h):
             st.warning(
-                f"Remove **{dlg_ticker}** ({dlg_h.company_name}) from your holdings?  "
+                f"Remove **{dlg_h.ticker}** ({dlg_h.company_name}) from your holdings?  "
                 "Transaction history is preserved. This only removes the active position.",
                 icon="⚠️",
             )
             _conf_check = st.checkbox("I understand — this cannot be undone")
-            _conf_text  = st.text_input(f"Type  {dlg_ticker}  to confirm")
-            _ready = _conf_check and _conf_text.strip().upper() == dlg_ticker.upper()
+            _conf_text  = st.text_input(f"Type  {dlg_h.ticker}  to confirm")
+            _ready = _conf_check and _conf_text.strip().upper() == dlg_h.ticker.upper()
             _xb1, _xb2 = st.columns(2)
             with _xb1:
                 if st.button(
@@ -3582,7 +3595,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 ):
                     try:
                         soft_delete_holding(dlg_ticker)
-                        st.toast(f"{dlg_ticker} removed from holdings", icon="🗑️")
+                        st.toast(f"{dlg_h.ticker} removed from holdings", icon="🗑️")
                         st.rerun()
                     except Exception as _ex:
                         st.error(f"Delete failed — {_ex}")
@@ -3675,7 +3688,7 @@ def render_holdings_tab(bundle: dict) -> None:
 
             # ── Load context for validation ───────────────────────────────────
             _ex_holdings = load_holdings()
-            _open_norms  = {_ntk_bu(k) for k, h in _ex_holdings.items() if h.quantity > 1e-9}
+            _open_norms  = {_ntk_bu(h.ticker) for h in _ex_holdings.values() if h.quantity > 1e-9}
             _accts_raw   = _load_accts_raw()
             _acct_by_name = {
                 a.account_name: (aid, a)
@@ -3698,10 +3711,9 @@ def render_holdings_tab(bundle: dict) -> None:
                 else:
                     _norm_tk = _ntk_bu(_raw_tk.upper())
                     if _norm_tk in _open_norms:
-                        _re.append(
-                            f"ticker '{_raw_tk}' already has an open holding — "
-                            "use row actions to update it"
-                        )
+                        # Soft warning only — duplicate tickers now allowed
+                        # (e.g. two GC=F holdings: Gold Bank Account + Physical Gold)
+                        pass
                     if _norm_tk in _seen_norms:
                         _re.append(
                             f"ticker '{_raw_tk}' appears more than once in this file"
@@ -3908,7 +3920,7 @@ def render_holdings_tab(bundle: dict) -> None:
                             else:
                                 if _v["current_market_price"] > 0:
                                     update_current_price(
-                                        _v["ticker"],
+                                        _h2.asset_id,
                                         _v["current_market_price"],
                                         source="upload",
                                     )
@@ -3936,7 +3948,7 @@ def render_holdings_tab(bundle: dict) -> None:
         _sel_rows = getattr(getattr(_tbl_sel, "selection", None), "rows", [])
         if _sel_rows:
             _si = _sel_rows[0]
-            _st = _ticker_order[_si] if _si < len(_ticker_order) else None
+            _st = _asset_id_order[_si] if _si < len(_asset_id_order) else None
             _sh = holdings.get(_st) if _st else None
             if _st and _sh:
                 with st.container(border=True):
@@ -3944,7 +3956,7 @@ def render_holdings_tab(bundle: dict) -> None:
                     with _abar_info:
                         _ab_ccy = getattr(_sh, "currency", "USD")
                         st.markdown(
-                            f"**{_st}** · {_sh.company_name}  "
+                            f"**{_sh.ticker}** · {_sh.company_name}  "
                             f"| {_sh.quantity:,.4f} shares · "
                             f"{_sh.unrealized_pnl_pct:+.1f}%"
                         )
@@ -4239,7 +4251,7 @@ def render_transactions_tab() -> None:
     with st.expander("🔁 Record Buy / Sell", expanded=True):
         tr1, tr2 = st.columns(2)
         with tr1:
-            all_tickers = sorted(set(holdings.keys()) | set(watchlist.keys()))
+            all_tickers = sorted(set(h.ticker for h in holdings.values()) | set(watchlist.keys()))
             if all_tickers:
                 _txn_src = st.radio("Source", ["From existing", "New ticker"],
                                     horizontal=True, key="txn_tab_src")
@@ -4264,8 +4276,13 @@ def render_transactions_tab() -> None:
 
             # Detect holding's currency for account filter
             _h_ccy = "USD"
-            if txn_ticker and txn_ticker in holdings:
-                _h_ccy = getattr(holdings[txn_ticker], "currency", "USD")
+            if txn_ticker:
+                _h_match = next(
+                    (h for h in holdings.values() if h.ticker == txn_ticker),
+                    None,
+                )
+                if _h_match:
+                    _h_ccy = getattr(_h_match, "currency", "USD")
 
             # Account selector — filtered by currency
             _matching = {aid: a for aid, a in _act_accts.items()
@@ -4306,9 +4323,13 @@ def render_transactions_tab() -> None:
             elif txn_qty <= 0:
                 st.error("Quantity must be > 0.")
             else:
+                _cn_h = next(
+                    (h for h in holdings.values() if h.ticker == txn_ticker),
+                    None,
+                )
                 _cn = (
                     watchlist[txn_ticker].company_name if txn_ticker in watchlist
-                    else holdings[txn_ticker].company_name if txn_ticker in holdings
+                    else _cn_h.company_name if _cn_h
                     else txn_ticker
                 )
                 txn, updated, err = record_transaction(
@@ -4509,8 +4530,8 @@ def render_thesis_memory_tab() -> None:
     }
     no_thesis = 0
     drift_count = 0
-    for t in holdings:
-        c = theses.get(t)
+    for h in holdings.values():
+        c = theses.get(h.ticker)
         if c is None:
             no_thesis += 1
         else:
@@ -4557,21 +4578,21 @@ def render_thesis_memory_tab() -> None:
         THESIS_STATUS_STRENGTHENING: 3,
     }
     def _sort_key(item):
-        ticker, h = item
-        c = theses.get(ticker)
+        asset_id, h = item
+        c = theses.get(h.ticker)
         if c is None:
-            return (5, ticker)  # unauthored at bottom
+            return (5, h.ticker)  # unauthored at bottom
         return (_STATUS_ORDER.get(c.thesis_status, 4),
                 0 if c.drift_detected else 1,
-                ticker)
+                h.ticker)
 
-    for ticker, h in sorted(holdings.items(), key=_sort_key):
-        c = theses.get(ticker)
+    for asset_id, h in sorted(holdings.items(), key=_sort_key):
+        c = theses.get(h.ticker)
         with st.container(border=True):
             # ── Header row: identity · status · conviction trend ─────────────
             hc1, hc2, hc3 = st.columns([2.5, 2, 2])
             with hc1:
-                st.markdown(f"### {ticker}")
+                st.markdown(f"### {h.ticker}")
                 st.caption(f"{h.company_name} · {h.sector} · {h.market}")
             with hc2:
                 if c is None:

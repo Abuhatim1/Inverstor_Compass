@@ -61,6 +61,7 @@ class PerHoldingValuation:
     missing_price:       bool    = False
     missing_fx:          bool    = False
     warning:             str     = ""
+    asset_id:            str     = ""   # unique asset identifier; matches holdings key
 
 
 # ── Full portfolio valuation ───────────────────────────────────────────────────
@@ -194,7 +195,7 @@ def calculate_portfolio_valuation(
     sum_base_mv = 0.0
     sum_base_cb = 0.0
 
-    for ticker, h in sorted(holdings.items()):
+    for asset_id, h in sorted(holdings.items()):
         ccy      = getattr(h, "currency", "USD")
         price    = float(h.current_price or 0.0)
         qty      = float(h.quantity or 0.0)
@@ -210,16 +211,17 @@ def calculate_portfolio_valuation(
         miss_p = price == 0.0 and qty > 0
         miss_f = src == "missing"
         if miss_p:
-            _warnings.append(f"{ticker}: price = 0 — MV will be understated.")
+            _warnings.append(f"{h.ticker}: price = 0 — MV will be understated.")
         if miss_f:
-            _warnings.append(f"{ticker}: no FX rate for {ccy} — using 1.0.")
+            _warnings.append(f"{h.ticker}: no FX rate for {ccy} — using 1.0.")
 
         sum_base_mv += base_mv
         sum_base_cb += base_cb
 
         rows.append(PerHoldingValuation(
-            ticker              = ticker,
+            ticker              = h.ticker,
             company_name        = h.company_name,
+            asset_id            = asset_id,
             quantity            = qty,
             current_price       = price,
             local_currency      = ccy,
