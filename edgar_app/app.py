@@ -3446,19 +3446,60 @@ def render_holdings_tab(bundle: dict) -> None:
                 f"**{dlg_ticker}** — direct field correction.  "
                 "Transaction history is not affected."
             )
+
+            # ── Numeric / text fields ─────────────────────────────────────────
             _e_name  = st.text_input("Company name", value=dlg_h.company_name or "")
-            _e_qty   = st.number_input(
-                "Quantity (correction)", value=float(dlg_h.quantity),
-                min_value=0.0, step=1.0, format="%.4f",
-            )
-            _e_avg   = st.number_input(
-                "Avg cost (correction)", value=float(dlg_h.avg_cost),
-                min_value=0.0, step=0.01, format="%.4f",
-            )
-            _e_price = st.number_input(
-                "Current price", value=float(dlg_h.current_price),
-                min_value=0.0, step=0.01, format="%.4f",
-            )
+            _en1, _en2, _en3 = st.columns(3)
+            with _en1:
+                _e_qty   = st.number_input(
+                    "Quantity (correction)", value=float(dlg_h.quantity),
+                    min_value=0.0, step=1.0, format="%.4f",
+                )
+            with _en2:
+                _e_avg   = st.number_input(
+                    "Avg cost (correction)", value=float(dlg_h.avg_cost),
+                    min_value=0.0, step=0.01, format="%.4f",
+                )
+            with _en3:
+                _e_price = st.number_input(
+                    "Current price", value=float(dlg_h.current_price),
+                    min_value=0.0, step=0.01, format="%.4f",
+                )
+
+            # ── Classification fields ─────────────────────────────────────────
+            _ec1, _ec2 = st.columns(2)
+            with _ec1:
+                _mkt_val = getattr(dlg_h, "market", "US") or "US"
+                _e_market = st.selectbox(
+                    "Market",
+                    options=MARKETS,
+                    index=MARKETS.index(_mkt_val) if _mkt_val in MARKETS else 0,
+                    key=f"dlg_edit_market_{dlg_ticker}",
+                )
+                _at_val = getattr(dlg_h, "asset_type", "Stock") or "Stock"
+                _e_type = st.selectbox(
+                    "Asset type",
+                    options=ASSET_TYPES,
+                    index=ASSET_TYPES.index(_at_val) if _at_val in ASSET_TYPES else ASSET_TYPES.index("Other"),
+                    key=f"dlg_edit_type_{dlg_ticker}",
+                )
+            with _ec2:
+                _sec_val = getattr(dlg_h, "sector", "Other") or "Other"
+                _e_sector = st.selectbox(
+                    "Sector",
+                    options=DEFAULT_SECTORS,
+                    index=DEFAULT_SECTORS.index(_sec_val) if _sec_val in DEFAULT_SECTORS else 0,
+                    key=f"dlg_edit_sector_{dlg_ticker}",
+                )
+                _ccy_val = getattr(dlg_h, "currency", "USD") or "USD"
+                _e_ccy = st.selectbox(
+                    "Currency",
+                    options=CURRENCIES,
+                    index=CURRENCIES.index(_ccy_val) if _ccy_val in CURRENCIES else 0,
+                    key=f"dlg_edit_ccy_{dlg_ticker}",
+                )
+
+            # ── Notes / Exchange symbol ───────────────────────────────────────
             _e_notes  = st.text_input("Notes", value=dlg_h.notes or "", max_chars=200)
             _e_exsym  = st.text_input(
                 "Exchange symbol",
@@ -3475,7 +3516,6 @@ def render_holdings_tab(bundle: dict) -> None:
             # ── Account selector ──────────────────────────────────────────────
             _ed_accts   = {aid: a for aid, a in _ed_load_accts().items() if a.active}
             _cur_aid    = getattr(dlg_h, "default_account_id", "") or ""
-            # Build options: "" sentinel first (placeholder), then real IDs
             _ed_opts    = [""] + list(_ed_accts.keys())
             _ed_labels  = {
                 "": "— Select account —",
@@ -3507,6 +3547,10 @@ def render_holdings_tab(bundle: dict) -> None:
                             quantity=float(_e_qty),
                             avg_cost=float(_e_avg),
                             current_price=float(_e_price),
+                            market=_e_market,
+                            sector=_e_sector,
+                            asset_type=_e_type,
+                            currency=_e_ccy,
                             notes=_e_notes or None,
                             exchange_symbol=_e_exsym.strip() or None,
                             default_account_id=_e_aid,

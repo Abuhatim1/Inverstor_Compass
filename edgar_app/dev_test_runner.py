@@ -5102,6 +5102,95 @@ def _cat_alloc_scope() -> list[TestResult]:
     return results
 
 
+def _cat_edit_ui() -> list[TestResult]:
+    """
+    EDIT-UI-01  Edit dialog renders Market selectbox wired to upsert_holding.
+    EDIT-UI-02  Edit dialog renders Sector selectbox wired to upsert_holding.
+    EDIT-UI-03  Edit dialog renders Asset Type selectbox wired to upsert_holding.
+    EDIT-UI-04  Edit dialog renders Currency selectbox wired to upsert_holding.
+    """
+    import re as _re
+    import pathlib as _pl
+
+    CAT = "Edit Holding UI"
+    results: list[TestResult] = []
+    _src = _pl.Path(__file__).parent / "app.py"
+    _text = _src.read_text(encoding="utf-8")
+
+    # Isolate the _dlg_edit function body
+    _start = _text.find("def _dlg_edit(")
+    _end   = _text.find("\n        @st.dialog", _start + 1)
+    _fn    = _text[_start:_end] if _start != -1 and _end != -1 else _text
+
+    def edit_ui_01():
+        """Market selectbox in _dlg_edit AND passed to upsert_holding."""
+        has_selectbox = bool(_re.search(
+            r'st\.selectbox\s*\(\s*["\']Market["\']',
+            _fn,
+        ))
+        passed_to_upsert = "market=_e_market" in _fn
+        ok = has_selectbox and passed_to_upsert
+        return (
+            "Market selectbox present in Edit dialog and passed to upsert_holding",
+            f"has_selectbox={has_selectbox}, passed_to_upsert={passed_to_upsert}",
+            ok,
+        )
+
+    def edit_ui_02():
+        """Sector selectbox in _dlg_edit AND passed to upsert_holding."""
+        has_selectbox = bool(_re.search(
+            r'st\.selectbox\s*\(\s*["\']Sector["\']',
+            _fn,
+        ))
+        passed_to_upsert = "sector=_e_sector" in _fn
+        ok = has_selectbox and passed_to_upsert
+        return (
+            "Sector selectbox present in Edit dialog and passed to upsert_holding",
+            f"has_selectbox={has_selectbox}, passed_to_upsert={passed_to_upsert}",
+            ok,
+        )
+
+    def edit_ui_03():
+        """Asset Type selectbox in _dlg_edit AND passed to upsert_holding."""
+        has_selectbox = bool(_re.search(
+            r'st\.selectbox\s*\(\s*["\']Asset type["\']',
+            _fn,
+        ))
+        passed_to_upsert = "asset_type=_e_type" in _fn
+        ok = has_selectbox and passed_to_upsert
+        return (
+            "Asset type selectbox present in Edit dialog and passed to upsert_holding",
+            f"has_selectbox={has_selectbox}, passed_to_upsert={passed_to_upsert}",
+            ok,
+        )
+
+    def edit_ui_04():
+        """Currency selectbox in _dlg_edit AND passed to upsert_holding."""
+        has_selectbox = bool(_re.search(
+            r'st\.selectbox\s*\(\s*["\']Currency["\']',
+            _fn,
+        ))
+        passed_to_upsert = "currency=_e_ccy" in _fn
+        ok = has_selectbox and passed_to_upsert
+        return (
+            "Currency selectbox present in Edit dialog and passed to upsert_holding",
+            f"has_selectbox={has_selectbox}, passed_to_upsert={passed_to_upsert}",
+            ok,
+        )
+
+    _tests = [
+        ("EDIT-UI-01", "Market selectbox present in Edit dialog and wired to upsert_holding",     "P0", True, edit_ui_01),
+        ("EDIT-UI-02", "Sector selectbox present in Edit dialog and wired to upsert_holding",     "P0", True, edit_ui_02),
+        ("EDIT-UI-03", "Asset type selectbox present in Edit dialog and wired to upsert_holding", "P0", True, edit_ui_03),
+        ("EDIT-UI-04", "Currency selectbox present in Edit dialog and wired to upsert_holding",   "P0", True, edit_ui_04),
+    ]
+
+    for tid, name, sev, blocker, fn in _tests:
+        results.append(_run(tid, name, CAT, "app._dlg_edit", sev, blocker, fn))
+
+    return results
+
+
 def _cat_acc_ui_ext() -> list[TestResult]:
     """
     ACC-UI-06  load_accounts() has no caching decorator — fresh on every call.
@@ -5441,6 +5530,7 @@ def run_all_tests() -> TestReport:
         + _cat_add() + _cat_disc() + _cat_sds() + _cat_fas() + _cat_alloc() + _cat_alloc_qp()
         + _cat_alloc_ui() + _cat_hld_ui() + _cat_alloc_mkt() + _cat_alloc_scope()
         + _cat_acc_ui_ext() + _cat_asset_type() + _cat_alloc_at()
+        + _cat_edit_ui()
     )
 
     punch_list: list[PunchListItem] = []
