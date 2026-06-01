@@ -4653,7 +4653,7 @@ def render_thesis_memory_tab() -> None:
                     expanded=False,
                 ):
                     _render_risk_matrix_section(
-                        ticker, c,
+                        h.ticker, c,
                         upsert_fn=upsert_risk_item,
                         delete_fn=delete_risk_item,
                         categories=RISK_CATEGORIES,
