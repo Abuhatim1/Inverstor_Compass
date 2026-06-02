@@ -2315,12 +2315,13 @@ def _cat_n() -> list[TestResult]:
                     asset_type="Stock",
                     exchange_symbol="",
                     price_source="SAHMK",
+                    asset_id="AST_999999",
                 )
-                save_holdings({"PERSIST_TEST": h_in})
+                save_holdings({"AST_999999": h_in})
                 loaded = load_holdings()
-                h_out  = loaded.get("PERSIST_TEST")
+                h_out  = loaded.get("AST_999999")
                 if h_out is None:
-                    return ("PERSIST_TEST key present after load", "key missing", False)
+                    return ("AST_999999 key present after load", "key missing", False)
 
                 checks = {
                     "quantity":     _near(h_out.quantity,      h_in.quantity,      1e-9),
@@ -3066,8 +3067,8 @@ def _cat_a11() -> list[TestResult]:
         """Every active holding (qty > 1e-9) appears in per_holding."""
         engine_tickers = {ph.ticker for ph in live_val.per_holding}
         missing = sorted(
-            t for t, h in live_active.items()
-            if t not in engine_tickers
+            h.ticker for h in live_active.values()
+            if h.ticker not in engine_tickers
         )
         ok = len(missing) == 0
         return (
@@ -3718,10 +3719,10 @@ def _cat_disc() -> list[TestResult]:
         import inspect
         sig = inspect.signature(update_current_price)
         params = list(sig.parameters.keys())
-        has_ticker = "ticker" in params
-        has_price  = "price" in params or "new_price" in params
+        has_asset_id = "asset_id" in params
+        has_price    = "price" in params or "new_price" in params
 
-        ok = callable(update_current_price) and has_ticker
+        ok = callable(update_current_price) and has_asset_id
         return (
             "update_current_price remains callable and has expected signature after discovery import",
             f"callable={callable(update_current_price)}, params={params}",
@@ -5364,7 +5365,11 @@ def _cat_asset_type() -> list[TestResult]:
                 default_account_id="TEST0001",
             )
             data = json.loads(_pl.Path(tmp_path).read_text())
-            stored = data.get("TEST_AT", {}).get("asset_type", "")
+            stored = next(
+                (v.get("asset_type", "") for v in data.values()
+                 if v.get("ticker") == "TEST_AT"),
+                ""
+            )
             ok  = stored == asset_type
             msg = f"stored='{stored}'"
         except Exception as _ex:
