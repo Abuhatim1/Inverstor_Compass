@@ -6,3 +6,9 @@ id = "an1enHjza2IlGkKhXPCGr"
 uri = "file://bousala_skills_governance_audit.pdf"
 type = "pdf"
 title = "Bousala Skills Governance Audit — Consolidation Plan"
+
+[[outputs]]
+id = "vzqrvP3d9jwp--Fo0GPuf"
+uri = "file://bousala_project_summary.txt"
+type = "text"
+title = "Bousala Project Summary"

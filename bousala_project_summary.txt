@@ -1,0 +1,152 @@
+BOUSALA (INVESTOR COMPASS) — PROJECT SUMMARY FOR INDEPENDENT QUALITY REVIEW
+============================================================================
+
+
+WHAT IT IS
+----------
+Bousala is a personal investment portfolio management application built on Python
+and Streamlit. It is designed for individual investors who hold assets across Saudi
+Arabian markets, US markets, and other international exchanges. The name means
+"compass" in Arabic, reflecting its role as an investor's navigational tool.
+
+The platform is currently at MVP stage, running as a locally-hosted web app.
+It is not yet deployed to a public server.
+
+
+CORE PURPOSE
+------------
+The application aims to be an investor-grade portfolio accounting and intelligence
+platform — not a stock screener or research website. The governing philosophy is:
+accuracy before features, data integrity before UI polish.
+
+
+WHAT IT DOES TODAY
+------------------
+
+Portfolio Accounting
+  - Add and manage investment holdings across multiple accounts
+    (Brokerage, Crypto, Other)
+  - Record buy and sell transactions using FIFO cost basis
+  - Track realized and unrealized P&L
+  - Support multiple currencies (USD, SAR, AED, EUR) with FX conversion
+    to a base currency
+  - Manage cash balances, deposits, withdrawals, and transfers between accounts
+
+Valuation
+  - Live price fetching via Yahoo Finance (international assets)
+  - Saudi market prices via SAHMK API (dedicated layer for Saudi-listed stocks)
+  - Single valuation engine — all modules (holdings, allocation, reports,
+    dashboard) consume the same price source
+
+Allocation Analytics
+  - Portfolio allocation by asset class, geography, sector, currency
+  - Multi-select filter combinations
+  - Visual charts (pie/bar)
+
+Research & Discovery
+  - SEC EDGAR integration for US company filings lookup
+  - SAHMK Discovery Engine for searching Saudi-listed companies
+  - AI-powered investment thesis analysis
+  - Watchlist management
+
+Reporting
+  - PDF export of portfolio snapshots
+  - Report history (last 3 reports retained automatically)
+
+
+TECHNICAL STACK
+---------------
+
+  Layer               Technology
+  ------------------  -------------------------------------------------
+  UI & app server     Python 3, Streamlit
+  Data storage        JSON flat files (local filesystem)
+  Market data         Yahoo Finance (yfinance), SAHMK API
+  SEC data            EDGAR public API
+  AI analysis         External LLM API (SAHMK key)
+  Environment         Replit (hosted development)
+  Test runner         Custom Python test runner (dev_test_runner.py)
+
+
+ARCHITECTURE — KEY DECISIONS
+-----------------------------
+
+1. Transaction history is the single source of truth.
+   Holdings, allocation, performance, and risk are all derived — never
+   independently stored as authoritative values.
+
+2. Layered data access.
+   UI code never calls external APIs directly. All market data passes through
+   dedicated provider layers (Yahoo Layer, SAHMK Layer, SEC Layer).
+
+3. Flat-file storage (JSON).
+   A deliberate MVP decision. holdings.json is keyed by 8-character UUID asset
+   IDs (AST_NNNNNN). This works for personal single-user use but will not scale
+   and is not suitable for multi-user or cloud deployment without migrating to
+   a database.
+
+4. Safe zones.
+   The valuation engine, FIFO logic, FX engine, SAHMK routing, and transaction
+   engine are considered protected. UI changes must never touch these.
+
+5. Mobile-first UI.
+   Compact layouts, progressive disclosure, no excessive scrolling.
+
+
+KNOWN LIMITATIONS & OPEN RISKS
+--------------------------------
+
+  Issue                                                          Severity
+  -------------------------------------------------------------  --------
+  JSON file storage — data lost on cloud deployment              High
+    (ephemeral filesystem)
+  8 pre-existing test failures in the test suite                 Medium
+    (N09, A11-07, DISC-06, ASSET-TYPE-02 through 06)
+  No authentication — single-user only, no login                 Medium
+  No database — cannot support multiple users or safe            Medium
+    concurrent access
+  Deployment blocked — run command cannot be set                 Low (operational)
+    programmatically on current host
+  PDF export has encoding issues with Arabic text                Low
+    and special characters
+
+
+TEST COVERAGE
+-------------
+A custom test runner (dev_test_runner.py) covers:
+  - Portfolio accounting (holdings, accounts, transactions, cash integrity)
+  - Valuation consistency across all UI modules
+  - SAHMK API routing
+  - Bulk upload validation
+  - Add-position workflows (dual-mode)
+  - SAHMK Discovery Engine
+  - Closed holdings and persistence
+
+Governance rule: test count must never decrease.
+
+
+WHAT A REVIEWER SHOULD FOCUS ON
+---------------------------------
+
+1. Data integrity
+   Does the FIFO engine produce correct cost basis and P&L across partial
+   closes and mixed-currency scenarios?
+
+2. Valuation consistency
+   Do the Holdings page, Allocation page, Dashboard, and Reports all show
+   identical portfolio values for the same moment in time?
+
+3. FX accuracy
+   Are multi-currency totals correctly converted before aggregation?
+
+4. The 8 failing tests
+   Are these genuine bugs or stale test expectations?
+
+5. Storage architecture
+   Is the JSON approach safe enough for the intended use, or does it carry
+   hidden data-loss risks even in the current Replit environment?
+
+
+============================================================================
+Generated: June 2026 | Bousala Investor Compass — MVP Stage
+============================================================================
