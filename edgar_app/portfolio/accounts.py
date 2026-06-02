@@ -69,10 +69,8 @@ def load_accounts() -> dict[str, Account]:
 
 
 def save_accounts(accounts: dict[str, Account]) -> None:
-    os.makedirs(_DIR, exist_ok=True)
-    with open(_ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-        json.dump({aid: asdict(a) for aid, a in accounts.items()},
-                  f, indent=2, ensure_ascii=False)
+    from portfolio._io import atomic_json_write
+    atomic_json_write(_ACCOUNTS_FILE, {aid: asdict(a) for aid, a in accounts.items()})
 
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────────

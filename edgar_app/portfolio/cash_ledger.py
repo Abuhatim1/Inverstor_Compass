@@ -108,9 +108,8 @@ def load_ledger() -> list[CashEntry]:
 
 
 def save_ledger(entries: list[CashEntry]) -> None:
-    os.makedirs(_DIR, exist_ok=True)
-    with open(_LEDGER_FILE, "w", encoding="utf-8") as f:
-        json.dump([asdict(e) for e in entries], f, indent=2, ensure_ascii=False)
+    from portfolio._io import atomic_json_write
+    atomic_json_write(_LEDGER_FILE, [asdict(e) for e in entries])
 
 
 # ── Write helpers ─────────────────────────────────────────────────────────────

@@ -385,7 +385,7 @@ def compute_portfolio_risk(positions: list[PortfolioPosition]) -> PortfolioRiskR
         uncertainty_contribs = []
 
     # ── 8. Commodity risk ─────────────────────────────────────────────────────
-    commodity_types = ("Commodity", "Gold", "Silver")
+    commodity_types = ("Commodity", "Precious Metal")
     commodity_pos = [p for p in positions if p.asset_type in commodity_types]
     commodity_weight = sum(p.weight_pct for p in commodity_pos)
     commodity_score = min(100, int(commodity_weight * 1.5))

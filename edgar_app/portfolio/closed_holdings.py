@@ -117,9 +117,8 @@ def _load_lots_raw() -> list[dict]:
 
 
 def _save_lots_raw(lots: list[dict]) -> None:
-    os.makedirs(_DIR, exist_ok=True)
-    with open(_CLOSED_LOTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(lots, f, indent=2, ensure_ascii=False)
+    from portfolio._io import atomic_json_write
+    atomic_json_write(_CLOSED_LOTS_FILE, lots)
 
 
 def load_closed_lots() -> list[ClosedLot]:

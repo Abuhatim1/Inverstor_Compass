@@ -76,8 +76,8 @@ def _gen_asset_id() -> str:
     asset_id = f"AST_{next_num:06d}"
     try:
         os.makedirs(_DIR or ".", exist_ok=True)
-        with open(_COUNTER_FILE, "w", encoding="utf-8") as _cf:
-            json.dump({"next": next_num + 1}, _cf)
+        from portfolio._io import atomic_json_write
+        atomic_json_write(_COUNTER_FILE, {"next": next_num + 1})
     except Exception:
         pass
     return asset_id
@@ -148,14 +148,20 @@ CURRENCIES: list[str] = [
 
 # Asset type → broad risk class used by the Risk Engine
 ASSET_RISK_CLASS: dict[str, str] = {
-    "Stock":     "equity",
-    "ETF":       "equity",
-    "Fund":      "equity",
-    "Commodity": "commodity",
-    "Gold":      "commodity",
-    "Silver":    "commodity",
-    "Cash":      "currency",
-    "Other":     "equity",
+    "Stock":          "equity",
+    "ETF":            "equity",
+    "REIT":           "equity",
+    "Mutual Fund":    "equity",
+    "Sukuk":          "fixed_income",
+    "Bond":           "fixed_income",
+    "Cash":           "currency",
+    "Precious Metal": "commodity",
+    "Commodity":      "commodity",
+    "Real Estate":    "real_estate",
+    "Private Equity": "private",
+    "Private Asset":  "private",
+    "Crypto":         "crypto",
+    "Other":          "equity",
 }
 
 
@@ -277,13 +283,10 @@ def load_holdings(path: str | None = None) -> dict[str, "Holding"]:
 
 def save_holdings(holdings: dict[str, "Holding"], path: str | None = None) -> None:
     """Save holdings to disk, keyed by asset_id.  Pass *path* to override default file."""
+    from portfolio._io import atomic_json_write
     filepath = path or _HOLDINGS_FILE
-    os.makedirs(os.path.dirname(filepath) or _DIR, exist_ok=True)
-    payload = {}
-    for asset_id, h in holdings.items():
-        payload[asset_id] = asdict(h)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+    payload = {asset_id: asdict(h) for asset_id, h in holdings.items()}
+    atomic_json_write(filepath, payload)
 
 
 def upsert_holding(
@@ -490,9 +493,8 @@ def load_transactions() -> list[Transaction]:
 
 
 def save_transactions(txns: list[Transaction]) -> None:
-    os.makedirs(_DIR, exist_ok=True)
-    with open(_TRANSACTIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump([asdict(t) for t in txns], f, indent=2, ensure_ascii=False)
+    from portfolio._io import atomic_json_write
+    atomic_json_write(_TRANSACTIONS_FILE, [asdict(t) for t in txns])
 
 
 def record_transaction(
