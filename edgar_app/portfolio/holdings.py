@@ -432,9 +432,8 @@ def soft_delete_holding(asset_id: str) -> bool:
     entry["_original_asset_id"] = asset_id
     archive.append(entry)
 
-    os.makedirs(_DIR, exist_ok=True)
-    with open(_DELETED_HOLDINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(archive, f, indent=2, ensure_ascii=False)
+    from portfolio._io import atomic_json_write
+    atomic_json_write(_DELETED_HOLDINGS_FILE, archive)
 
     # ── Remove from live holdings ─────────────────────────────────────────────
     del holdings[asset_id]
