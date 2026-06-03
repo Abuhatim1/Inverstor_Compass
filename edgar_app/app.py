@@ -4611,9 +4611,166 @@ def render_accounts_tab() -> None:
 
 def render_transactions_tab() -> None:
     """Transaction History — audit log of all buy/sell/settlement activity."""
-    from portfolio import load_transactions
-    from portfolio.accounts import load_accounts
+    from portfolio import (
+        load_transactions,
+        SETTLEMENT_CATEGORIES, CURRENCIES,
+        edit_settlement as _rt_edit_settle,
+        delete_settlement as _rt_del_settle,
+    )
+    from portfolio.accounts import load_accounts, account_display_name as _rt_adn
     import pandas as pd
+
+    # ── Dialog: Edit Settlement ──────────────────────────────────────────────
+    @st.dialog("✏️ Edit Settlement")
+    def _dlg_edit_settlement(txn):
+        from portfolio.accounts import load_accounts as _es_la
+        st.caption(
+            f"ID **{txn.transaction_id[:8]}…** · recorded {txn.date}  \n"
+            "Cash reversal is handled automatically — audit trail preserved."
+        )
+
+        # Category
+        _orig_cat = txn.settlement_category or "Dividend"
+        _cat_idx  = SETTLEMENT_CATEGORIES.index(_orig_cat) if _orig_cat in SETTLEMENT_CATEGORIES else 0
+        _es_cat   = st.selectbox(
+            "Category", SETTLEMENT_CATEGORIES,
+            index=_cat_idx,
+            key=f"es_edit_cat_{txn.transaction_id}",
+        )
+
+        # Direction — auto-locked by category
+        _INCOME_CATS  = {"Dividend"}
+        _EXPENSE_CATS = {"Fee", "Tax", "Zakat", "Islamic Purification"}
+        _orig_amt     = txn.settlement_amount
+        if _es_cat in _INCOME_CATS:
+            _es_dir = "Income"
+            st.info("✅ **Income / Credit** — auto-set for this category", icon="ℹ️")
+        elif _es_cat in _EXPENSE_CATS:
+            _es_dir = "Expense"
+            st.info("💸 **Expense / Debit** — auto-set for this category", icon="ℹ️")
+        else:
+            _init_dir = "Income" if _orig_amt >= 0 else "Expense"
+            _es_dir = st.radio(
+                "Direction", ["Income", "Expense"],
+                index=["Income", "Expense"].index(_init_dir),
+                horizontal=True,
+                key=f"es_edit_dir_{txn.transaction_id}",
+            )
+
+        # Date / Amount / Currency
+        _esd1, _esd2, _esd3 = st.columns(3)
+        with _esd1:
+            _es_date = st.date_input(
+                "Date", value=date.fromisoformat(txn.date),
+                key=f"es_edit_date_{txn.transaction_id}",
+            )
+        with _esd2:
+            _es_abs = st.number_input(
+                "Amount", value=abs(_orig_amt),
+                min_value=0.0, step=0.01, format="%.2f",
+                key=f"es_edit_amt_{txn.transaction_id}",
+                help="Enter the absolute amount — direction is determined above.",
+            )
+        with _esd3:
+            _es_def_ccy = txn.settlement_currency or "SAR"
+            _es_ccy_idx = CURRENCIES.index(_es_def_ccy) if _es_def_ccy in CURRENCIES else 0
+            _es_ccy = st.selectbox(
+                "Currency", CURRENCIES, index=_es_ccy_idx,
+                key=f"es_edit_ccy_{txn.transaction_id}",
+            )
+
+        _es_signed = _es_abs if _es_dir == "Income" else -_es_abs
+
+        # Account
+        _es_accounts  = _es_la()
+        _es_acct_sort = sorted(_es_accounts.values(), key=lambda a: a.account_name)
+        _es_acct_lbls = ["— no account —"] + [
+            _rt_adn(a) + (f"  ⚠️ ({a.base_currency} ≠ {_es_ccy})" if a.base_currency != _es_ccy else "")
+            for a in _es_acct_sort
+        ]
+        _es_acct_ids  = [None] + [a.account_id for a in _es_acct_sort]
+        _cur_idx      = next((i for i, aid in enumerate(_es_acct_ids) if aid == (txn.account_id or "")), 0)
+        _es_acct_sel  = st.selectbox(
+            "Account", _es_acct_lbls, index=_cur_idx,
+            key=f"es_edit_acct_{txn.transaction_id}",
+        )
+        _es_acct_id   = _es_acct_ids[_es_acct_lbls.index(_es_acct_sel)] or ""
+        if _es_acct_id and _es_accounts.get(_es_acct_id):
+            _ao = _es_accounts[_es_acct_id]
+            st.caption(f"Balance: **{_ao.cash_balance:,.2f} {_ao.base_currency}**")
+
+        # Notes
+        _es_notes = st.text_area(
+            "Notes (min. 10 characters)", value=txn.notes or "",
+            max_chars=500, key=f"es_edit_notes_{txn.transaction_id}",
+        )
+        st.caption(f"{len(_es_notes.strip())} / 10 minimum characters")
+
+        st.divider()
+        _eb1, _eb2 = st.columns(2)
+        with _eb1:
+            if st.button(
+                "💾 Save Changes", type="primary",
+                use_container_width=True,
+                key=f"es_edit_save_{txn.transaction_id}",
+            ):
+                _upd, _err = _rt_edit_settle(
+                    transaction_id=txn.transaction_id,
+                    amount=_es_signed,
+                    category=_es_cat,
+                    currency=_es_ccy,
+                    settlement_date=_es_date.isoformat(),
+                    notes=_es_notes,
+                    account_id=_es_acct_id,
+                )
+                if _err:
+                    st.error(_err)
+                else:
+                    _sgn2 = "+" if _es_signed >= 0 else ""
+                    st.toast(
+                        f"Settlement updated: {_es_cat} {_sgn2}{_es_signed:,.2f} {_es_ccy}",
+                        icon="💾",
+                    )
+                    st.rerun()
+        with _eb2:
+            if st.button("Cancel", use_container_width=True,
+                         key=f"es_edit_cancel_{txn.transaction_id}"):
+                st.rerun()
+
+    # ── Dialog: Delete Settlement ─────────────────────────────────────────────
+    @st.dialog("🗑️ Delete Settlement")
+    def _dlg_delete_settlement(txn):
+        _cat = txn.settlement_category or "Settlement"
+        _amt = txn.settlement_amount
+        _ccy = txn.settlement_currency or ""
+        _sgn = "+" if _amt >= 0 else ""
+        st.warning(
+            f"Delete this **{_cat}** of **{_sgn}{_amt:,.2f} {_ccy}** on **{txn.date}**?  \n\n"
+            "The cash effect will be **reversed** via a negating ledger entry "
+            "(audit trail preserved).",
+            icon="⚠️",
+        )
+        _ds_conf = st.checkbox(
+            "I understand — the settlement and its cash effect will be reversed",
+            key=f"ds_conf_{txn.transaction_id}",
+        )
+        _db1, _db2 = st.columns(2)
+        with _db1:
+            if st.button(
+                "🗑️ Delete", type="primary",
+                use_container_width=True, disabled=not _ds_conf,
+                key=f"ds_del_{txn.transaction_id}",
+            ):
+                _err = _rt_del_settle(txn.transaction_id)
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast(f"{_cat} settlement deleted", icon="🗑️")
+                    st.rerun()
+        with _db2:
+            if st.button("Cancel", use_container_width=True,
+                         key=f"ds_cancel_{txn.transaction_id}"):
+                st.rerun()
 
     st.header("📜 Transaction History")
     st.caption(
@@ -4701,6 +4858,38 @@ def render_transactions_tab() -> None:
         _txn_df = pd.DataFrame(rows)
         _txn_df.index = range(1, len(_txn_df) + 1)
         st.dataframe(_txn_df, use_container_width=True)
+
+        # ── Settlement action rows (edit / delete per settlement) ─────────────
+        _settle_in_view = [t for t in _sorted if t.side == "SETTLEMENT"]
+        if _settle_in_view:
+            with st.expander(
+                f"✏️ Edit / Delete Settlements ({len(_settle_in_view)})",
+                expanded=False,
+            ):
+                for _es_t in _settle_in_view:
+                    _sgn_s = "+" if _es_t.settlement_amount >= 0 else ""
+                    _ea1, _ea2, _ea3 = st.columns([5, 1, 1])
+                    with _ea1:
+                        st.caption(
+                            f"**{_es_t.date}** · {_es_t.settlement_category or '—'} · "
+                            f"{_sgn_s}{_es_t.settlement_amount:,.2f} "
+                            f"{_es_t.settlement_currency or ''}"
+                            + (f" · {_es_t.ticker}" if _es_t.ticker else " · Portfolio")
+                        )
+                    with _ea2:
+                        if st.button(
+                            "✏️ Edit",
+                            key=f"txh_es_edit_{_es_t.transaction_id}",
+                            use_container_width=True,
+                        ):
+                            _dlg_edit_settlement(_es_t)
+                    with _ea3:
+                        if st.button(
+                            "🗑️ Del",
+                            key=f"txh_es_del_{_es_t.transaction_id}",
+                            use_container_width=True,
+                        ):
+                            _dlg_delete_settlement(_es_t)
 
         # ── Summary metrics ───────────────────────────────────────────────────
         _buys    = [t for t in _sorted if t.side == "BUY"]
