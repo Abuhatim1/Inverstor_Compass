@@ -4406,160 +4406,60 @@ def render_accounts_tab() -> None:
 
 
 def render_transactions_tab() -> None:
-    """Buy / Sell transaction recording and full history."""
-    from portfolio import (
-        ASSET_TYPES, CURRENCIES, DEFAULT_SECTORS, MARKETS,
-        load_holdings, load_transactions, load_portfolio, record_transaction,
-    )
-    from portfolio.accounts import (
-        load_accounts, active_accounts, account_display_name,
-    )
-    from portfolio.cash_ledger import append_cash_entry
+    """Transaction History — read-only audit log of all buy/sell activity."""
+    from portfolio import load_transactions
+    from portfolio.accounts import load_accounts
     import pandas as pd
-    from datetime import date as _date_cls
 
-    st.header("🔁 Transactions")
+    st.header("📜 Transaction History")
     st.caption(
-        "Record buy and sell transactions. "
-        "Cash is automatically debited / credited to the linked account."
+        "Complete audit trail of all buy and sell transactions. "
+        "To record new trades, use **➕ Buy More** or **📤 Sell / Close** "
+        "on the **💼 Holdings** tab."
     )
 
-    holdings  = load_holdings()
-    watchlist = load_portfolio()
-    accounts  = load_accounts()
-    _act_accts = {aid: a for aid, a in accounts.items() if a.active}
-
-    # ── Record form ───────────────────────────────────────────────────────────
-    with st.expander("🔁 Record Buy / Sell", expanded=True):
-        tr1, tr2 = st.columns(2)
-        with tr1:
-            all_tickers = sorted(set(h.ticker for h in holdings.values()) | set(watchlist.keys()))
-            if all_tickers:
-                _txn_src = st.radio("Source", ["From existing", "New ticker"],
-                                    horizontal=True, key="txn_tab_src")
-                if _txn_src == "From existing":
-                    txn_ticker = st.selectbox("Ticker", all_tickers, key="txn_tab_tk_sel")
-                else:
-                    txn_ticker = st.text_input("Ticker", key="txn_tab_tk_txt").strip().upper()
-            else:
-                txn_ticker = st.text_input("Ticker", key="txn_tab_tk_txt").strip().upper()
-
-            txn_side  = st.radio("Side", ["BUY", "SELL"], horizontal=True, key="txn_tab_side")
-            txn_qty   = st.number_input("Quantity",   min_value=0.0, step=1.0,         key="txn_tab_qty")
-            txn_price = st.number_input("Price/unit", min_value=0.0, step=0.01, format="%.4f", key="txn_tab_price")
-            txn_fees  = st.number_input(
-                "Fees", min_value=0.0, step=1.0, format="%.2f", key="txn_tab_fees",
-                help="Broker fees. 0 if none.",
-            )
-
-        with tr2:
-            txn_date  = st.date_input("Date", value=_date_cls.today(), key="txn_tab_date")
-            txn_notes = st.text_area("Notes (optional)", key="txn_tab_notes", height=70)
-
-            # Detect holding's currency for account filter
-            _h_ccy = "USD"
-            if txn_ticker:
-                _h_match = next(
-                    (h for h in holdings.values() if h.ticker == txn_ticker),
-                    None,
-                )
-                if _h_match:
-                    _h_ccy = getattr(_h_match, "currency", "USD")
-
-            # Account selector — filtered by currency
-            _matching = {aid: a for aid, a in _act_accts.items()
-                         if a.base_currency == _h_ccy}
-            _acct_opts = {"(none — skip cash tracking)": None}
-            _acct_opts.update({account_display_name(a): aid for aid, a in _matching.items()})
-
-            if _act_accts and not _matching:
-                st.warning(
-                    f"No active **{_h_ccy}** account found. "
-                    "Add one in the **💳 Accounts** tab.",
-                    icon="⚠️",
-                )
-            _acct_lbl = st.selectbox(
-                f"Account ({_h_ccy})", list(_acct_opts.keys()), key="txn_tab_acct",
-            )
-            txn_account_id = _acct_opts.get(_acct_lbl)
-
-            # Cash impact preview
-            if txn_qty > 0 and txn_price > 0:
-                _gross = txn_qty * txn_price
-                if txn_side == "BUY":
-                    st.info(f"Cash out: **{_h_ccy} {_gross + txn_fees:,.2f}**", icon="💸")
-                else:
-                    st.info(f"Cash in: **{_h_ccy} {_gross - txn_fees:,.2f}**",  icon="💰")
-
-            # Metadata for new holdings created by BUY
-            new_h_market   = st.selectbox("Market (new holding)", MARKETS,       key="txn_tab_mkt")
-            new_h_sector   = st.selectbox("Sector (new holding)", DEFAULT_SECTORS, key="txn_tab_sec")
-            new_h_type     = st.selectbox("Type   (new holding)", ASSET_TYPES,   key="txn_tab_type")
-            _ccy_idx = CURRENCIES.index(_h_ccy) if _h_ccy in CURRENCIES else 0
-            new_h_currency = st.selectbox("Currency (new holding)", CURRENCIES,
-                                          index=_ccy_idx, key="txn_tab_cur")
-
-        if st.button("🔁 Record transaction", type="primary", key="txn_tab_submit"):
-            if not txn_ticker:
-                st.error("Ticker is required.")
-            elif txn_qty <= 0:
-                st.error("Quantity must be > 0.")
-            else:
-                _cn_h = next(
-                    (h for h in holdings.values() if h.ticker == txn_ticker),
-                    None,
-                )
-                _cn = (
-                    watchlist[txn_ticker].company_name if txn_ticker in watchlist
-                    else _cn_h.company_name if _cn_h
-                    else txn_ticker
-                )
-                txn, updated, err = record_transaction(
-                    ticker=txn_ticker, side=txn_side,
-                    quantity=float(txn_qty), price=float(txn_price),
-                    txn_date=txn_date.isoformat(), notes=txn_notes,
-                    company_name=_cn, market=new_h_market, sector=new_h_sector,
-                    asset_type=new_h_type, currency=new_h_currency,
-                )
-                if err:
-                    st.error(err)
-                else:
-                    if txn_account_id:
-                        _gross2 = float(txn_qty) * float(txn_price)
-                        _net    = (-(_gross2 + txn_fees) if txn_side == "BUY"
-                                   else (_gross2 - txn_fees))
-                        append_cash_entry(
-                            account_id=txn_account_id,
-                            transaction_type=txn_side,
-                            currency=_h_ccy, amount=_net,
-                            linked_ticker=txn_ticker,
-                            notes=txn_notes or f"{txn_side} {txn_qty:g} @ {txn_price}",
-                            entry_date=txn_date.isoformat(),
-                        )
-                        if txn_fees > 0:
-                            append_cash_entry(
-                                account_id=txn_account_id,
-                                transaction_type="FEE",
-                                currency=_h_ccy, amount=-txn_fees,
-                                linked_ticker=txn_ticker,
-                                notes="Broker fee",
-                                entry_date=txn_date.isoformat(),
-                            )
-                        try:
-                            from portfolio.accounts import update_account_cash
-                            update_account_cash(txn_account_id, _net)
-                        except Exception:
-                            pass
-                    st.toast(f"{txn_side} {txn_qty:g} {txn_ticker} @ {txn_price:.4f} recorded",
-                             icon="🔁")
-                    st.rerun()
-
-    # ── Transaction history ───────────────────────────────────────────────────
+    accounts = load_accounts()
     txns = load_transactions()
-    if txns:
-        st.subheader("📜 Transaction History")
-        _sorted = sorted(txns, key=lambda t: (t.date, t.recorded_at), reverse=True)
+
+    if not txns:
+        st.info(
+            "No transactions recorded yet. "
+            "Use **➕ Add New Position** or **Buy More / Sell** "
+            "on the **💼 Holdings** tab to get started.",
+            icon="💡",
+        )
+        return
+
+    # ── Filters ───────────────────────────────────────────────────────────────
+    _fc1, _fc2, _fc3 = st.columns(3)
+    with _fc1:
+        _side_filter = st.selectbox("Side", ["All", "BUY", "SELL"], key="txh_side")
+    with _fc2:
+        _all_tickers = sorted({t.ticker for t in txns})
+        _tk_filter = st.selectbox("Ticker", ["All"] + _all_tickers, key="txh_ticker")
+    with _fc3:
         _acct_names = {aid: a.account_name for aid, a in accounts.items()}
+        _all_accts_used = sorted({
+            _acct_names.get(getattr(t, "account_id", ""), "—") or "—"
+            for t in txns
+        })
+        _acct_filter = st.selectbox("Account", ["All"] + _all_accts_used, key="txh_acct")
+
+    # ── Apply filters ─────────────────────────────────────────────────────────
+    _filtered = txns
+    if _side_filter != "All":
+        _filtered = [t for t in _filtered if t.side == _side_filter]
+    if _tk_filter != "All":
+        _filtered = [t for t in _filtered if t.ticker == _tk_filter]
+    if _acct_filter != "All":
+        _filtered = [
+            t for t in _filtered
+            if (_acct_names.get(getattr(t, "account_id", ""), "—") or "—") == _acct_filter
+        ]
+
+    _sorted = sorted(_filtered, key=lambda t: (t.date, t.recorded_at), reverse=True)
+
+    if _sorted:
         rows = [{
             "Date":     t.date,
             "Ticker":   t.ticker,
@@ -4573,10 +4473,18 @@ def render_transactions_tab() -> None:
         } for t in _sorted]
         _txn_df = pd.DataFrame(rows)
         _txn_df.index = range(1, len(_txn_df) + 1)
-        st.table(_txn_df)
-        st.caption(f"{len(txns)} transaction(s) total.")
+        st.dataframe(_txn_df, use_container_width=True)
+
+        # ── Summary metrics ───────────────────────────────────────────────────
+        _buys  = [t for t in _sorted if t.side == "BUY"]
+        _sells = [t for t in _sorted if t.side == "SELL"]
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        _m1.metric("Total Transactions", len(_sorted))
+        _m2.metric("Buys",  len(_buys))
+        _m3.metric("Sells", len(_sells))
+        _m4.metric("Total Fees", f"{sum(getattr(t,'fees',0.0) for t in _sorted):,.2f}")
     else:
-        st.info("No transactions recorded yet.", icon="ℹ️")
+        st.info("No transactions match the current filters.", icon="🔍")
 
 
 def render_cash_ledger_tab() -> None:
@@ -6937,7 +6845,7 @@ render_global_header()
     "📊 Allocation",
     "📁 Closed Holdings",
     "💳 Accounts",
-    "🔁 Transactions",
+    "📜 Transaction History",
     "💵 Cash Ledger",
     "🎯 Decision Queue",
     "🛡️ Portfolio Risk",

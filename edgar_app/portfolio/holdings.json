@@ -17,7 +17,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "c38b4be4",
     "exchange_symbol": ""
   },
@@ -39,7 +39,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "c38b4be4",
     "exchange_symbol": ""
   },
@@ -61,7 +61,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "3637b685",
     "exchange_symbol": ""
   },
@@ -83,7 +83,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "c38b4be4",
     "exchange_symbol": ""
   },
@@ -105,7 +105,7 @@
     "purchase_date": "",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "c38b4be4",
     "exchange_symbol": ""
   },
@@ -127,7 +127,7 @@
     "purchase_date": "2020-05-01",
     "notes": "",
     "price_source": "SAHMK",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "5cc295b7",
     "exchange_symbol": "2222"
   },
@@ -149,7 +149,7 @@
     "purchase_date": "2023-05-01",
     "notes": "",
     "price_source": "SAHMK",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "5cc295b7",
     "exchange_symbol": "4164"
   },
@@ -171,7 +171,7 @@
     "purchase_date": "2020-05-01",
     "notes": "",
     "price_source": "SAHMK",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "5cc295b7",
     "exchange_symbol": "7010"
   },
@@ -193,7 +193,7 @@
     "purchase_date": "2026-05-30",
     "notes": "",
     "price_source": "SAHMK",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "5cc295b7",
     "exchange_symbol": ""
   },
@@ -215,7 +215,7 @@
     "purchase_date": "2026-05-30",
     "notes": "",
     "price_source": "SAHMK",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "5cc295b7",
     "exchange_symbol": ""
   },
@@ -237,7 +237,7 @@
     "purchase_date": "2026-06-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "3637b685",
     "exchange_symbol": ""
   },
@@ -249,7 +249,7 @@
     "sector": "Other",
     "quantity": 27.3312,
     "avg_cost": 2064.2601536772777,
-    "current_price": 4496.10009765625,
+    "current_price": 4505.2998046875,
     "added_at": "2026-06-01",
     "asset_type": "Precious Metal",
     "currency": "USD",
@@ -259,7 +259,7 @@
     "purchase_date": "2022-06-01",
     "notes": "",
     "price_source": "yfinance",
-    "price_date": "2026-06-02",
+    "price_date": "2026-06-03",
     "default_account_id": "8d456f26",
     "exchange_symbol": ""
   }
