@@ -323,5 +323,57 @@
     "fees": 0.0,
     "transaction_id": "TXN_a8d2e46d",
     "asset_id": "AST_000393"
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T02:28:38.986328",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_7b920399",
+    "asset_id": "AST_000431"
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T02:28:38.996273",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_7cb7b82c",
+    "asset_id": "AST_000432"
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T02:29:00.170097",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_cacb49e4",
+    "asset_id": "AST_000470"
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T02:29:00.180376",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_747bcd4c",
+    "asset_id": "AST_000471"
   }
 ]

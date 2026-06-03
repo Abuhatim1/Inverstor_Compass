@@ -1057,19 +1057,24 @@ def _cat_h() -> list[TestResult]:
 
     # ── H04: All public functions are exception-free without an API key ───────
     def h04():
-        import sahmk_client
-        raised = False
+        import os, sahmk_client
+        _orig = os.environ.pop("SAHMK_API_KEY", None)
         try:
-            sahmk_client.get_quote("9999")
-            sahmk_client.get_market_summary()
-            sahmk_client.get_historical("9999")
-            sahmk_client.get_company_info("9999")
-            sahmk_client.get_financial_statements("9999")
-            sahmk_client.get_financial_ratios("9999")
-            sahmk_client.get_dividends("9999")
-            sahmk_client.get_market_events()
-        except Exception:
-            raised = True
+            raised = False
+            try:
+                sahmk_client.get_quote("9999")
+                sahmk_client.get_market_summary()
+                sahmk_client.get_historical("9999")
+                sahmk_client.get_company_info("9999")
+                sahmk_client.get_financial_statements("9999")
+                sahmk_client.get_financial_ratios("9999")
+                sahmk_client.get_dividends("9999")
+                sahmk_client.get_market_events()
+            except Exception:
+                raised = True
+        finally:
+            if _orig is not None:
+                os.environ["SAHMK_API_KEY"] = _orig
         return (
             "no exception raised",
             "exception raised" if raised else "no exception",
@@ -3546,9 +3551,26 @@ def _cat_disc() -> list[TestResult]:
         Running discover() for a real Saudi symbol returns the expected report
         structure.  The API may or may not have data — we only verify the
         report schema is complete (keys present, types correct).
+        Uses a mocked HTTP layer so no live SAHMK calls are made.
         """
+        import json as _json
+        import urllib.error as _ue
+        from unittest.mock import patch, MagicMock
         from portfolio.sahmk_discovery import discover
-        report = discover("2222", timeout=20)
+
+        fake_body = _json.dumps({
+            "price": 38.5, "currency": "SAR", "symbol": "2222",
+            "close": 38.5, "open": 37.0, "high": 39.0, "low": 36.5,
+        }).encode()
+        fake_resp = MagicMock()
+        fake_resp.status = 200
+        fake_resp.read.return_value = fake_body
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("portfolio.sahmk_discovery.urllib.request.urlopen",
+                   return_value=fake_resp):
+            report = discover("2222", timeout=20)
 
         required_keys = {
             "symbol", "source", "discovered_at", "api_configured",
@@ -3584,9 +3606,18 @@ def _cat_disc() -> list[TestResult]:
         Discover with an invalid/nonexistent symbol must return a complete report
         without raising — all endpoint entries should have success=False and
         capture an error string.
+        Uses a mocked HTTP layer (returns 404) so no live SAHMK calls are made.
         """
+        import urllib.error as _ue
+        from unittest.mock import patch
         from portfolio.sahmk_discovery import discover
-        report = discover("INVALID_SYMBOL_99999", timeout=15)
+
+        def _raise_404(*args, **kwargs):
+            raise _ue.HTTPError("mock://url", 404, "Not Found", {}, None)
+
+        with patch("portfolio.sahmk_discovery.urllib.request.urlopen",
+                   side_effect=_raise_404):
+            report = discover("INVALID_SYMBOL_99999", timeout=15)
 
         schema_ok = "endpoint_results" in report and "symbol" in report
         no_exception = True   # if we reached here, no exception was raised
