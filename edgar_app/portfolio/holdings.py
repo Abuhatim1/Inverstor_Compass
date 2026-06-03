@@ -229,8 +229,33 @@ class Transaction:
     recorded_at:    str   = ""  # ISO timestamp
     account_id:     str   = ""  # linked investment account (optional)
     fees:           float = 0.0
-    transaction_id: str   = ""  # immutable; auto-generated at creation
-    asset_id:       str   = ""  # links to Holding.asset_id
+    transaction_id:      str   = ""  # immutable; auto-generated at creation
+    asset_id:            str   = ""  # links to Holding.asset_id
+    # Settlement-only fields (default empty/zero so existing records load unchanged)
+    settlement_amount:   float = 0.0  # positive = income, negative = expense
+    settlement_category: str   = ""   # from SETTLEMENT_CATEGORIES
+    settlement_currency: str   = ""   # ISO currency code
+
+
+# Settlement categories (exhaustive list — do not extend without updating tests)
+SETTLEMENT_CATEGORIES: list[str] = [
+    "Dividend",
+    "Fee",
+    "Tax",
+    "Zakat",
+    "Purification",
+    "Adjustment",
+]
+
+# Cash-ledger type mapping for each settlement category
+_SETTLE_LEDGER_TYPE: dict[str, str] = {
+    "Dividend":    "DIVIDEND",
+    "Fee":         "FEE",
+    "Tax":         "FEE",
+    "Zakat":       "FEE",
+    "Purification":"FEE",
+    "Adjustment":  "OTHER",
+}
 
 
 # ── Holdings persistence ──────────────────────────────────────────────────────
@@ -665,3 +690,224 @@ def portfolio_weights(holdings: dict[str, Holding]) -> dict[str, float]:
     if total <= 0:
         return {aid: 0.0 for aid in holdings}
     return {aid: (h.market_value / total) * 100.0 for aid, h in holdings.items()}
+
+
+# ── Settlement engine ─────────────────────────────────────────────────────────
+
+def record_settlement(
+    amount:          float,
+    category:        str,
+    currency:        str,
+    settlement_date: str | None = None,
+    notes:           str = "",
+    asset_id:        str = "",
+    account_id:      str = "",
+) -> "tuple[Transaction | None, str | None]":
+    """
+    Record a settlement (dividend, fee, tax, zakat, purification, adjustment).
+
+    Three-step atomic write:
+      1. Append SETTLEMENT Transaction to transactions.json
+      2. Append CashEntry to cash_ledger.json  (only when account_id provided)
+      3. Update Account.cash_balance            (only when account_id provided)
+
+    Returns (transaction, None) on success, (None, error_message) on failure.
+    NEVER modifies quantity, avg_cost, cost_basis, or FIFO lots.
+    """
+    if amount == 0.0:
+        return None, "Amount must not be zero."
+    if category not in SETTLEMENT_CATEGORIES:
+        return None, (
+            f"Invalid category {category!r}. "
+            f"Must be one of: {', '.join(SETTLEMENT_CATEGORIES)}."
+        )
+    if len(notes.strip()) < 10:
+        return None, "Notes must be at least 10 characters."
+
+    ticker = ""
+    if asset_id:
+        h = load_holdings().get(asset_id)
+        if h is None:
+            return None, f"Holding {asset_id!r} not found."
+        ticker = h.ticker
+
+    if account_id:
+        from portfolio.accounts import load_accounts as _la
+        if account_id not in _la():
+            return None, f"Account {account_id!r} not found."
+
+    # Step 1 — append transaction
+    txn = Transaction(
+        ticker=ticker,
+        side="SETTLEMENT",
+        quantity=0.0,
+        price=0.0,
+        date=settlement_date or date.today().isoformat(),
+        notes=notes,
+        recorded_at=datetime.now().isoformat(),
+        account_id=account_id,
+        fees=0.0,
+        transaction_id="TXN_" + str(uuid.uuid4())[:8],
+        asset_id=asset_id,
+        settlement_amount=amount,
+        settlement_category=category,
+        settlement_currency=currency,
+    )
+    txns = load_transactions()
+    txns.append(txn)
+    save_transactions(txns)
+
+    # Steps 2 & 3 — cash effects
+    if account_id:
+        from portfolio.cash_ledger import append_cash_entry as _ace
+        from portfolio.accounts import update_account_cash as _uac
+        _ace(
+            account_id=account_id,
+            transaction_type=_SETTLE_LEDGER_TYPE.get(category, "OTHER"),
+            currency=currency,
+            amount=amount,
+            linked_ticker=ticker,
+            notes=notes,
+        )
+        _uac(account_id, amount)
+
+    return txn, None
+
+
+def edit_settlement(
+    transaction_id:  str,
+    amount:          float | None = None,
+    category:        str | None = None,
+    currency:        str | None = None,
+    settlement_date: str | None = None,
+    notes:           str | None = None,
+    asset_id:        str | None = None,
+    account_id:      str | None = None,
+) -> "tuple[Transaction | None, str | None]":
+    """
+    Edit an existing settlement.
+
+    Old cash effects are reversed via a negating cash-ledger entry (audit
+    trail preserved).  New cash effects are then posted.
+
+    Returns (updated_transaction, None) on success, (None, error_msg) on failure.
+    """
+    txns = load_transactions()
+    idx = next(
+        (i for i, t in enumerate(txns) if t.transaction_id == transaction_id),
+        None,
+    )
+    if idx is None:
+        return None, f"Transaction {transaction_id!r} not found."
+    orig = txns[idx]
+    if orig.side != "SETTLEMENT":
+        return None, f"Transaction {transaction_id!r} is not a SETTLEMENT."
+
+    # Resolve new field values (keep original if not provided)
+    new_amount   = amount          if amount   is not None else orig.settlement_amount
+    new_category = category        if category is not None else orig.settlement_category
+    new_currency = currency        if currency is not None else orig.settlement_currency
+    new_date     = settlement_date if settlement_date is not None else orig.date
+    new_notes    = notes           if notes    is not None else orig.notes
+    new_asset_id = asset_id        if asset_id is not None else orig.asset_id
+    new_acct_id  = account_id      if account_id is not None else orig.account_id
+
+    if new_amount == 0.0:
+        return None, "Amount must not be zero."
+    if new_category not in SETTLEMENT_CATEGORIES:
+        return None, f"Invalid category {new_category!r}."
+    if len(new_notes.strip()) < 10:
+        return None, "Notes must be at least 10 characters."
+
+    # Resolve ticker for (possibly changed) asset_id
+    new_ticker = orig.ticker
+    if asset_id is not None:
+        if new_asset_id:
+            h = load_holdings().get(new_asset_id)
+            if h is None:
+                return None, f"Holding {new_asset_id!r} not found."
+            new_ticker = h.ticker
+        else:
+            new_ticker = ""
+
+    # Reverse old cash effects (negating reversal entry — audit trail intact)
+    if orig.account_id:
+        from portfolio.accounts import load_accounts as _la, update_account_cash as _uac
+        from portfolio.cash_ledger import append_cash_entry as _ace
+        if orig.account_id in _la():
+            _ace(
+                account_id=orig.account_id,
+                transaction_type=_SETTLE_LEDGER_TYPE.get(orig.settlement_category, "OTHER"),
+                currency=orig.settlement_currency,
+                amount=-orig.settlement_amount,
+                linked_ticker=orig.ticker,
+                notes=f"[Reversal of {orig.transaction_id}] {orig.notes[:60]}",
+            )
+            _uac(orig.account_id, -orig.settlement_amount)
+
+    # Update transaction record
+    orig.settlement_amount   = new_amount
+    orig.settlement_category = new_category
+    orig.settlement_currency = new_currency
+    orig.date                = new_date
+    orig.notes               = new_notes
+    orig.asset_id            = new_asset_id
+    orig.ticker              = new_ticker
+    orig.account_id          = new_acct_id
+    txns[idx] = orig
+    save_transactions(txns)
+
+    # Post new cash effects
+    if new_acct_id:
+        from portfolio.accounts import load_accounts as _la, update_account_cash as _uac
+        from portfolio.cash_ledger import append_cash_entry as _ace
+        if new_acct_id in _la():
+            _ace(
+                account_id=new_acct_id,
+                transaction_type=_SETTLE_LEDGER_TYPE.get(new_category, "OTHER"),
+                currency=new_currency,
+                amount=new_amount,
+                linked_ticker=new_ticker,
+                notes=new_notes,
+            )
+            _uac(new_acct_id, new_amount)
+
+    return orig, None
+
+
+def delete_settlement(transaction_id: str) -> "str | None":
+    """
+    Delete a settlement and reverse its cash effects via a negating
+    cash-ledger entry (audit trail preserved).
+
+    Returns None on success, error string on failure.
+    """
+    txns = load_transactions()
+    idx = next(
+        (i for i, t in enumerate(txns) if t.transaction_id == transaction_id),
+        None,
+    )
+    if idx is None:
+        return f"Transaction {transaction_id!r} not found."
+    orig = txns[idx]
+    if orig.side != "SETTLEMENT":
+        return f"Transaction {transaction_id!r} is not a SETTLEMENT."
+
+    # Reverse cash effects
+    if orig.account_id:
+        from portfolio.accounts import load_accounts as _la, update_account_cash as _uac
+        from portfolio.cash_ledger import append_cash_entry as _ace
+        if orig.account_id in _la():
+            _ace(
+                account_id=orig.account_id,
+                transaction_type=_SETTLE_LEDGER_TYPE.get(orig.settlement_category, "OTHER"),
+                currency=orig.settlement_currency,
+                amount=-orig.settlement_amount,
+                linked_ticker=orig.ticker,
+                notes=f"[Deleted {orig.transaction_id}] {orig.notes[:60]}",
+            )
+            _uac(orig.account_id, -orig.settlement_amount)
+
+    txns.pop(idx)
+    save_transactions(txns)
+    return None

@@ -2724,11 +2724,12 @@ def render_holdings_tab(bundle: dict) -> None:
         )
         st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
 
-        # ── Primary action bar — Buy / Sell / Add always visible ──────────────
-        _pa1, _pa2, _pa3 = st.columns(3)
+        # ── Primary action bar — Buy / Sell / Add / Settlement always visible ───
+        _pa1, _pa2, _pa3, _pa4 = st.columns(4)
         _add_new_clicked = False
         _quick_buy_clicked = False
         _quick_sell_clicked = False
+        _settlement_clicked = False
         with _pa1:
             if st.button("➕ Add New Position", key="open_add_new_btn",
                          type="primary", use_container_width=True,
@@ -2747,6 +2748,11 @@ def render_holdings_tab(bundle: dict) -> None:
                          disabled=not _active_holdings,
                          help="Sell shares or close a position."):
                 _quick_sell_clicked = True
+        with _pa4:
+            if st.button("📋 Settlement", key="open_settlement_btn",
+                         use_container_width=True,
+                         help="Record a dividend, fee, tax, zakat, or other settlement."):
+                _settlement_clicked = True
 
         # ── Secondary tools row ───────────────────────────────────────────────
         _tb1, _tb2, _tb3 = st.columns(3)
@@ -3633,6 +3639,185 @@ def render_holdings_tab(bundle: dict) -> None:
         if _quick_sell_clicked:
             _dlg_quick_sell()
 
+        # ── Dialog: Settlement ────────────────────────────────────────────────
+        @st.dialog("📋 Record Settlement", width="large")
+        def _dlg_settlement(preselected_asset_id=None, preselected_holding=None):
+            from portfolio import (
+                SETTLEMENT_CATEGORIES, CURRENCIES,
+                record_settlement, load_holdings as _s_load_h,
+            )
+            from portfolio.accounts import load_accounts as _s_load_a, account_display_name as _s_adn
+
+            _s_holdings = _s_load_h()
+            _s_accounts = _s_load_a()
+
+            # ── Scope selector (hidden when called from per-row button) ────────
+            if preselected_asset_id is not None:
+                _s_scope = "Specific Holding"
+                _s_asset_id = preselected_asset_id
+                _s_holding  = preselected_holding
+            else:
+                _s_scope = st.radio(
+                    "Settlement scope",
+                    ["Specific Holding", "Portfolio Level"],
+                    horizontal=True,
+                    key="settle_scope",
+                )
+                _s_asset_id = None
+                _s_holding  = None
+
+            # ── Holding picker ─────────────────────────────────────────────────
+            if _s_scope == "Specific Holding" and preselected_asset_id is None:
+                _s_active = {
+                    aid: h for aid, h in _s_holdings.items() if h.quantity > 1e-9
+                }
+                if not _s_active:
+                    st.warning(
+                        "No active holdings. Use **Portfolio Level** scope instead.",
+                        icon="⚠️",
+                    )
+                    return
+                _s_opts = {
+                    f"{h.ticker} — {h.company_name} ({h.quantity:,.4f} sh)": aid
+                    for aid, h in sorted(_s_active.items(), key=lambda x: x[1].ticker)
+                }
+                _s_lbl = st.selectbox(
+                    "Holding", list(_s_opts.keys()), key="settle_holding_pick"
+                )
+                _s_asset_id = _s_opts[_s_lbl]
+                _s_holding  = _s_active[_s_asset_id]
+
+            if _s_holding is not None:
+                _si1, _si2, _si3 = st.columns(3)
+                _si1.caption(f"**Asset ID:** {_s_holding.asset_id}")
+                _si2.caption(f"**Type:** {getattr(_s_holding, 'asset_type', 'Stock')}")
+                _si3.caption(f"**Currency:** {getattr(_s_holding, 'currency', 'USD')}")
+
+            # ── Date / Amount / Currency ───────────────────────────────────────
+            _sd1, _sd2, _sd3 = st.columns(3)
+            with _sd1:
+                _s_date = st.date_input("Date", value=date.today(), key="settle_date")
+            with _sd2:
+                _s_amount = st.number_input(
+                    "Amount", value=0.0, step=0.01, format="%.2f",
+                    key="settle_amount",
+                    help="Positive = income / credit.  Negative = expense / debit.",
+                )
+            with _sd3:
+                _s_def_ccy = (
+                    getattr(_s_holding, "currency", "SAR") if _s_holding else "SAR"
+                )
+                _s_ccy_idx = CURRENCIES.index(_s_def_ccy) if _s_def_ccy in CURRENCIES else 0
+                _s_ccy = st.selectbox(
+                    "Currency", CURRENCIES, index=_s_ccy_idx, key="settle_ccy"
+                )
+            if _s_amount > 0:
+                st.caption("✅ Income / Credit")
+            elif _s_amount < 0:
+                st.caption("💸 Expense / Debit")
+
+            # ── Category ──────────────────────────────────────────────────────
+            _s_cat = st.selectbox(
+                "Category", SETTLEMENT_CATEGORIES,
+                index=SETTLEMENT_CATEGORIES.index("Dividend"),
+                key="settle_cat",
+            )
+
+            # ── Account ───────────────────────────────────────────────────────
+            _s_acct_sorted = sorted(
+                _s_accounts.values(), key=lambda a: a.account_name
+            )
+            _s_acct_labels = ["— no account —"] + [
+                _s_adn(a) + (
+                    f"  ⚠️ currency mismatch ({a.base_currency} ≠ {_s_ccy})"
+                    if a.base_currency != _s_ccy else ""
+                )
+                for a in _s_acct_sorted
+            ]
+            _s_acct_ids = [None] + [a.account_id for a in _s_acct_sorted]
+            _s_acct_sel_lbl = st.selectbox(
+                "Account", _s_acct_labels, key="settle_acct"
+            )
+            _s_acct_idx = _s_acct_labels.index(_s_acct_sel_lbl)
+            _s_acct_id  = _s_acct_ids[_s_acct_idx] or ""
+            if _s_acct_id:
+                _s_acct_obj = _s_accounts.get(_s_acct_id)
+                if _s_acct_obj:
+                    st.caption(
+                        f"Current balance: **{_s_acct_obj.cash_balance:,.2f}"
+                        f" {_s_acct_obj.base_currency}**"
+                    )
+
+            # ── Notes ─────────────────────────────────────────────────────────
+            _s_notes = st.text_area(
+                "Notes (min. 10 characters)", key="settle_notes", max_chars=500
+            )
+            st.caption(f"{len(_s_notes.strip())} / 10 minimum characters")
+
+            # ── Impact Preview ─────────────────────────────────────────────────
+            st.divider()
+            st.markdown("**🔍 Impact Preview**")
+            _ip1, _ip2 = st.columns(2)
+            with _ip1:
+                st.markdown("**This settlement WILL:**")
+                _sgn = "+" if _s_amount >= 0 else ""
+                st.markdown(
+                    f"- Record **{_sgn}{_s_amount:,.2f} {_s_ccy}** as **{_s_cat}**"
+                )
+                if _s_acct_id:
+                    _dir = "Credit" if _s_amount >= 0 else "Debit"
+                    _acct_disp = _s_acct_labels[_s_acct_idx].split("  ⚠️")[0]
+                    st.markdown(f"- {_dir} account **{_acct_disp}**")
+                if _s_asset_id:
+                    _linked = _s_holdings.get(_s_asset_id)
+                    if _linked:
+                        st.markdown(
+                            f"- Count toward **{_linked.ticker}** holding return"
+                        )
+                else:
+                    st.markdown("- Count toward portfolio-level return")
+            with _ip2:
+                st.markdown("**This settlement will NOT:**")
+                st.markdown("- ~~Change cost basis or average cost~~")
+                st.markdown("- ~~Change FIFO realized P&L~~")
+                st.markdown("- ~~Change share quantity~~")
+
+            # ── Buttons ───────────────────────────────────────────────────────
+            st.divider()
+            _sb1, _sb2 = st.columns(2)
+            with _sb1:
+                if st.button(
+                    "✅ Save Settlement", type="primary",
+                    use_container_width=True, key="settle_save"
+                ):
+                    _s_txn, _s_err = record_settlement(
+                        amount=_s_amount,
+                        category=_s_cat,
+                        currency=_s_ccy,
+                        settlement_date=_s_date.isoformat(),
+                        notes=_s_notes,
+                        asset_id=_s_asset_id or "",
+                        account_id=_s_acct_id,
+                    )
+                    if _s_err:
+                        st.error(_s_err)
+                    else:
+                        _sgn2 = "+" if _s_amount >= 0 else ""
+                        st.toast(
+                            f"Settlement recorded: {_s_cat} "
+                            f"{_sgn2}{_s_amount:,.2f} {_s_ccy}",
+                            icon="✅",
+                        )
+                        st.rerun()
+            with _sb2:
+                if st.button(
+                    "Cancel", use_container_width=True, key="settle_cancel"
+                ):
+                    st.rerun()
+
+        if _settlement_clicked:
+            _dlg_settlement()
+
         # ── Dialog: Edit ─────────────────────────────────────────────────────
         @st.dialog("✏️ Edit Holding")
         def _dlg_edit(dlg_ticker: str, dlg_h):
@@ -4134,7 +4319,7 @@ def render_holdings_tab(bundle: dict) -> None:
             _sh = holdings.get(_st) if _st else None
             if _st and _sh:
                 with st.container(border=True):
-                    _abar_info, _ab1, _ab2, _ab3, _ab4 = st.columns([3, 1, 1, 1, 1])
+                    _abar_info, _ab1, _ab2, _ab3, _ab4, _ab5 = st.columns([3, 1, 1, 1, 1, 1])
                     with _abar_info:
                         _ab_ccy = getattr(_sh, "currency", "USD")
                         st.markdown(
@@ -4152,10 +4337,14 @@ def render_holdings_tab(bundle: dict) -> None:
                                      disabled=(_sh.quantity <= 1e-9)):
                             _dlg_sell(_st, _sh)
                     with _ab3:
+                        if st.button("📋 Settle", key="tbl_settle_btn",
+                                     use_container_width=True):
+                            _dlg_settlement(_st, _sh)
+                    with _ab4:
                         if st.button("✏️ Edit", key="tbl_edit_btn",
                                      use_container_width=True):
                             _dlg_edit(_st, _sh)
-                    with _ab4:
+                    with _ab5:
                         if st.button("🗑️ Del", key="tbl_del_btn",
                                      use_container_width=True):
                             _dlg_delete(_st, _sh)
@@ -4406,16 +4595,16 @@ def render_accounts_tab() -> None:
 
 
 def render_transactions_tab() -> None:
-    """Transaction History — read-only audit log of all buy/sell activity."""
+    """Transaction History — audit log of all buy/sell/settlement activity."""
     from portfolio import load_transactions
     from portfolio.accounts import load_accounts
     import pandas as pd
 
     st.header("📜 Transaction History")
     st.caption(
-        "Complete audit trail of all buy and sell transactions. "
-        "To record new trades, use **➕ Buy More** or **📤 Sell / Close** "
-        "on the **💼 Holdings** tab."
+        "Complete audit trail of all trades and settlement transactions. "
+        "Record trades via **➕ Buy More** or **📤 Sell / Close** on the **💼 Holdings** tab. "
+        "Record dividends, fees, and other settlements via **📋 Settlement**."
     )
 
     accounts = load_accounts()
@@ -4424,29 +4613,39 @@ def render_transactions_tab() -> None:
     if not txns:
         st.info(
             "No transactions recorded yet. "
-            "Use **➕ Add New Position** or **Buy More / Sell** "
+            "Use **➕ Add New Position** or **Buy More / Sell / Settlement** "
             "on the **💼 Holdings** tab to get started.",
             icon="💡",
         )
         return
 
     # ── Filters ───────────────────────────────────────────────────────────────
-    _fc1, _fc2, _fc3 = st.columns(3)
+    _fc1, _fc2, _fc3, _fc4 = st.columns(4)
     with _fc1:
-        _side_filter = st.selectbox("Side", ["All", "BUY", "SELL"], key="txh_side")
+        _type_filter = st.selectbox(
+            "Type", ["All", "Trades", "Settlements"], key="txh_type"
+        )
     with _fc2:
-        _all_tickers = sorted({t.ticker for t in txns})
-        _tk_filter = st.selectbox("Ticker", ["All"] + _all_tickers, key="txh_ticker")
+        _side_filter = st.selectbox("Side", ["All", "BUY", "SELL"], key="txh_side")
     with _fc3:
+        _all_tickers = sorted({t.ticker for t in txns if t.ticker})
+        _tk_filter = st.selectbox("Ticker", ["All"] + _all_tickers, key="txh_ticker")
+    with _fc4:
         _acct_names = {aid: a.account_name for aid, a in accounts.items()}
         _all_accts_used = sorted({
             _acct_names.get(getattr(t, "account_id", ""), "—") or "—"
             for t in txns
         })
-        _acct_filter = st.selectbox("Account", ["All"] + _all_accts_used, key="txh_acct")
+        _acct_filter = st.selectbox(
+            "Account", ["All"] + _all_accts_used, key="txh_acct"
+        )
 
     # ── Apply filters ─────────────────────────────────────────────────────────
     _filtered = txns
+    if _type_filter == "Trades":
+        _filtered = [t for t in _filtered if t.side in ("BUY", "SELL")]
+    elif _type_filter == "Settlements":
+        _filtered = [t for t in _filtered if t.side == "SETTLEMENT"]
     if _side_filter != "All":
         _filtered = [t for t in _filtered if t.side == _side_filter]
     if _tk_filter != "All":
@@ -4460,29 +4659,46 @@ def render_transactions_tab() -> None:
     _sorted = sorted(_filtered, key=lambda t: (t.date, t.recorded_at), reverse=True)
 
     if _sorted:
-        rows = [{
-            "Date":     t.date,
-            "Ticker":   t.ticker,
-            "Side":     t.side,
-            "Qty":      t.quantity,
-            "Price":    round(t.price, 4),
-            "Value":    round(t.quantity * t.price, 2),
-            "Fees":     getattr(t, "fees", 0.0),
-            "Account":  _acct_names.get(getattr(t, "account_id", ""), "—") or "—",
-            "Notes":    t.notes,
-        } for t in _sorted]
+        rows = []
+        for _t in _sorted:
+            _is_settle = _t.side == "SETTLEMENT"
+            _s_amt     = getattr(_t, "settlement_amount", 0.0)
+            _s_cat     = getattr(_t, "settlement_category", "")
+            _s_cur     = getattr(_t, "settlement_currency", "")
+            _display_ticker = _t.ticker if _t.ticker else ("Portfolio" if _is_settle else "—")
+            if _is_settle:
+                _detail = f"{_s_amt:+,.2f} {_s_cur}" if _s_cur else f"{_s_amt:+,.2f}"
+                _val    = _s_amt
+            else:
+                _detail = f"{_t.quantity:,.4f} × {_t.price:,.4f}"
+                _val    = round(_t.quantity * _t.price, 2)
+            rows.append({
+                "Date":     _t.date,
+                "Ticker":   _display_ticker,
+                "Type":     _t.side,
+                "Detail":   _detail,
+                "Value":    _val,
+                "Category": _s_cat if _is_settle else "—",
+                "Fees":     getattr(_t, "fees", 0.0),
+                "Account":  _acct_names.get(getattr(_t, "account_id", ""), "—") or "—",
+                "Notes":    _t.notes,
+            })
         _txn_df = pd.DataFrame(rows)
         _txn_df.index = range(1, len(_txn_df) + 1)
         st.dataframe(_txn_df, use_container_width=True)
 
         # ── Summary metrics ───────────────────────────────────────────────────
-        _buys  = [t for t in _sorted if t.side == "BUY"]
-        _sells = [t for t in _sorted if t.side == "SELL"]
-        _m1, _m2, _m3, _m4 = st.columns(4)
-        _m1.metric("Total Transactions", len(_sorted))
-        _m2.metric("Buys",  len(_buys))
-        _m3.metric("Sells", len(_sells))
-        _m4.metric("Total Fees", f"{sum(getattr(t,'fees',0.0) for t in _sorted):,.2f}")
+        _buys    = [t for t in _sorted if t.side == "BUY"]
+        _sells   = [t for t in _sorted if t.side == "SELL"]
+        _settles = [t for t in _sorted if t.side == "SETTLEMENT"]
+        _net_settle = sum(getattr(t, "settlement_amount", 0.0) for t in _settles)
+        _m1, _m2, _m3, _m4, _m5, _m6 = st.columns(6)
+        _m1.metric("Total",       len(_sorted))
+        _m2.metric("Buys",        len(_buys))
+        _m3.metric("Sells",       len(_sells))
+        _m4.metric("Settlements", len(_settles))
+        _m5.metric("Net Settlement", f"{_net_settle:+,.2f}")
+        _m6.metric("Total Fees",  f"{sum(getattr(t,'fees',0.0) for t in _sorted):,.2f}")
     else:
         st.info("No transactions match the current filters.", icon="🔍")
 

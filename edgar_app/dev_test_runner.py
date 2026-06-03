@@ -5933,6 +5933,319 @@ def _cat_asset_identity() -> list[TestResult]:
     return results
 
 
+def _cat_settle() -> list[TestResult]:
+    """
+    SETTLE: Settlement transaction regression tests.
+
+    SETTLE-01  Asset-level Dividend settlement recorded correctly.
+    SETTLE-02  Portfolio-level Zakat has asset_id='' and ticker=''.
+    SETTLE-03  FIFO queue ignores SETTLEMENT — only sees BUY.
+    SETTLE-04  Settlement never changes holding quantity or avg_cost.
+    SETTLE-05  Reject notes shorter than 10 characters.
+    SETTLE-06  Reject amount == 0.
+    SETTLE-07  Reject invalid category string.
+    SETTLE-08  Cash ledger type mapping: Dividend→DIVIDEND, Zakat→FEE.
+    """
+    CAT = "Settlement"
+    results: list[TestResult] = []
+
+    def settle01():
+        import tempfile, os, json
+        from unittest.mock import patch
+        from portfolio.holdings import (
+            record_settlement, Holding, save_holdings,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            h = Holding(
+                ticker="S01TST", asset_id="AST_990001",
+                company_name="Settle Test Co",
+                quantity=100.0, avg_cost=50.0, current_price=55.0,
+            )
+            save_holdings({"AST_990001": h}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                txn, err = record_settlement(
+                    amount=500.0, category="Dividend", currency="SAR",
+                    notes="Q2 2026 dividend from S01TST holding",
+                    asset_id="AST_990001",
+                )
+        ok_no_err   = err is None
+        ok_side     = txn is not None and txn.side == "SETTLEMENT"
+        ok_amount   = txn is not None and txn.settlement_amount == 500.0
+        ok_category = txn is not None and txn.settlement_category == "Dividend"
+        ok_asset_id = txn is not None and txn.asset_id == "AST_990001"
+        ok_ticker   = txn is not None and txn.ticker == "S01TST"
+        ok = ok_no_err and ok_side and ok_amount and ok_category and ok_asset_id and ok_ticker
+        detail = []
+        if not ok_no_err:   detail.append(f"err={err}")
+        if not ok_side:     detail.append("side != SETTLEMENT")
+        if not ok_amount:   detail.append("settlement_amount mismatch")
+        if not ok_category: detail.append("settlement_category mismatch")
+        if not ok_asset_id: detail.append("asset_id mismatch")
+        if not ok_ticker:   detail.append("ticker mismatch")
+        return (
+            "side=SETTLEMENT, amount=500, category=Dividend, asset_id=AST_990001, ticker=S01TST",
+            "PASS" if ok else "; ".join(detail),
+            ok,
+        )
+
+    def settle02():
+        import tempfile, os
+        from unittest.mock import patch
+        from portfolio.holdings import record_settlement, save_holdings
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            save_holdings({}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                txn, err = record_settlement(
+                    amount=-1000.0, category="Zakat", currency="SAR",
+                    notes="Annual zakat on total portfolio value",
+                )
+        ok = (err is None and txn is not None
+              and txn.asset_id == "" and txn.ticker == "")
+        return (
+            "asset_id='' and ticker='' for portfolio-level settlement",
+            "PASS" if ok else (
+                f"err={err}" if err else
+                f"asset_id={getattr(txn,'asset_id','?')!r}, ticker={getattr(txn,'ticker','?')!r}"
+            ),
+            ok,
+        )
+
+    def settle03():
+        import tempfile, os
+        from unittest.mock import patch
+        from portfolio.holdings import (
+            record_transaction, record_settlement,
+            Holding, save_holdings, load_holdings,
+        )
+        from portfolio.closed_holdings import _build_fifo_queue
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            # Pre-create the holding so record_transaction treats it as an
+            # existing position (bypasses the "account required for new
+            # position" guard — not the subject of this test).
+            pre_h = Holding(
+                ticker="S03TST", asset_id="AST_990003",
+                company_name="FIFO Test Co",
+                quantity=10.0, avg_cost=100.0, current_price=100.0,
+            )
+            save_holdings({"AST_990003": pre_h}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                # Record a BUY targeting the existing holding
+                record_transaction(
+                    ticker="S03TST", side="BUY",
+                    quantity=5.0, price=100.0,
+                    notes="test buy for FIFO isolation",
+                    asset_id="AST_990003",
+                )
+                record_settlement(
+                    amount=50.0, category="Dividend", currency="USD",
+                    notes="dividend for FIFO isolation test",
+                    asset_id="AST_990003",
+                )
+                queue = _build_fifo_queue("S03TST")
+        ok = len(queue) == 1
+        return (
+            "FIFO queue has exactly 1 BUY lot; SETTLEMENT is invisible",
+            f"queue length={len(queue)}",
+            ok,
+        )
+
+    def settle04():
+        import tempfile, os
+        from unittest.mock import patch
+        from portfolio.holdings import (
+            record_settlement, Holding, save_holdings, load_holdings,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            h = Holding(
+                ticker="S04TST", asset_id="AST_990004",
+                company_name="NoChange Co",
+                quantity=200.0, avg_cost=75.0, current_price=80.0,
+            )
+            save_holdings({"AST_990004": h}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                _, err = record_settlement(
+                    amount=-200.0, category="Fee", currency="USD",
+                    notes="Custody fee for SETTLE-04 isolation test",
+                    asset_id="AST_990004",
+                )
+                holdings_after = load_holdings()
+        h_after = holdings_after.get("AST_990004")
+        qty_ok = h_after is not None and abs(h_after.quantity - 200.0) < 1e-9
+        avg_ok = h_after is not None and abs(h_after.avg_cost - 75.0) < 1e-9
+        ok = err is None and qty_ok and avg_ok
+        return (
+            "quantity=200 and avg_cost=75 unchanged after settlement",
+            "PASS" if ok else (
+                f"err={err}" if err else
+                f"qty={getattr(h_after,'quantity','?')}, avg={getattr(h_after,'avg_cost','?')}"
+            ),
+            ok,
+        )
+
+    def settle05():
+        import tempfile, os
+        from unittest.mock import patch
+        from portfolio.holdings import record_settlement, save_holdings
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            save_holdings({}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                _, err = record_settlement(
+                    amount=100.0, category="Dividend", currency="SAR",
+                    notes="short",
+                )
+        ok = err is not None and "10" in err
+        return (
+            "error message mentioning 10-character minimum",
+            f"err={err!r}",
+            ok,
+        )
+
+    def settle06():
+        import tempfile, os
+        from unittest.mock import patch
+        from portfolio.holdings import record_settlement, save_holdings
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            save_holdings({}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                _, err = record_settlement(
+                    amount=0.0, category="Dividend", currency="SAR",
+                    notes="zero amount for validation test",
+                )
+        ok = err is not None and "zero" in err.lower()
+        return (
+            "error message for amount == 0",
+            f"err={err!r}",
+            ok,
+        )
+
+    def settle07():
+        import tempfile, os
+        from unittest.mock import patch
+        from portfolio.holdings import record_settlement, save_holdings
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path = os.path.join(tmp, "holdings.json")
+            t_path = os.path.join(tmp, "transactions.json")
+            save_holdings({}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                _, err = record_settlement(
+                    amount=100.0, category="InvalidCat", currency="SAR",
+                    notes="invalid category for validation test",
+                )
+        ok = err is not None and ("Invalid" in err or "InvalidCat" in err)
+        return (
+            "error message for invalid category string",
+            f"err={err!r}",
+            ok,
+        )
+
+    def settle08():
+        import tempfile, os, json
+        from unittest.mock import patch
+        from dataclasses import asdict
+        from portfolio.holdings import record_settlement, save_holdings
+        from portfolio.accounts import Account, save_accounts
+        with tempfile.TemporaryDirectory() as tmp:
+            h_path  = os.path.join(tmp, "holdings.json")
+            t_path  = os.path.join(tmp, "transactions.json")
+            a_path  = os.path.join(tmp, "accounts.json")
+            cl_path = os.path.join(tmp, "cash_ledger.json")
+            save_holdings({}, path=h_path)
+            with open(t_path, "w") as f:
+                f.write("[]")
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+                patch("portfolio.accounts._ACCOUNTS_FILE", a_path),
+                patch("portfolio.cash_ledger._LEDGER_FILE", cl_path),
+            ):
+                acct = Account(
+                    account_id="ACC_S08TST",
+                    account_name="Test Brokerage S08",
+                    account_type="Brokerage",
+                    base_currency="SAR",
+                    cash_balance=10000.0,
+                )
+                save_accounts({"ACC_S08TST": acct})
+                record_settlement(
+                    amount=300.0, category="Dividend", currency="SAR",
+                    notes="Q2 dividend for ledger mapping test",
+                    account_id="ACC_S08TST",
+                )
+                record_settlement(
+                    amount=-500.0, category="Zakat", currency="SAR",
+                    notes="Annual zakat for ledger mapping test",
+                    account_id="ACC_S08TST",
+                )
+                with open(cl_path) as f:
+                    raw_entries = json.load(f)
+        types = [e.get("transaction_type", "") for e in raw_entries]
+        ok_div  = "DIVIDEND" in types
+        ok_zkat = "FEE" in types
+        ok = ok_div and ok_zkat
+        return (
+            "Dividend→DIVIDEND and Zakat→FEE in cash ledger",
+            f"types found={types}",
+            ok,
+        )
+
+    results.append(_run("SETTLE-01", "Asset-level Dividend settlement recorded correctly",          CAT, "portfolio.holdings.record_settlement",     "P0", True,  settle01))
+    results.append(_run("SETTLE-02", "Portfolio-level Zakat has asset_id='' and ticker=''",         CAT, "portfolio.holdings.record_settlement",     "P0", True,  settle02))
+    results.append(_run("SETTLE-03", "FIFO queue ignores SETTLEMENT — only sees BUY",               CAT, "portfolio.closed_holdings._build_fifo_queue","P0", True, settle03))
+    results.append(_run("SETTLE-04", "Settlement never changes holding quantity or avg_cost",        CAT, "portfolio.holdings.record_settlement",     "P0", True,  settle04))
+    results.append(_run("SETTLE-05", "Reject notes shorter than 10 characters",                     CAT, "portfolio.holdings.record_settlement",     "P0", True,  settle05))
+    results.append(_run("SETTLE-06", "Reject amount == 0",                                          CAT, "portfolio.holdings.record_settlement",     "P0", True,  settle06))
+    results.append(_run("SETTLE-07", "Reject invalid category string",                              CAT, "portfolio.holdings.record_settlement",     "P0", True,  settle07))
+    results.append(_run("SETTLE-08", "Cash ledger type mapping: Dividend→DIVIDEND, Zakat→FEE",      CAT, "portfolio.cash_ledger.append_cash_entry",  "P0", True,  settle08))
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -5948,6 +6261,7 @@ def run_all_tests() -> TestReport:
         + _cat_edit_ui()
         + _cat_assetid()
         + _cat_asset_identity()
+        + _cat_settle()
     )
 
     punch_list: list[PunchListItem] = []

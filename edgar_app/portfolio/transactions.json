@@ -10,7 +10,10 @@
     "account_id": "5cc295b7",
     "fees": 0.0,
     "transaction_id": "TXN_e24ca7cb",
-    "asset_id": ""
+    "asset_id": "",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL",
@@ -23,7 +26,10 @@
     "account_id": "c38b4be4",
     "fees": 0.0,
     "transaction_id": "TXN_739b0a74",
-    "asset_id": ""
+    "asset_id": "",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL",
@@ -36,7 +42,10 @@
     "account_id": "c38b4be4",
     "fees": 0.0,
     "transaction_id": "TXN_b168d5c3",
-    "asset_id": ""
+    "asset_id": "",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL",
@@ -49,7 +58,10 @@
     "account_id": "3637b685",
     "fees": 0.0,
     "transaction_id": "TXN_fc3560a3",
-    "asset_id": ""
+    "asset_id": "",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -62,7 +74,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_58108c14",
-    "asset_id": "AST_000052"
+    "asset_id": "AST_000052",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -75,7 +90,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_036503aa",
-    "asset_id": "AST_000053"
+    "asset_id": "AST_000053",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -88,7 +106,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_e7cb35af",
-    "asset_id": "AST_000052"
+    "asset_id": "AST_000052",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -101,7 +122,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_225f1076",
-    "asset_id": "AST_000053"
+    "asset_id": "AST_000053",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -114,7 +138,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_7a59da91",
-    "asset_id": "AST_000118"
+    "asset_id": "AST_000118",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -127,7 +154,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_15f556c1",
-    "asset_id": "AST_000119"
+    "asset_id": "AST_000119",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -140,7 +170,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_8706461c",
-    "asset_id": "AST_000155"
+    "asset_id": "AST_000155",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -153,7 +186,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_a292ceee",
-    "asset_id": "AST_000156"
+    "asset_id": "AST_000156",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -166,7 +202,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_f78f5936",
-    "asset_id": "AST_000195"
+    "asset_id": "AST_000195",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -179,7 +218,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_e7a7a205",
-    "asset_id": "AST_000196"
+    "asset_id": "AST_000196",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "GC=F",
@@ -192,7 +234,10 @@
     "account_id": "5356d109",
     "fees": 0.0,
     "transaction_id": "TXN_a453f748",
-    "asset_id": "AST_000017"
+    "asset_id": "AST_000017",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -205,7 +250,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_23ef035d",
-    "asset_id": "AST_000234"
+    "asset_id": "AST_000234",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -218,7 +266,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_75953c2e",
-    "asset_id": "AST_000235"
+    "asset_id": "AST_000235",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -231,7 +282,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_0f022d93",
-    "asset_id": "AST_000273"
+    "asset_id": "AST_000273",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -244,7 +298,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_47f28e48",
-    "asset_id": "AST_000274"
+    "asset_id": "AST_000274",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -257,7 +314,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_952a1239",
-    "asset_id": "AST_000314"
+    "asset_id": "AST_000314",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -270,7 +330,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_39a3866c",
-    "asset_id": "AST_000315"
+    "asset_id": "AST_000315",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -283,7 +346,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_88cabf34",
-    "asset_id": "AST_000353"
+    "asset_id": "AST_000353",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -296,7 +362,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_8e9e73e9",
-    "asset_id": "AST_000354"
+    "asset_id": "AST_000354",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -309,7 +378,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_5e81590a",
-    "asset_id": "AST_000392"
+    "asset_id": "AST_000392",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -322,7 +394,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_a8d2e46d",
-    "asset_id": "AST_000393"
+    "asset_id": "AST_000393",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -335,7 +410,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_7b920399",
-    "asset_id": "AST_000431"
+    "asset_id": "AST_000431",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -348,7 +426,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_7cb7b82c",
-    "asset_id": "AST_000432"
+    "asset_id": "AST_000432",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "AAPL_AID06",
@@ -361,7 +442,10 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_cacb49e4",
-    "asset_id": "AST_000470"
+    "asset_id": "AST_000470",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   },
   {
     "ticker": "TSLA_TEST_ASSETID07",
@@ -374,6 +458,105 @@
     "account_id": "acct1",
     "fees": 0.0,
     "transaction_id": "TXN_747bcd4c",
-    "asset_id": "AST_000471"
+    "asset_id": "AST_000471",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T14:06:50.978729",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_027a5cf7",
+    "asset_id": "AST_000509",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T14:06:50.987642",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_828fc9f8",
+    "asset_id": "AST_000510",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T14:07:14.785749",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_00b6a7ec",
+    "asset_id": "AST_000549",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T14:07:14.794393",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_73979295",
+    "asset_id": "AST_000550",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T14:09:21.799346",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_4a7dcef0",
+    "asset_id": "AST_000589",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-03",
+    "notes": "",
+    "recorded_at": "2026-06-03T14:09:21.809295",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_2528a720",
+    "asset_id": "AST_000590",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   }
 ]
