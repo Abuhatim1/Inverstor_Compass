@@ -86,17 +86,19 @@ Dashboards
 
 ## Portfolio Accounting Rules
 
+Scope: Single investor, single portfolio.
+
 Support:
 
-- Multiple portfolios
-- Multiple investment accounts
+- Multiple investment accounts (Brokerage, Crypto, Other)
 - Multiple bank accounts
-- Multiple currencies
-- Cash balances
+- Multiple currencies (SAR, USD, AED, EUR, GBP)
+- Cash balances per account
 - Cash transfers
 - Buy transactions
 - Sell transactions
-- Realized gains
+- Settlement transactions (dividends, fees, taxes, zakat, purification, adjustments)
+- Realized gains (FIFO)
 - Unrealized gains
 
 All calculations must remain auditable.
@@ -153,15 +155,22 @@ Examples:
 
 Primary:
 
-- Yahoo Finance
+- Yahoo Finance (yfinance) — all markets
+- SAHMK API — Saudi market (implemented, live)
 
-Planned:
+Routing:
 
-- SAHMK Integration Layer
+- market_data_router.py → routes price requests to correct provider
+- market_prices.py → Yahoo Finance
+- sahmk_client.py → SAHMK API (Saudi symbols)
+- fx_rates.py → FX rates (yfinance + hardcoded defaults)
+- edgar/client.py → SEC EDGAR
 
 Rule:
 
 Portfolio modules consume internal data services only.
+
+UI code (app.py) must never call external APIs directly.
 
 ---
 

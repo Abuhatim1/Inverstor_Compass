@@ -290,6 +290,107 @@ Never prioritize Tier 3 work over Tier 1 defects.
 
 ────────────────────────────
 
+## Asset and Transaction Identification
+
+Holdings are keyed by sequential asset IDs — never by ticker.
+
+Format: AST_NNNNNN (e.g., AST_000001, AST_000042)
+
+Counter lives in: portfolio/_asset_counter.json
+
+Multiple holdings can share the same ticker symbol.
+
+All transactions (BUY, SELL, SETTLEMENT) share one ID format:
+
+TXN_{uuid8} — e.g., TXN_3f7a2b1c
+
+Generated via: "TXN_" + str(uuid.uuid4())[:8]
+
+There is NO sequential transaction counter. Do not create one.
+
+────────────────────────────
+
+## Atomic File Writes
+
+All JSON persistence must use write-to-temp-then-rename.
+
+Use _safe_json_write() for every data file write.
+
+Never use open() + json.dump() directly on portfolio data files.
+
+This prevents data corruption if the process crashes mid-write.
+
+────────────────────────────
+
+## Data Storage Files
+
+All data lives in edgar_app/portfolio/*.json
+
+| File | Contents |
+|---|---|
+| holdings.json | Active holdings (keyed by AST_ID) |
+| transactions.json | BUY / SELL / SETTLEMENT log (append-only) |
+| closed_lots.json | FIFO closed lots with realized P&L (append-only) |
+| accounts.json | Investment accounts + cash balances |
+| cash_ledger.json | Cash movement audit trail |
+| _asset_counter.json | Next AST_NNNNNN sequence number |
+| deleted_holdings.json | Soft-deleted holdings archive |
+| portfolio_state.json | Research watchlist entries |
+| core_theses.json | Investment thesis documents |
+| delta_history.json | Filing change alerts |
+| comparison_history.json | Filing comparison records |
+
+These files are lost on cloud redeploy (ephemeral filesystem). SQLite migration is a known priority.
+
+────────────────────────────
+
+## Settlement Isolation Rule
+
+Settlements are a third transaction type (side="SETTLEMENT").
+
+A settlement NEVER modifies:
+
+- share quantity
+- avg_cost or cost_basis
+- FIFO lots
+- realized P&L
+
+The FIFO engine only processes side == "BUY" and side == "SELL".
+
+Settlements are invisible to it by design.
+
+Settlement recording uses THREE atomic writes:
+
+1. Append Transaction (side="SETTLEMENT") to transactions.json
+2. Append CashEntry to cash_ledger.json (if account linked)
+3. Update Account.cash_balance (if account linked)
+
+Settlement categories: Dividend, Fee, Tax, Zakat, Purification, Adjustment
+
+Functions: record_settlement(), edit_settlement(), delete_settlement()
+
+These are separate from record_transaction(). Do not merge them.
+
+────────────────────────────
+
+## Transaction Recording Entry Points
+
+All trade and settlement recording lives on the Holdings tab only.
+
+The Transaction History tab is READ-ONLY (audit log). No recording forms there.
+
+Entry points on Holdings tab:
+
+1. Add New Position — dual mode (Mode A: import/transfer, Mode B: new buy)
+2. Buy More — quick buy dialog with holding picker
+3. Sell / Close — quick sell dialog with FIFO + P&L preview
+4. Settlement — dialog with holding picker or portfolio-level option
+5. Per-row Buy / Sell / Settle — pre-targeted to selected holding
+6. Bulk Upload — CSV import for multiple positions
+7. Per-row Edit / Delete — field correction and soft-delete with archival
+
+────────────────────────────
+
 ## Safe Zones
 
 UI-only changes should remain UI-only.

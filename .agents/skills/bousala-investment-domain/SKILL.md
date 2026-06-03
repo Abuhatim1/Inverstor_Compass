@@ -147,6 +147,59 @@ Market filters affect UI and reporting only.
 
 ────────────────────────────
 
+## Settlement Rules
+
+Settlements are a third transaction type alongside BUY and SELL.
+
+A settlement is any financial event tied to an investment that is not a buy or a sell.
+
+Examples: dividend received, brokerage fee, tax withholding, zakat, purification payment, miscellaneous correction.
+
+Categories and cash direction:
+
+| Category | Direction | Typical use |
+|---|---|---|
+| Dividend | + inflow | Cash dividends, fund distributions |
+| Fee | - outflow | Brokerage fees, custody charges |
+| Tax | - outflow | Withholding tax, capital gains tax |
+| Zakat | - outflow | Annual zakat on investment holdings |
+| Purification | - outflow | Haram income purification payment |
+| Adjustment | +/- either | Corrections, refunds, miscellaneous |
+
+A settlement NEVER changes:
+
+- share quantity
+- avg_cost or cost_basis
+- FIFO lots or realized P&L
+
+Settlements affect total return, XIRR, income/expense metrics, cash balance, and cash ledger audit trail.
+
+Settlement scope:
+
+- Asset-level: linked to a specific holding via asset_id
+- Portfolio-level: not linked to any holding (asset_id = "")
+
+────────────────────────────
+
+## FIFO Engine Rules
+
+The FIFO engine in closed_holdings.py processes only side == "BUY" and side == "SELL".
+
+When a sell is recorded:
+
+1. _build_fifo_queue() replays ALL transaction history for that ticker
+2. Builds a queue of remaining open buy lots (oldest first)
+3. execute_sell_fifo() matches sell quantity against the queue
+4. Creates ClosedLot records with per-lot realized P&L
+5. Fees are prorated proportionally across matched lots
+6. Quantity is reduced; if zero, position shows as closed
+
+The FIFO queue is rebuilt from scratch on every sell — no stale state.
+
+Holdings added via "Record Existing Holding" (Mode A / no BUY transaction) use a synthetic fallback lot at avg_cost for FIFO matching.
+
+────────────────────────────
+
 ## Research Separation
 
 Research engines are read-only.

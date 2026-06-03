@@ -70,6 +70,10 @@ Verify:
 
 ## Test Categories
 
+Two naming systems are in use and both are correct — they refer to the same tests at different levels of abstraction.
+
+**Conceptual names** (used in skill files and architectural discussions):
+
 HLD = Holdings
 
 ACC = Accounts
@@ -91,6 +95,34 @@ RISK = Risk
 SEC = SEC Research
 
 SAHMK = Saudi Market Layer
+
+SETTLE = Settlement transactions
+
+**Actual test ID prefixes** (used in dev_test_runner.py):
+
+N01–N10 = Portfolio accounting (holdings, transactions, cost basis)
+
+A11 = Valuation consistency (cross-tab, per-account, FX)
+
+A10 = Account deletion guards
+
+H, J = SAHMK API resilience and connectivity
+
+DISC = SAHMK Discovery Engine
+
+SDS = SAHMK Discovery Storage Layer
+
+BULK = Bulk upload validation
+
+ADD-POS = Add-position workflows (dual mode A/B)
+
+CLOSE = Closed holdings persistence
+
+ASSET-TYPE = Asset type taxonomy
+
+ALLOC-AT = Allocation by asset type
+
+SETTLE = Settlement transactions (record, edit, delete, FIFO isolation, cash ledger mapping, validation)
 
 ────────────────────────────
 
