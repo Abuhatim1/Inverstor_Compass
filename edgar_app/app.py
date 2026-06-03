@@ -7173,6 +7173,7 @@ def render_alt_investments_tab() -> None:
         compute_cf_metrics, compute_cf_reconciliation,
     )
     from portfolio import CURRENCIES
+    from datetime import date
     import pandas as pd
 
     st.header("🏦 Alternative Investments")
