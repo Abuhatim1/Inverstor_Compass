@@ -414,8 +414,6 @@ def record_igi_transaction(
         return None, f"Invalid transaction type: {txn_type!r}."
     if amount <= 0:
         return None, "Amount must be positive."
-    if not notes.strip():
-        return None, "Notes are required."
 
     txn = IGITransaction(
         txn_id        = _new_id(),
@@ -459,8 +457,6 @@ def process_maturity(
         return None, f"Investment is not eligible for maturity processing (status: {inv.status})."
     if actual_total_received < 0:
         return None, "Actual total received cannot be negative."
-    if len(notes.strip()) < 10:
-        return None, "Notes must be at least 10 characters."
 
     action = final_action or inv.maturity_instruction
     if action not in MATURITY_INSTRUCTIONS:
@@ -556,8 +552,6 @@ def process_early_withdrawal(
         return None, "Actual total received cannot be negative."
     if early_withdrawal_cost < 0:
         return None, "Early withdrawal cost cannot be negative."
-    if len(notes.strip()) < 10:
-        return None, "Notes must be at least 10 characters."
 
     split = compute_maturity_split(inv.principal_amount, actual_total)
     txns  = load_igi_transactions(path=txn_path)

@@ -7386,8 +7386,7 @@ def render_alt_investments_tab() -> None:
                                     key=f"igi_wd_tot_{inv.investment_id}")
             _cost = st.number_input("Early Withdrawal Cost (penalty/fee)", min_value=0.0,
                                     step=10.0, format="%.2f", key=f"igi_wd_cost_{inv.investment_id}")
-            _notes = st.text_area("Notes (min. 10 characters)", key=f"igi_wd_notes_{inv.investment_id}", max_chars=500)
-            st.caption(f"{len(_notes.strip())} / 10 minimum characters")
+            _notes = st.text_area("Notes", key=f"igi_wd_notes_{inv.investment_id}", max_chars=500)
 
             from portfolio.alt_investments import compute_maturity_split
             _split = compute_maturity_split(inv.principal_amount, _tot)
@@ -7396,15 +7395,17 @@ def render_alt_investments_tab() -> None:
             _ws1.metric("Principal Returned",    f"{_split['principal_returned']:,.2f}")
             _ws2.metric("Profit Received",       f"{_split['profit_received']:,.2f}")
             _ws3.metric("Withdrawal Cost",       f"{_cost:,.2f}")
+            if _split["principal_loss"] > 0:
+                st.warning(f"⚠️ Principal loss: {_split['principal_loss']:,.2f}", icon="⚠️")
 
-            _conf = st.checkbox("I understand this closes the investment permanently", key=f"igi_wd_conf_{inv.investment_id}")
+            st.caption("⚠️ This action is permanent — the investment will be marked Closed.")
             _b1, _b2 = st.columns(2)
             with _b1:
                 if st.button("✅ Confirm Withdrawal", type="primary", use_container_width=True,
-                             disabled=not _conf, key=f"igi_wd_save_{inv.investment_id}"):
+                             key=f"igi_wd_save_{inv.investment_id}"):
                     _res, _err = process_early_withdrawal(
                         investment_id=inv.investment_id, withdrawal_date=_wd.isoformat(),
-                        actual_total=_tot, early_withdrawal_cost=_cost, notes=_notes,
+                        actual_total=_tot, early_withdrawal_cost=_cost, notes=_notes or "Early withdrawal",
                     )
                     if _err:
                         st.error(_err)
@@ -7440,24 +7441,25 @@ def render_alt_investments_tab() -> None:
                 icon="⏰",
             )
 
-        # ── Add button + status filter ─────────────────────────────────────
+        # ── Add button + institution filter ───────────────────────────────
+        _igi_institutions = sorted({i.institution for i in _igi_all}) if _igi_all else []
         _igi_c1, _igi_c2 = st.columns([3, 1])
         with _igi_c1:
-            _igi_status_filter = st.selectbox(
-                "Filter by Status",
-                ["All"] + IGI_STATUSES,
-                key="igi_status_filter",
+            _igi_inst_filter = st.selectbox(
+                "Filter by Institution",
+                ["All"] + _igi_institutions,
+                key="igi_inst_filter",
             )
         with _igi_c2:
             if st.button("➕ Add Investment", use_container_width=True,
                          type="primary", key="igi_open_add"):
                 _dlg_igi_add()
 
-        # ── Investment list ────────────────────────────────────────────────
+        # ── Investment list — grouped by institution ───────────────────────
         _filtered_igi = _igi_all
-        if _igi_status_filter != "All":
-            _filtered_igi = [i for i in _igi_all if i.status == _igi_status_filter]
-        _filtered_igi = sorted(_filtered_igi, key=lambda x: (x.status, x.maturity_date or ""))
+        if _igi_inst_filter != "All":
+            _filtered_igi = [i for i in _igi_all if i.institution == _igi_inst_filter]
+        _filtered_igi = sorted(_filtered_igi, key=lambda x: (x.institution, x.start_date or ""))
 
         if not _igi_all:
             st.info(
@@ -7467,7 +7469,14 @@ def render_alt_investments_tab() -> None:
         elif not _filtered_igi:
             st.info("No investments match the current filter.", icon="🔍")
         else:
+            # Group by institution
+            _seen_inst: set[str] = set()
             for _inv in _filtered_igi:
+                # Institution header (once per group)
+                if _inv.institution not in _seen_inst:
+                    _seen_inst.add(_inv.institution)
+                    st.markdown(f"#### 🏛️ {_inv.institution}")
+
                 _inv_txns = [t for t in _igi_txns if t.investment_id == _inv.investment_id]
                 _status_icon = {
                     "Pending Funding": "⏳",
@@ -7477,18 +7486,19 @@ def render_alt_investments_tab() -> None:
                 }.get(_inv.status, "•")
 
                 with st.expander(
-                    f"{_status_icon} **{_inv.investment_name}** · {_inv.institution} · "
+                    f"{_status_icon} **{_inv.investment_name}** · "
                     f"{_inv.current_value:,.2f} {_inv.currency} · "
                     f"Yield {_inv.expected_yield_pct:.2f}% · "
+                    f"{_inv.status} · "
                     f"Maturity {_inv.maturity_date or '—'}",
                     expanded=(_inv.status == "Maturity Action Required"),
                 ):
                     # Info row
                     _ri1, _ri2, _ri3, _ri4 = st.columns(4)
-                    _ri1.caption(f"**Status:** {_inv.status}")
-                    _ri2.caption(f"**Principal:** {_inv.principal_amount:,.2f} {_inv.currency}")
-                    _ri3.caption(f"**Structure:** {_inv.profit_payment_structure}")
-                    _ri4.caption(f"**Liquidity:** {_inv.liquidity_type}")
+                    _ri1.caption(f"**Principal:** {_inv.principal_amount:,.2f} {_inv.currency}")
+                    _ri2.caption(f"**Structure:** {_inv.profit_payment_structure}")
+                    _ri3.caption(f"**Liquidity:** {_inv.liquidity_type}")
+                    _ri4.caption(f"**Maturity Instruction:** {_inv.maturity_instruction}")
                     if _inv.sharia_structure != "Not Specified":
                         st.caption(f"🕌 Sharia: {_inv.sharia_structure} · {_inv.sharia_status}")
                     if _inv.parent_investment_id or _inv.child_investment_id:
@@ -7498,8 +7508,10 @@ def render_alt_investments_tab() -> None:
                         if _inv.child_investment_id:
                             _chain_parts.append(f"Child: `{_inv.child_investment_id}`")
                         st.caption("🔗 Chain: " + " · ".join(_chain_parts))
+                    if _inv.notes:
+                        st.caption(f"📝 {_inv.notes}")
 
-                    # Metrics
+                    # Performance metrics
                     _m = compute_igi_metrics(_inv.investment_id)
                     if _m:
                         _met1, _met2, _met3, _met4 = st.columns(4)
@@ -7509,20 +7521,22 @@ def render_alt_investments_tab() -> None:
                         _xirr_val = _m.get("xirr")
                         _met4.metric("XIRR", f"{_xirr_val*100:.2f}%" if _xirr_val is not None else "N/A")
 
-                    # Transaction mini-table
+                    # Transaction list — always shown, empty state if none
+                    st.caption(f"**Transactions** ({len(_inv_txns)})")
                     if _inv_txns:
                         _txn_rows = [
                             {"Date": t.date, "Type": t.txn_type,
-                             "Amount": t.amount, "Notes": t.notes}
+                             "Amount": f"{t.amount:,.2f}", "Notes": t.notes}
                             for t in sorted(_inv_txns, key=lambda x: x.date, reverse=True)
                         ]
                         st.dataframe(pd.DataFrame(_txn_rows), use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("_No transactions recorded yet._")
 
                     # Action buttons
-                    _ab_cols = [1, 1, 1, 1, 1]
                     _can_mature   = _inv.status in ("Maturity Action Required", "Active")
                     _can_withdraw = _inv.status not in ("Closed", "Pending Funding")
-                    _act1, _act2, _act3, _act4, _act5 = st.columns(_ab_cols)
+                    _act1, _act2, _act3, _act4 = st.columns(4)
                     with _act1:
                         if st.button("💰 Add Txn", key=f"igi_atxn_{_inv.investment_id}", use_container_width=True):
                             _dlg_igi_txn(_inv)
@@ -7542,11 +7556,6 @@ def render_alt_investments_tab() -> None:
                             use_container_width=True, disabled=not _can_withdraw,
                         ):
                             _dlg_igi_withdraw(_inv)
-                    with _act5:
-                        _inv_id_display = _inv.investment_id
-                        st.caption(f"ID: `{_inv_id_display}`")
-                    if _inv.notes:
-                        st.caption(f"📝 {_inv.notes}")
 
     # ═══════════════════════════════════════════════════════════════════════
     # SECTION B — CROWDFUNDING
