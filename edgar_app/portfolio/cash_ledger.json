@@ -10,5 +10,17 @@
     "linked_ticker": "",
     "notes": "Testing1 zzxxvf",
     "recorded_at": "2026-06-03T14:17:38.594490"
+  },
+  {
+    "entry_id": "7053abc1-0a5",
+    "date": "2026-06-03",
+    "account_id": "488be063",
+    "transaction_type": "FEE",
+    "currency": "SAR",
+    "amount": -1000.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "2222.SE",
+    "notes": "Xxxxxxxxxxxxxxxxx ",
+    "recorded_at": "2026-06-03T14:34:27.166497"
   }
 ]

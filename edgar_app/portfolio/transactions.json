@@ -590,5 +590,21 @@
     "settlement_amount": -2000.0,
     "settlement_category": "Purification",
     "settlement_currency": "SAR"
+  },
+  {
+    "ticker": "2222.SE",
+    "side": "SETTLEMENT",
+    "quantity": 0.0,
+    "price": 0.0,
+    "date": "2026-06-03",
+    "notes": "Xxxxxxxxxxxxxxxxx ",
+    "recorded_at": "2026-06-03T14:34:27.161899",
+    "account_id": "488be063",
+    "fees": 0.0,
+    "transaction_id": "TXN_fbf8addf",
+    "asset_id": "AST_000011",
+    "settlement_amount": -1000.0,
+    "settlement_category": "Tax",
+    "settlement_currency": "SAR"
   }
 ]
