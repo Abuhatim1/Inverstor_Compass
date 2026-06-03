@@ -1,0 +1,104 @@
+Implement Arabic / English UI toggle as a presentation-layer-only feature.
+
+Objective:
+Add bilingual UI support without changing any business logic, data structure, calculations, IDs, storage files, or existing workflows.
+
+Strict rules:
+1. Do not change JSON keys.
+2. Do not change dataframe column names used by logic.
+3. Do not change function names.
+4. Do not change asset_id, transaction_id, account_id, portfolio_id, or any internal identifiers.
+5. Do not change calculation logic, validation logic, transaction logic, settlement logic, or account-layer logic.
+6. Do not rename saved data fields.
+7. Do not modify existing workflows except replacing visible text labels with translation calls.
+
+Implementation approach:
+Create a new helper file:
+
+ui_i18n.py
+
+It should contain:
+- supported languages: English and Arabic
+- default language: English
+- centralized translation dictionary
+- helper function t(key, lang)
+- optional helper for RTL CSS when Arabic is selected
+
+Example structure:
+
+LANGUAGES = {
+    "English": "en",
+    "العربية": "ar"
+}
+
+TRANSLATIONS = {
+    "en": {
+        "holdings": "Holdings",
+        "buy": "Buy",
+        "sell": "Sell",
+        "settlement": "Settlement",
+        "portfolio": "Portfolio",
+        "accounts": "Accounts"
+    },
+    "ar": {
+        "holdings": "المراكز",
+        "buy": "شراء",
+        "sell": "بيع",
+        "settlement": "تسوية",
+        "portfolio": "المحفظة",
+        "accounts": "الحسابات"
+    }
+}
+
+def t(key, lang="en"):
+    return TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, key)
+
+UI requirements:
+1. Add language selector in the sidebar or app header:
+   English / العربية
+
+2. Store selected language in st.session_state.
+
+3. Apply translation only to visible UI text:
+   - page titles
+   - tab labels
+   - buttons
+   - captions
+   - tooltips
+   - form labels
+   - success messages
+   - warning messages
+   - error messages
+   - table display labels only
+
+4. For tables:
+   If Arabic labels are needed, create a display-only copy:
+
+   display_df = df.rename(columns=DISPLAY_COLUMN_LABELS[lang])
+
+   Never use display_df for:
+   - calculations
+   - saving
+   - validation
+   - transaction processing
+   - account reconciliation
+
+5. Arabic RTL:
+   Apply RTL alignment through CSS only when Arabic is selected.
+   Do not alter layout logic or component behavior.
+
+6. Keep all internal logic in English.
+
+Testing requirements:
+1. Confirm English mode works exactly as before.
+2. Confirm Arabic mode changes visible labels only.
+3. Confirm buy, sell, settlement, account movement, and holdings calculations still work.
+4. Confirm saved JSON/data files remain unchanged.
+5. Confirm no internal dataframe columns were renamed.
+6. Add tests/checks to the developer test runner confirming:
+   - required internal columns still exist
+   - transaction save/load still works
+   - display renaming is not used in business logic
+
+Deliverable:
+A minimal isolated bilingual UI layer with no impact on the app engine.

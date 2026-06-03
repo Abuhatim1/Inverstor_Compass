@@ -1,0 +1,14 @@
+[
+  {
+    "entry_id": "52ca9ba8-1a6",
+    "date": "2026-06-03",
+    "account_id": "488be063",
+    "transaction_type": "FEE",
+    "currency": "SAR",
+    "amount": -2000.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Testing1 zzxxvf",
+    "recorded_at": "2026-06-03T14:17:38.594490"
+  }
+]
