@@ -2722,11 +2722,35 @@ def render_holdings_tab(bundle: dict) -> None:
                 "Account":  st.column_config.TextColumn("Account"),
             },
         )
-        st.caption("👆 Tap a row to select it, then use the action bar below  ·  🟢 profit  🔴 loss  ⚪ flat")
+        st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
 
-        # ── Table action buttons ───────────────────────────────────────────────
-        _tab1, _tab2, _tab3, _tab4 = st.columns(4)
-        with _tab1:
+        # ── Primary action bar — Buy / Sell / Add always visible ──────────────
+        _pa1, _pa2, _pa3 = st.columns(3)
+        _add_new_clicked = False
+        _quick_buy_clicked = False
+        _quick_sell_clicked = False
+        with _pa1:
+            if st.button("➕ Add New Position", key="open_add_new_btn",
+                         type="primary", use_container_width=True,
+                         help="Open a single new position with a BUY transaction."):
+                _add_new_clicked = True
+        with _pa2:
+            _active_holdings = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
+            if st.button("➕ Buy More", key="open_quick_buy_btn",
+                         type="primary", use_container_width=True,
+                         disabled=not _active_holdings,
+                         help="Add shares to an existing holding."):
+                _quick_buy_clicked = True
+        with _pa3:
+            if st.button("📤 Sell / Close", key="open_quick_sell_btn",
+                         type="primary", use_container_width=True,
+                         disabled=not _active_holdings,
+                         help="Sell shares or close a position."):
+                _quick_sell_clicked = True
+
+        # ── Secondary tools row ───────────────────────────────────────────────
+        _tb1, _tb2, _tb3 = st.columns(3)
+        with _tb1:
             # Refresh prices via multi-provider router (SAHMK → yfinance → cached)
             if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
                          use_container_width=True,
@@ -2750,7 +2774,7 @@ def render_holdings_tab(bundle: dict) -> None:
                     icon="✅" if _ok_list else "⚠️",
                 )
                 st.rerun()
-        with _tab2:
+        with _tb2:
             # Download CSV
             import io as _io
             _csv_buf = _io.StringIO()
@@ -2782,17 +2806,11 @@ def render_holdings_tab(bundle: dict) -> None:
                 use_container_width=True,
                 key="dl_holdings_csv",
             )
-        _add_new_clicked = False
-        with _tab3:
+        with _tb3:
             if st.button("⬆️ Bulk Upload", key="open_bulk_upload_btn",
                          use_container_width=True,
                          help="Upload multiple new positions from a CSV file."):
                 _dlg_bulk_upload()
-        with _tab4:
-            if st.button("➕ Add New Position", key="open_add_new_btn",
-                         type="primary", use_container_width=True,
-                         help="Open a single new position with a BUY transaction."):
-                _add_new_clicked = True
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
@@ -3424,6 +3442,196 @@ def render_holdings_tab(bundle: dict) -> None:
         #    by Streamlit natively; no persistent flag needed.
         if _add_new_clicked:
             _dlg_add_new()
+
+        # ── Dialog: Quick Buy (top-bar, with holding picker) ─────────────────
+        @st.dialog("➕ Quick Buy", width="large")
+        def _dlg_quick_buy():
+            _qb_active = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
+            _qb_labels = {aid: f"{h.ticker} — {h.company_name} ({h.quantity:,.4f} shares)"
+                          for aid, h in _qb_active.items()}
+            _qb_sel = st.selectbox(
+                "Select holding to buy more",
+                options=list(_qb_labels.keys()),
+                format_func=lambda k: _qb_labels[k],
+                key="qb_holding_pick",
+            )
+            if _qb_sel:
+                _qb_h = _qb_active[_qb_sel]
+                _qb_ccy = getattr(_qb_h, "currency", "USD")
+                st.divider()
+                st.caption(
+                    f"**{_qb_h.ticker}** · {_qb_h.company_name}  "
+                    f"| {_qb_h.quantity:,.4f} shares @ avg {_qb_h.avg_cost:.4f} {_qb_ccy}"
+                )
+                _qb_c1, _qb_c2 = st.columns(2)
+                with _qb_c1:
+                    _qb_qty = st.number_input("Qty to buy", min_value=0.0001, step=1.0,
+                                              format="%.4f", value=1.0, key="qb_qty")
+                    _qb_price = st.number_input(
+                        "Price / share",
+                        value=float(_qb_h.current_price or _qb_h.avg_cost or 0.0),
+                        min_value=0.0, step=0.01, format="%.4f", key="qb_price",
+                    )
+                with _qb_c2:
+                    _qb_d_pairs = _acct_pairs_for()
+                    _qb_d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _qb_d_pairs]
+                    _qb_d_ids = [""] + [aid for aid, _ in _qb_d_pairs]
+                    _qb_acct = st.selectbox("Account", options=range(len(_qb_d_labels)),
+                                            format_func=lambda i: _qb_d_labels[i], key="qb_acct")
+                    _qb_fees = st.number_input("Fees", min_value=0.0, value=0.0,
+                                               step=0.01, format="%.2f", key="qb_fees")
+                _qb_date = st.date_input("Trade date", value=None, key="qb_date")
+                _qb_notes = st.text_input("Notes", max_chars=200, key="qb_notes")
+                _qb_corr = st.checkbox("Record correction only — skip cash debit", key="qb_corr")
+
+                _qb_aid = _qb_d_ids[_qb_acct]
+                _qb_total = float(_qb_qty) * float(_qb_price) + float(_qb_fees)
+
+                # Cash check
+                _qb_cash_ok = True
+                if not _qb_corr and _qb_aid:
+                    try:
+                        _ck_a = _load_accts_raw()
+                        _ck_b = _ck_a[_qb_aid].cash_balance if _qb_aid in _ck_a else None
+                        if _ck_b is not None:
+                            _ck_i = "🟢" if _ck_b >= _qb_total else "🔴"
+                            st.caption(f"{_ck_i} Account cash: **{_ck_b:,.2f} {_qb_ccy}** · Cost: **{_qb_total:,.2f} {_qb_ccy}**")
+                            if _ck_b < _qb_total:
+                                st.warning(f"Insufficient cash — available {_ck_b:,.2f}, needed {_qb_total:,.2f}.", icon="⚠️")
+                                _qb_cash_ok = False
+                    except Exception:
+                        pass
+
+                # New avg cost preview
+                if (_qb_h.quantity + _qb_qty) > 0:
+                    _qb_new_avg = ((_qb_h.avg_cost * _qb_h.quantity) + (_qb_price * _qb_qty)) / (_qb_h.quantity + _qb_qty)
+                    st.caption(f"Est. new avg cost: **{_qb_new_avg:.4f} {_qb_ccy}**")
+
+                _qbb1, _qbb2 = st.columns(2)
+                with _qbb1:
+                    if st.button("✅ Confirm Buy", type="primary", use_container_width=True,
+                                 disabled=not _qb_cash_ok, key="qb_submit"):
+                        try:
+                            _t, _h2, _e = record_transaction(
+                                ticker=_qb_h.ticker, asset_id=_qb_sel, side="BUY",
+                                quantity=float(_qb_qty), price=float(_qb_price),
+                                txn_date=_qb_date.isoformat() if _qb_date else None,
+                                notes=_qb_notes, company_name=_qb_h.company_name,
+                                market=_qb_h.market, sector=_qb_h.sector,
+                                asset_type=getattr(_qb_h, "asset_type", "Stock"),
+                                currency=_qb_ccy,
+                                has_ticker=getattr(_qb_h, "has_ticker", True),
+                                account_id=_qb_aid, fees=float(_qb_fees),
+                            )
+                            if _e:
+                                st.error(_e)
+                            else:
+                                if not _qb_corr and _qb_aid:
+                                    try:
+                                        _upd_cash(_qb_aid, -_qb_total)
+                                    except Exception:
+                                        pass
+                                st.toast(f"Bought {_qb_qty:.4f} × {_qb_h.ticker} @ {_qb_price:.4f}", icon="✅")
+                                st.rerun()
+                        except Exception as _ex:
+                            st.error(f"Buy failed — {_ex}")
+                with _qbb2:
+                    if st.button("Cancel", use_container_width=True, key="qb_cancel"):
+                        st.rerun()
+
+        if _quick_buy_clicked:
+            _dlg_quick_buy()
+
+        # ── Dialog: Quick Sell (top-bar, with holding picker) ────────────────
+        @st.dialog("📤 Quick Sell", width="large")
+        def _dlg_quick_sell():
+            _qs_active = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
+            _qs_labels = {aid: f"{h.ticker} — {h.company_name} ({h.quantity:,.4f} shares)"
+                          for aid, h in _qs_active.items()}
+            _qs_sel = st.selectbox(
+                "Select holding to sell",
+                options=list(_qs_labels.keys()),
+                format_func=lambda k: _qs_labels[k],
+                key="qs_holding_pick",
+            )
+            if _qs_sel:
+                _qs_h = _qs_active[_qs_sel]
+                _qs_ccy = getattr(_qs_h, "currency", "USD")
+                _qs_avail = float(_qs_h.quantity)
+                st.divider()
+                st.caption(
+                    f"**{_qs_h.ticker}** · {_qs_h.company_name}  "
+                    f"| **{_qs_avail:,.4f}** shares @ avg cost {_qs_h.avg_cost:.4f} {_qs_ccy}"
+                )
+                _qs_full = st.checkbox("Close full position", value=True, key="qs_full")
+                _qs_qty = _qs_avail if _qs_full else st.number_input(
+                    "Qty to sell", min_value=0.0001, max_value=_qs_avail,
+                    step=1.0, format="%.4f", key="qs_qty",
+                )
+                _qs_price = st.number_input(
+                    "Sell price / share",
+                    value=float(_qs_h.current_price or _qs_h.avg_cost or 0.0),
+                    min_value=0.0, step=0.01, format="%.4f", key="qs_price",
+                )
+                _qs_d_pairs = _acct_pairs_for()
+                _qs_d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _qs_d_pairs]
+                _qs_d_ids = [""] + [aid for aid, _ in _qs_d_pairs]
+                _qs_acct = st.selectbox("Account", options=range(len(_qs_d_labels)),
+                                        format_func=lambda i: _qs_d_labels[i], key="qs_acct")
+                _qs_fees = st.number_input("Fees", min_value=0.0, value=0.0,
+                                           step=0.01, format="%.2f", key="qs_fees")
+                _qs_date = st.date_input("Trade date", value=None, key="qs_date")
+                _qs_notes = st.text_input("Notes", max_chars=200, key="qs_notes")
+
+                # P&L preview
+                _qs_gross = float(_qs_qty) * float(_qs_price)
+                _qs_cost = float(_qs_qty) * float(_qs_h.avg_cost)
+                _qs_rpnl = _qs_gross - _qs_cost - float(_qs_fees)
+                _qs_pnl_icon = "🟢" if _qs_rpnl >= 0 else "🔴"
+                st.caption(
+                    f"{_qs_pnl_icon} Est. realized P&L: **{_qs_rpnl:+,.2f} {_qs_ccy}** "
+                    f"| Proceeds: {_qs_gross:,.2f} · Cost basis: {_qs_cost:,.2f}"
+                )
+
+                _qs_aid = _qs_d_ids[_qs_acct]
+                _qsb1, _qsb2 = st.columns(2)
+                with _qsb1:
+                    if st.button("📤 Confirm Sell", type="primary", use_container_width=True, key="qs_submit"):
+                        try:
+                            _t, _h2, _e = record_transaction(
+                                ticker=_qs_h.ticker, asset_id=_qs_sel, side="SELL",
+                                quantity=float(_qs_qty), price=float(_qs_price),
+                                txn_date=_qs_date.isoformat() if _qs_date else None,
+                                notes=_qs_notes, company_name=_qs_h.company_name,
+                                market=_qs_h.market, sector=_qs_h.sector,
+                                asset_type=getattr(_qs_h, "asset_type", "Stock"),
+                                currency=_qs_ccy,
+                                has_ticker=getattr(_qs_h, "has_ticker", True),
+                                account_id=_qs_aid, fees=float(_qs_fees),
+                            )
+                            if _e:
+                                st.error(_e)
+                            else:
+                                if _qs_aid:
+                                    try:
+                                        _qs_net = _qs_gross - float(_qs_fees)
+                                        _upd_cash(_qs_aid, _qs_net)
+                                    except Exception:
+                                        pass
+                                st.toast(
+                                    f"Sold {_qs_qty:.4f} × {_qs_h.ticker} "
+                                    f"@ {_qs_price:.4f} · P&L: {_qs_rpnl:+,.2f} {_qs_ccy}",
+                                    icon="✅",
+                                )
+                                st.rerun()
+                        except Exception as _ex:
+                            st.error(f"Sell failed — {_ex}")
+                with _qsb2:
+                    if st.button("Cancel", use_container_width=True, key="qs_cancel"):
+                        st.rerun()
+
+        if _quick_sell_clicked:
+            _dlg_quick_sell()
 
         # ── Dialog: Edit ─────────────────────────────────────────────────────
         @st.dialog("✏️ Edit Holding")
