@@ -6246,6 +6246,904 @@ def _cat_settle() -> list[TestResult]:
     return results
 
 
+def _cat_igi() -> list[TestResult]:
+    """
+    IGI: Investment Grade Income regression tests.
+
+    IGI-01  add_igi_investment creates investment with correct fields.
+    IGI-02  add_igi_investment rejects empty investment name.
+    IGI-03  add_igi_investment rejects zero principal.
+    IGI-04  record_igi_transaction records correctly.
+    IGI-05  record_igi_transaction rejects unknown investment.
+    IGI-06  compute_maturity_split — actual >= principal → profit, no loss.
+    IGI-07  compute_maturity_split — actual < principal → loss, no profit.
+    IGI-08  process_maturity Principal Returned path closes investment.
+    IGI-09  process_maturity Reinvest Principal creates draft child.
+    IGI-10  process_maturity Reinvest Principal + Profit includes profit in child principal.
+    IGI-11  process_early_withdrawal closes investment.
+    IGI-12  compute_igi_metrics correct totals from transactions.
+    IGI-13  compute_xirr returns None for empty flow list.
+    IGI-14  compute_xirr returns None for all-same-sign flows.
+    IGI-15  compute_xirr converges for simple annual 10% case.
+    IGI-16  Auto-flag: Active investment past maturity_date → Maturity Action Required on load.
+    """
+    CAT = "IGI"
+    results: list[TestResult] = []
+
+    def igi01():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, load_igi_investments
+        with tempfile.TemporaryDirectory() as tmp:
+            p   = os.path.join(tmp, "inv.json")
+            tp  = os.path.join(tmp, "txn.json")
+            inv, err = add_igi_investment(
+                investment_name="Test Murabaha",
+                institution="Al Rajhi Bank",
+                currency="SAR",
+                principal_amount=50000.0,
+                current_value=50000.0,
+                start_date="2025-01-01",
+                maturity_date="2026-01-01",
+                expected_yield_pct=5.5,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Locked Until Maturity",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+        ok_no_err = err is None
+        ok_name   = inv is not None and inv.investment_name == "Test Murabaha"
+        ok_inst   = inv is not None and inv.institution == "Al Rajhi Bank"
+        ok_pa     = inv is not None and inv.principal_amount == 50000.0
+        ok_yld    = inv is not None and inv.expected_yield_pct == 5.5
+        ok_status = inv is not None and inv.status == "Active"
+        ok = ok_no_err and ok_name and ok_inst and ok_pa and ok_yld and ok_status
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_name:   detail.append("name mismatch")
+        if not ok_inst:   detail.append("institution mismatch")
+        if not ok_pa:     detail.append("principal_amount mismatch")
+        if not ok_yld:    detail.append("expected_yield_pct mismatch")
+        if not ok_status: detail.append("status != Active")
+        return ("name=Test Murabaha, institution=Al Rajhi Bank, pa=50000, yield=5.5, status=Active",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi02():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, err = add_igi_investment(
+                investment_name="   ",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=1000.0,
+                current_value=1000.0,
+                start_date="2025-01-01",
+                maturity_date="2026-01-01",
+                expected_yield_pct=5.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Daily",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+        ok = inv is None and err is not None and "name" in err.lower()
+        return ("empty name rejected with error mentioning 'name'",
+                "PASS" if ok else f"inv={inv}, err={err!r}", ok)
+
+    def igi03():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, err = add_igi_investment(
+                investment_name="Bad Principal",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=0.0,
+                current_value=0.0,
+                start_date="2025-01-01",
+                maturity_date="2026-01-01",
+                expected_yield_pct=5.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Daily",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+        ok = inv is None and err is not None and "principal" in err.lower()
+        return ("zero principal rejected with error mentioning 'principal'",
+                "PASS" if ok else f"inv={inv}, err={err!r}", ok)
+
+    def igi04():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, record_igi_transaction, load_igi_transactions
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, _ = add_igi_investment(
+                investment_name="TXN Test",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=10000.0,
+                current_value=10000.0,
+                start_date="2025-01-01",
+                maturity_date="2026-01-01",
+                expected_yield_pct=4.0,
+                profit_payment_structure="Periodic",
+                liquidity_type="Monthly",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+            txn, err = record_igi_transaction(
+                investment_id=inv.investment_id,
+                txn_type="Profit Received",
+                amount=400.0,
+                txn_date="2026-01-01",
+                notes="Q4 2025 profit payment received",
+                path=p, txn_path=tp,
+            )
+            txns = load_igi_transactions(path=tp)
+        ok_no_err = err is None
+        ok_type   = txn is not None and txn.txn_type == "Profit Received"
+        ok_amount = txn is not None and txn.amount == 400.0
+        profit_txns = [t for t in txns if t.txn_type == "Profit Received"]
+        ok_stored = len(profit_txns) == 1
+        ok = ok_no_err and ok_type and ok_amount and ok_stored
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_type:   detail.append("txn_type mismatch")
+        if not ok_amount: detail.append("amount mismatch")
+        if not ok_stored: detail.append(f"stored profit txns={len(profit_txns)}, expected 1")
+        return ("Profit Received 400 stored correctly",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi05():
+        import tempfile, os
+        from portfolio.alt_investments import record_igi_transaction
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            open(p, "w").write("{}")
+            open(tp, "w").write("[]")
+            txn, err = record_igi_transaction(
+                investment_id="notexist",
+                txn_type="Profit Received",
+                amount=100.0,
+                txn_date="2025-01-01",
+                notes="Should fail",
+                path=p, txn_path=tp,
+            )
+        ok = txn is None and err is not None and "not found" in err.lower()
+        return ("unknown investment_id rejected",
+                "PASS" if ok else f"txn={txn}, err={err!r}", ok)
+
+    def igi06():
+        from portfolio.alt_investments import compute_maturity_split
+        result = compute_maturity_split(principal_outstanding=10000.0, actual_total_received=10700.0)
+        ok_pr = abs(result["principal_returned"] - 10000.0) < 0.001
+        ok_pf = abs(result["profit_received"] - 700.0) < 0.001
+        ok_lo = result["principal_loss"] == 0.0
+        ok = ok_pr and ok_pf and ok_lo
+        detail = []
+        if not ok_pr: detail.append(f"principal_returned={result['principal_returned']}")
+        if not ok_pf: detail.append(f"profit_received={result['profit_received']}")
+        if not ok_lo: detail.append(f"principal_loss={result['principal_loss']}")
+        return ("principal=10000 actual=10700 → profit=700 loss=0",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi07():
+        from portfolio.alt_investments import compute_maturity_split
+        result = compute_maturity_split(principal_outstanding=10000.0, actual_total_received=9200.0)
+        ok_pr = abs(result["principal_returned"] - 9200.0) < 0.001
+        ok_pf = result["profit_received"] == 0.0
+        ok_lo = abs(result["principal_loss"] - 800.0) < 0.001
+        ok = ok_pr and ok_pf and ok_lo
+        detail = []
+        if not ok_pr: detail.append(f"principal_returned={result['principal_returned']}")
+        if not ok_pf: detail.append(f"profit_received={result['profit_received']}")
+        if not ok_lo: detail.append(f"principal_loss={result['principal_loss']}")
+        return ("principal=10000 actual=9200 → loss=800 profit=0",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi08():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, process_maturity, load_igi_investments
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, _ = add_igi_investment(
+                investment_name="Maturity Test",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=20000.0,
+                current_value=20000.0,
+                start_date="2024-01-01",
+                maturity_date="2025-01-01",
+                expected_yield_pct=6.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Locked Until Maturity",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+            res, err = process_maturity(
+                investment_id=inv.investment_id,
+                actual_total_received=21200.0,
+                actual_maturity_date="2025-01-01",
+                notes="Investment matured as expected with full return",
+                path=p, txn_path=tp,
+            )
+            invs_after = load_igi_investments(path=p)
+        ok_no_err  = err is None
+        ok_action  = res is not None and res["action_taken"] == "Principal Returned"
+        ok_profit  = res is not None and abs(res["profit_received"] - 1200.0) < 0.001
+        ok_closed  = invs_after.get(inv.investment_id) is not None and invs_after[inv.investment_id].status == "Closed"
+        ok_no_child = res is not None and res["child_investment_id"] == ""
+        ok = ok_no_err and ok_action and ok_profit and ok_closed and ok_no_child
+        detail = []
+        if not ok_no_err:   detail.append(f"err={err}")
+        if not ok_action:   detail.append(f"action={res and res.get('action_taken')}")
+        if not ok_profit:   detail.append(f"profit_received={res and res.get('profit_received')}")
+        if not ok_closed:   detail.append("status != Closed")
+        if not ok_no_child: detail.append("unexpected child_investment_id")
+        return ("process_maturity Principal Returned → status=Closed, profit=1200, no child",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi09():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, process_maturity, load_igi_investments
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, _ = add_igi_investment(
+                investment_name="Reinvest Test",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=10000.0,
+                current_value=10000.0,
+                start_date="2024-01-01",
+                maturity_date="2025-01-01",
+                expected_yield_pct=5.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Locked Until Maturity",
+                maturity_instruction="Reinvest Principal",
+                path=p, txn_path=tp,
+            )
+            res, err = process_maturity(
+                investment_id=inv.investment_id,
+                actual_total_received=10500.0,
+                actual_maturity_date="2025-01-01",
+                notes="Maturity processed — reinvesting principal only",
+                path=p, txn_path=tp,
+            )
+            invs_after = load_igi_investments(path=p)
+        ok_no_err = err is None
+        ok_action = res is not None and res["action_taken"] == "Reinvest Principal"
+        child_id  = res["child_investment_id"] if res else ""
+        ok_child  = bool(child_id) and child_id in invs_after
+        child_pa  = invs_after[child_id].principal_amount if ok_child else 0
+        ok_child_pa = abs(child_pa - 10000.0) < 0.001
+        ok_child_status = ok_child and invs_after[child_id].status == "Pending Funding"
+        ok = ok_no_err and ok_action and ok_child and ok_child_pa and ok_child_status
+        detail = []
+        if not ok_no_err:        detail.append(f"err={err}")
+        if not ok_action:        detail.append(f"action={res and res.get('action_taken')}")
+        if not ok_child:         detail.append("no child investment created")
+        if not ok_child_pa:      detail.append(f"child principal={child_pa}")
+        if not ok_child_status:  detail.append("child status != Pending Funding")
+        return ("Reinvest Principal → child created, principal=10000, status=Pending Funding",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi10():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, process_maturity, load_igi_investments
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, _ = add_igi_investment(
+                investment_name="Reinvest All Test",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=10000.0,
+                current_value=10000.0,
+                start_date="2024-01-01",
+                maturity_date="2025-01-01",
+                expected_yield_pct=5.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Locked Until Maturity",
+                maturity_instruction="Reinvest Principal + Profit",
+                path=p, txn_path=tp,
+            )
+            res, err = process_maturity(
+                investment_id=inv.investment_id,
+                actual_total_received=10600.0,
+                actual_maturity_date="2025-01-01",
+                notes="Reinvesting both principal and profit received",
+                path=p, txn_path=tp,
+            )
+            invs_after = load_igi_investments(path=p)
+        ok_no_err = err is None
+        child_id  = res["child_investment_id"] if res else ""
+        ok_child  = bool(child_id) and child_id in invs_after
+        child_pa  = invs_after[child_id].principal_amount if ok_child else 0
+        ok_child_pa = abs(child_pa - 10600.0) < 0.001
+        ok = ok_no_err and ok_child and ok_child_pa
+        detail = []
+        if not ok_no_err:   detail.append(f"err={err}")
+        if not ok_child:    detail.append("no child investment")
+        if not ok_child_pa: detail.append(f"child principal={child_pa}, expected 10600")
+        return ("Reinvest Principal + Profit → child principal = principal + profit = 10600",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi11():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, process_early_withdrawal, load_igi_investments
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, _ = add_igi_investment(
+                investment_name="Withdrawal Test",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=15000.0,
+                current_value=15000.0,
+                start_date="2025-01-01",
+                maturity_date="2026-12-31",
+                expected_yield_pct=5.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Monthly",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+            res, err = process_early_withdrawal(
+                investment_id=inv.investment_id,
+                withdrawal_date="2025-06-01",
+                actual_total=14800.0,
+                early_withdrawal_cost=200.0,
+                notes="Early exit due to liquidity need in portfolio",
+                path=p, txn_path=tp,
+            )
+            invs_after = load_igi_investments(path=p)
+        ok_no_err  = err is None
+        ok_closed  = invs_after.get(inv.investment_id) is not None and invs_after[inv.investment_id].status == "Closed"
+        ok_loss    = res is not None and abs(res["principal_loss"] - 200.0) < 0.001
+        ok_cost    = res is not None and res["early_withdrawal_cost"] == 200.0
+        ok = ok_no_err and ok_closed and ok_loss and ok_cost
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_closed: detail.append("status != Closed")
+        if not ok_loss:   detail.append(f"principal_loss={res and res.get('principal_loss')}")
+        if not ok_cost:   detail.append(f"early_withdrawal_cost={res and res.get('early_withdrawal_cost')}")
+        return ("early_withdrawal → Closed, loss=200, cost=200",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi12():
+        import tempfile, os
+        from portfolio.alt_investments import add_igi_investment, record_igi_transaction, compute_igi_metrics
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "inv.json")
+            tp = os.path.join(tmp, "txn.json")
+            inv, _ = add_igi_investment(
+                investment_name="Metrics Test",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=10000.0,
+                current_value=10300.0,
+                start_date="2025-01-01",
+                maturity_date="2026-01-01",
+                expected_yield_pct=5.0,
+                profit_payment_structure="Periodic",
+                liquidity_type="Monthly",
+                maturity_instruction="Principal Returned",
+                path=p, txn_path=tp,
+            )
+            record_igi_transaction(
+                investment_id=inv.investment_id, txn_type="Profit Received",
+                amount=300.0, txn_date="2025-07-01",
+                notes="Mid-year profit payment received from institution",
+                path=p, txn_path=tp,
+            )
+            m = compute_igi_metrics(inv.investment_id, path=p, txn_path=tp)
+        ok_invested = abs(m.get("total_invested", 0) - 10000.0) < 0.001
+        ok_profit   = abs(m.get("total_profit_received", 0) - 300.0) < 0.001
+        ok_cv       = abs(m.get("current_value", 0) - 10300.0) < 0.001
+        ok = ok_invested and ok_profit and ok_cv
+        detail = []
+        if not ok_invested: detail.append(f"total_invested={m.get('total_invested')}")
+        if not ok_profit:   detail.append(f"total_profit_received={m.get('total_profit_received')}")
+        if not ok_cv:       detail.append(f"current_value={m.get('current_value')}")
+        return ("metrics: total_invested=10000, profit_received=300, current_value=10300",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def igi13():
+        from portfolio.alt_investments import compute_xirr
+        r = compute_xirr([])
+        ok = r is None
+        return ("compute_xirr([]) → None", "PASS" if ok else f"got {r!r}", ok)
+
+    def igi14():
+        from portfolio.alt_investments import compute_xirr
+        r = compute_xirr([("2025-01-01", -1000.0), ("2026-01-01", -500.0)])
+        ok = r is None
+        return ("all-outflow cash flows → None (no sign change)", "PASS" if ok else f"got {r!r}", ok)
+
+    def igi15():
+        from portfolio.alt_investments import compute_xirr
+        r = compute_xirr([("2025-01-01", -10000.0), ("2026-01-01", 11000.0)])
+        ok = r is not None and abs(r - 0.10) < 0.001
+        return ("invest 10000 get 11000 in 1 year → XIRR ≈ 10.0%",
+                "PASS" if ok else f"got {r!r}", ok)
+
+    def igi16():
+        import tempfile, os, json
+        from portfolio.alt_investments import save_igi_investments, load_igi_investments, IGIInvestment
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "inv.json")
+            # Create an Active investment with maturity date in the past
+            inv = IGIInvestment(
+                investment_id="aabbccdd",
+                investment_name="Past Maturity",
+                institution="Bank",
+                currency="SAR",
+                principal_amount=5000.0,
+                current_value=5000.0,
+                start_date="2023-01-01",
+                maturity_date="2023-12-31",
+                expected_yield_pct=4.0,
+                profit_payment_structure="At Maturity",
+                liquidity_type="Locked Until Maturity",
+                status="Active",
+                maturity_instruction="Principal Returned",
+                created_at="2023-01-01T00:00:00Z",
+            )
+            save_igi_investments({"aabbccdd": inv}, path=p)
+            invs = load_igi_investments(path=p)
+        loaded = invs.get("aabbccdd")
+        ok = loaded is not None and loaded.status == "Maturity Action Required"
+        return ("Active investment past maturity_date auto-flagged to 'Maturity Action Required'",
+                "PASS" if ok else f"status={loaded and loaded.status}", ok)
+
+    for test_id, desc, fn in [
+        ("IGI-01", "add_igi_investment creates investment with correct fields",                   igi01),
+        ("IGI-02", "add_igi_investment rejects empty investment name",                            igi02),
+        ("IGI-03", "add_igi_investment rejects zero principal",                                   igi03),
+        ("IGI-04", "record_igi_transaction records Profit Received correctly",                    igi04),
+        ("IGI-05", "record_igi_transaction rejects unknown investment_id",                        igi05),
+        ("IGI-06", "compute_maturity_split actual>=principal → profit no loss",                   igi06),
+        ("IGI-07", "compute_maturity_split actual<principal → loss no profit",                    igi07),
+        ("IGI-08", "process_maturity Principal Returned → Closed no child",                       igi08),
+        ("IGI-09", "process_maturity Reinvest Principal → child Pending Funding",                 igi09),
+        ("IGI-10", "process_maturity Reinvest Principal+Profit → child principal=pa+profit",      igi10),
+        ("IGI-11", "process_early_withdrawal → Closed, loss and cost recorded",                   igi11),
+        ("IGI-12", "compute_igi_metrics correct total_invested and profit_received",               igi12),
+        ("IGI-13", "compute_xirr empty list → None",                                              igi13),
+        ("IGI-14", "compute_xirr all-outflow → None",                                             igi14),
+        ("IGI-15", "compute_xirr 10k→11k in 1yr → 10%",                                          igi15),
+        ("IGI-16", "auto-flag Active investment past maturity_date → Maturity Action Required",   igi16),
+    ]:
+        results.append(_run(test_id, desc, CAT, "portfolio.alt_investments", "P0", True, fn))
+    return results
+
+
+def _cat_cf() -> list[TestResult]:
+    """
+    CF: Crowdfunding account regression tests.
+
+    CF-01  add_cf_account creates account with correct fields.
+    CF-02  add_cf_account rejects empty platform name.
+    CF-03  add_cf_account rejects invalid crowdfunding type.
+    CF-04  record_cf_transaction records correctly.
+    CF-05  record_cf_transaction rejects unknown account.
+    CF-06  add_cf_snapshot updates account live position.
+    CF-07  add_cf_snapshot stores historical record (immutable, append-only).
+    CF-08  compute_cf_reconciliation — reconciled case diff ≈ 0.
+    CF-09  compute_cf_reconciliation — unreconciled case diff != 0.
+    CF-10  compute_cf_metrics — correct net_deposits and net_profit_loss.
+    CF-11  edit_cf_account updates status and total fields.
+    CF-12  Multiple snapshots: latest updates live position, all stored.
+    """
+    CAT = "CF"
+    results: list[TestResult] = []
+
+    def cf01():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, load_cf_accounts
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "acct.json")
+            acct, err = add_cf_account(
+                platform_name="Manafa",
+                account_name="Main Account",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Manafa Capital",
+                currency="SAR",
+                current_account_value=25000.0,
+                available_cash=5000.0,
+                active_investments=20000.0,
+                delayed_investments=0.0,
+                defaulted_investments=0.0,
+                total_deposits=25000.0,
+                total_withdrawals=0.0,
+                total_profit_received=0.0,
+                total_losses=0.0,
+                last_update_date="2025-06-01",
+                path=p,
+            )
+        ok_no_err = err is None
+        ok_plat   = acct is not None and acct.platform_name == "Manafa"
+        ok_type   = acct is not None and acct.crowdfunding_type == "Debt Crowdfunding"
+        ok_val    = acct is not None and acct.current_account_value == 25000.0
+        ok_status = acct is not None and acct.status == "Active"
+        ok = ok_no_err and ok_plat and ok_type and ok_val and ok_status
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_plat:   detail.append("platform_name mismatch")
+        if not ok_type:   detail.append("crowdfunding_type mismatch")
+        if not ok_val:    detail.append("current_account_value mismatch")
+        if not ok_status: detail.append("status != Active")
+        return ("platform=Manafa, type=Debt Crowdfunding, value=25000, status=Active",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def cf02():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "acct.json")
+            acct, err = add_cf_account(
+                platform_name="",
+                account_name="Test",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Bank",
+                currency="SAR",
+                current_account_value=0.0, available_cash=0.0,
+                active_investments=0.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=0.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01",
+                path=p,
+            )
+        ok = acct is None and err is not None and "platform" in err.lower()
+        return ("empty platform_name rejected", "PASS" if ok else f"acct={acct}, err={err!r}", ok)
+
+    def cf03():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "acct.json")
+            acct, err = add_cf_account(
+                platform_name="TestPlatform",
+                account_name="Test",
+                crowdfunding_type="Invalid Type",
+                institution="Bank",
+                currency="SAR",
+                current_account_value=0.0, available_cash=0.0,
+                active_investments=0.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=0.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01",
+                path=p,
+            )
+        ok = acct is None and err is not None
+        return ("invalid crowdfunding type rejected",
+                "PASS" if ok else f"acct={acct}, err={err!r}", ok)
+
+    def cf04():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, record_cf_transaction, load_cf_transactions
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            tp = os.path.join(tmp, "txn.json")
+            acct, _ = add_cf_account(
+                platform_name="Nayifat", account_name="Primary",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Nayifat Finance", currency="SAR",
+                current_account_value=10000.0, available_cash=2000.0,
+                active_investments=8000.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=10000.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01", path=p,
+            )
+            txn, err = record_cf_transaction(
+                account_id=acct.account_id, txn_type="Profit Received",
+                amount=450.0, txn_date="2025-06-01",
+                notes="Profit distribution Q2 2025",
+                path=p, txn_path=tp,
+            )
+            txns = load_cf_transactions(path=tp)
+        ok_no_err = err is None
+        ok_type   = txn is not None and txn.txn_type == "Profit Received"
+        ok_amount = txn is not None and txn.amount == 450.0
+        ok_stored = len([t for t in txns if t.txn_type == "Profit Received"]) == 1
+        ok = ok_no_err and ok_type and ok_amount and ok_stored
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_type:   detail.append("txn_type mismatch")
+        if not ok_amount: detail.append("amount mismatch")
+        if not ok_stored: detail.append("transaction not stored")
+        return ("Profit Received 450 stored correctly",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def cf05():
+        import tempfile, os
+        from portfolio.crowdfunding import record_cf_transaction
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            tp = os.path.join(tmp, "txn.json")
+            open(p, "w").write("{}")
+            open(tp, "w").write("[]")
+            txn, err = record_cf_transaction(
+                account_id="notexist",
+                txn_type="Deposit",
+                amount=100.0,
+                txn_date="2025-01-01",
+                notes="Should fail",
+                path=p, txn_path=tp,
+            )
+        ok = txn is None and err is not None and "not found" in err.lower()
+        return ("unknown account_id rejected",
+                "PASS" if ok else f"txn={txn}, err={err!r}", ok)
+
+    def cf06():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, add_cf_snapshot, load_cf_accounts
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            sp = os.path.join(tmp, "snap.json")
+            acct, _ = add_cf_account(
+                platform_name="Lendo", account_name="Primary",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Lendo Capital", currency="SAR",
+                current_account_value=10000.0, available_cash=2000.0,
+                active_investments=8000.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=10000.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01", path=p,
+            )
+            snap, err = add_cf_snapshot(
+                account_id=acct.account_id,
+                snapshot_date="2025-06-01",
+                current_account_value=10800.0,
+                available_cash=1800.0,
+                active_investments=9000.0,
+                delayed_investments=0.0,
+                defaulted_investments=0.0,
+                notes="Mid-year update",
+                path=p, snap_path=sp,
+            )
+            accts_after = load_cf_accounts(path=p)
+        ok_no_err = err is None
+        ok_snap   = snap is not None and snap.current_account_value == 10800.0
+        ok_live   = accts_after[acct.account_id].current_account_value == 10800.0
+        ok_cash   = accts_after[acct.account_id].available_cash == 1800.0
+        ok = ok_no_err and ok_snap and ok_live and ok_cash
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_snap:   detail.append("snapshot value mismatch")
+        if not ok_live:   detail.append(f"live value={accts_after[acct.account_id].current_account_value}")
+        if not ok_cash:   detail.append(f"live cash={accts_after[acct.account_id].available_cash}")
+        return ("snapshot updates live account: value=10800, cash=1800",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def cf07():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, add_cf_snapshot, load_cf_snapshots
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            sp = os.path.join(tmp, "snap.json")
+            acct, _ = add_cf_account(
+                platform_name="Raqamyah", account_name="A1",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Raqamyah", currency="SAR",
+                current_account_value=5000.0, available_cash=500.0,
+                active_investments=4500.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=5000.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01", path=p,
+            )
+            add_cf_snapshot(
+                account_id=acct.account_id, snapshot_date="2025-03-01",
+                current_account_value=5200.0, available_cash=500.0,
+                active_investments=4700.0, delayed_investments=0.0,
+                defaulted_investments=0.0, notes="Q1 snapshot", path=p, snap_path=sp,
+            )
+            add_cf_snapshot(
+                account_id=acct.account_id, snapshot_date="2025-06-01",
+                current_account_value=5500.0, available_cash=600.0,
+                active_investments=4900.0, delayed_investments=0.0,
+                defaulted_investments=0.0, notes="Q2 snapshot", path=p, snap_path=sp,
+            )
+            snaps = load_cf_snapshots(path=sp)
+        acct_snaps = [s for s in snaps if s.account_id == acct.account_id]
+        ok = len(acct_snaps) == 2
+        return ("two snapshots stored immutably (count=2)",
+                "PASS" if ok else f"count={len(acct_snaps)}", ok)
+
+    def cf08():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, record_cf_transaction, compute_cf_reconciliation
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            tp = os.path.join(tmp, "txn.json")
+            acct, _ = add_cf_account(
+                platform_name="Platform",
+                account_name="Reconciled",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Bank",
+                currency="SAR",
+                current_account_value=10500.0,
+                available_cash=0.0, active_investments=0.0,
+                delayed_investments=0.0, defaulted_investments=0.0,
+                total_deposits=0.0, total_withdrawals=0.0,
+                total_profit_received=0.0, total_losses=0.0,
+                last_update_date="2025-01-01", path=p,
+            )
+            record_cf_transaction(account_id=acct.account_id, txn_type="Deposit",
+                                  amount=10000.0, txn_date="2025-01-01",
+                                  notes="Initial deposit", path=p, txn_path=tp)
+            record_cf_transaction(account_id=acct.account_id, txn_type="Profit Received",
+                                  amount=500.0, txn_date="2025-06-01",
+                                  notes="Profit received Q2", path=p, txn_path=tp)
+            rec = compute_cf_reconciliation(acct.account_id, path=p, txn_path=tp)
+        ok = abs(rec.get("unreconciled_diff", 999)) < 0.01
+        return ("reconciliation diff ≈ 0 when value equals deposits+profit",
+                "PASS" if ok else f"diff={rec.get('unreconciled_diff')}", ok)
+
+    def cf09():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, record_cf_transaction, compute_cf_reconciliation
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            tp = os.path.join(tmp, "txn.json")
+            acct, _ = add_cf_account(
+                platform_name="Platform",
+                account_name="Unreconciled",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Bank",
+                currency="SAR",
+                current_account_value=11000.0,
+                available_cash=0.0, active_investments=0.0,
+                delayed_investments=0.0, defaulted_investments=0.0,
+                total_deposits=0.0, total_withdrawals=0.0,
+                total_profit_received=0.0, total_losses=0.0,
+                last_update_date="2025-01-01", path=p,
+            )
+            record_cf_transaction(account_id=acct.account_id, txn_type="Deposit",
+                                  amount=10000.0, txn_date="2025-01-01",
+                                  notes="Initial deposit", path=p, txn_path=tp)
+            rec = compute_cf_reconciliation(acct.account_id, path=p, txn_path=tp)
+        diff = rec.get("unreconciled_diff", 0)
+        ok = abs(diff - 1000.0) < 0.01
+        return ("unreconciled diff = 1000 (value=11000, deposits=10000)",
+                "PASS" if ok else f"diff={diff}", ok)
+
+    def cf10():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, record_cf_transaction, compute_cf_metrics
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            tp = os.path.join(tmp, "txn.json")
+            acct, _ = add_cf_account(
+                platform_name="Forus", account_name="Main",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Forus",
+                currency="SAR",
+                current_account_value=9000.0,
+                available_cash=0.0, active_investments=0.0,
+                delayed_investments=0.0, defaulted_investments=0.0,
+                total_deposits=0.0, total_withdrawals=0.0,
+                total_profit_received=0.0, total_losses=0.0,
+                last_update_date="2025-01-01", path=p,
+            )
+            record_cf_transaction(account_id=acct.account_id, txn_type="Deposit",
+                                  amount=10000.0, txn_date="2025-01-01",
+                                  notes="Initial deposit", path=p, txn_path=tp)
+            record_cf_transaction(account_id=acct.account_id, txn_type="Withdrawal",
+                                  amount=1000.0, txn_date="2025-03-01",
+                                  notes="Partial withdrawal", path=p, txn_path=tp)
+            record_cf_transaction(account_id=acct.account_id, txn_type="Profit Received",
+                                  amount=200.0, txn_date="2025-06-01",
+                                  notes="Q2 profit", path=p, txn_path=tp)
+            record_cf_transaction(account_id=acct.account_id, txn_type="Loss Write-Off",
+                                  amount=50.0, txn_date="2025-06-15",
+                                  notes="Write-off defaulted deal", path=p, txn_path=tp)
+            m = compute_cf_metrics(acct.account_id, path=p, txn_path=tp)
+        ok_nd  = abs(m.get("net_deposits", 999) - 9000.0) < 0.001
+        ok_npl = abs(m.get("net_profit_loss", 999) - 150.0) < 0.001
+        ok = ok_nd and ok_npl
+        detail = []
+        if not ok_nd:  detail.append(f"net_deposits={m.get('net_deposits')}, expected 9000")
+        if not ok_npl: detail.append(f"net_profit_loss={m.get('net_profit_loss')}, expected 150")
+        return ("net_deposits=9000, net_profit_loss=150",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def cf11():
+        import tempfile, os
+        from portfolio.crowdfunding import add_cf_account, edit_cf_account, load_cf_accounts
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "acct.json")
+            acct, _ = add_cf_account(
+                platform_name="OldPlatform", account_name="X",
+                crowdfunding_type="Debt Crowdfunding",
+                institution="Bank",
+                currency="SAR",
+                current_account_value=0.0, available_cash=0.0,
+                active_investments=0.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=0.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01", path=p,
+            )
+            _, err = edit_cf_account(acct.account_id, status="Closed",
+                                     total_deposits=5000.0, path=p)
+            accts = load_cf_accounts(path=p)
+        ok_no_err = err is None
+        ok_stat   = accts[acct.account_id].status == "Closed"
+        ok_dep    = accts[acct.account_id].total_deposits == 5000.0
+        ok = ok_no_err and ok_stat and ok_dep
+        detail = []
+        if not ok_no_err: detail.append(f"err={err}")
+        if not ok_stat:   detail.append("status not updated to Closed")
+        if not ok_dep:    detail.append("total_deposits not updated")
+        return ("edit_cf_account status=Closed total_deposits=5000",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    def cf12():
+        import tempfile, os
+        from portfolio.crowdfunding import (
+            add_cf_account, add_cf_snapshot, load_cf_accounts, load_cf_snapshots
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            p  = os.path.join(tmp, "acct.json")
+            sp = os.path.join(tmp, "snap.json")
+            acct, _ = add_cf_account(
+                platform_name="Multi-Snap", account_name="A",
+                crowdfunding_type="Equity Crowdfunding",
+                institution="Platform",
+                currency="USD",
+                current_account_value=1000.0, available_cash=100.0,
+                active_investments=900.0, delayed_investments=0.0,
+                defaulted_investments=0.0, total_deposits=1000.0,
+                total_withdrawals=0.0, total_profit_received=0.0,
+                total_losses=0.0, last_update_date="2025-01-01", path=p,
+            )
+            for val, dt in [(1100.0, "2025-03-01"), (1250.0, "2025-06-01"), (1400.0, "2025-09-01")]:
+                add_cf_snapshot(
+                    account_id=acct.account_id, snapshot_date=dt,
+                    current_account_value=val, available_cash=100.0,
+                    active_investments=val - 100.0, delayed_investments=0.0,
+                    defaulted_investments=0.0, notes=f"snap {dt}",
+                    path=p, snap_path=sp,
+                )
+            accts_final = load_cf_accounts(path=p)
+            snaps_final = load_cf_snapshots(path=sp)
+        acct_snaps = [s for s in snaps_final if s.account_id == acct.account_id]
+        ok_count    = len(acct_snaps) == 3
+        ok_live_val = accts_final[acct.account_id].current_account_value == 1400.0
+        ok_live_dt  = accts_final[acct.account_id].last_update_date == "2025-09-01"
+        ok = ok_count and ok_live_val and ok_live_dt
+        detail = []
+        if not ok_count:    detail.append(f"snapshot count={len(acct_snaps)}, expected 3")
+        if not ok_live_val: detail.append(f"live value={accts_final[acct.account_id].current_account_value}")
+        if not ok_live_dt:  detail.append(f"last_update_date={accts_final[acct.account_id].last_update_date}")
+        return ("3 snapshots stored; live position = latest (1400, 2025-09-01)",
+                "PASS" if ok else "; ".join(detail), ok)
+
+    for test_id, desc, fn in [
+        ("CF-01", "add_cf_account creates account with correct fields",               cf01),
+        ("CF-02", "add_cf_account rejects empty platform name",                       cf02),
+        ("CF-03", "add_cf_account rejects invalid crowdfunding type",                 cf03),
+        ("CF-04", "record_cf_transaction records Profit Received correctly",          cf04),
+        ("CF-05", "record_cf_transaction rejects unknown account_id",                 cf05),
+        ("CF-06", "add_cf_snapshot updates live account position",                    cf06),
+        ("CF-07", "add_cf_snapshot stores historical snapshots immutably",            cf07),
+        ("CF-08", "compute_cf_reconciliation diff ≈ 0 when balanced",                 cf08),
+        ("CF-09", "compute_cf_reconciliation detects unreconciled diff = 1000",       cf09),
+        ("CF-10", "compute_cf_metrics: net_deposits=9000, net_profit_loss=150",       cf10),
+        ("CF-11", "edit_cf_account updates status and total_deposits",                cf11),
+        ("CF-12", "multiple snapshots: 3 stored, live = latest",                      cf12),
+    ]:
+        results.append(_run(test_id, desc, CAT, "portfolio.crowdfunding", "P0", True, fn))
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -6262,6 +7160,8 @@ def run_all_tests() -> TestReport:
         + _cat_assetid()
         + _cat_asset_identity()
         + _cat_settle()
+        + _cat_igi()
+        + _cat_cf()
     )
 
     punch_list: list[PunchListItem] = []

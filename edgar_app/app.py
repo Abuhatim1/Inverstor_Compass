@@ -7152,6 +7152,691 @@ def render_test_runner_tab() -> None:
     _show_history()
 
 
+# ── Alternative Investments Tab ───────────────────────────────────────────────
+
+def render_alt_investments_tab() -> None:
+    """Alternative Investments — Investment Grade Income and Crowdfunding."""
+    from portfolio.alt_investments import (
+        SHARIA_STRUCTURES, SHARIA_COMPLIANCE_STATUSES,
+        PROFIT_PAYMENT_STRUCTURES, LIQUIDITY_TYPES, IGI_STATUSES,
+        MATURITY_INSTRUCTIONS, IGI_TRANSACTION_TYPES,
+        load_igi_investments, load_igi_transactions,
+        add_igi_investment, edit_igi_investment,
+        record_igi_transaction, process_maturity, process_early_withdrawal,
+        compute_igi_metrics,
+    )
+    from portfolio.crowdfunding import (
+        CROWDFUNDING_TYPES, CF_STATUSES, CF_TRANSACTION_TYPES,
+        load_cf_accounts, load_cf_transactions, load_cf_snapshots,
+        add_cf_account, edit_cf_account,
+        record_cf_transaction, add_cf_snapshot,
+        compute_cf_metrics, compute_cf_reconciliation,
+    )
+    from portfolio import CURRENCIES
+    import pandas as pd
+
+    st.header("🏦 Alternative Investments")
+    st.caption(
+        "Track Investment Grade Income (Sukuk, deposits, savings accounts) "
+        "and Crowdfunding platform accounts — without modifying the Holdings engine."
+    )
+
+    _alt_type = st.radio(
+        "Investment Type",
+        ["Investment Grade Income", "Crowdfunding"],
+        horizontal=True,
+        key="alt_inv_type",
+    )
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SECTION A — INVESTMENT GRADE INCOME
+    # ═══════════════════════════════════════════════════════════════════════
+    if _alt_type == "Investment Grade Income":
+
+        # ── Dialogs ───────────────────────────────────────────────────────
+
+        @st.dialog("➕ Add Investment Grade Income")
+        def _dlg_igi_add():
+            _ai1, _ai2 = st.columns(2)
+            with _ai1:
+                _n  = st.text_input("Investment Name *", key="igi_add_name")
+                _in = st.text_input("Institution *", key="igi_add_inst")
+                _cur = st.selectbox("Currency", CURRENCIES,
+                                    index=CURRENCIES.index("SAR") if "SAR" in CURRENCIES else 0,
+                                    key="igi_add_ccy")
+                _pa = st.number_input("Principal Amount *", min_value=0.01, step=100.0, format="%.2f", key="igi_add_pa")
+                _cv = st.number_input("Current Value", min_value=0.0, step=100.0, format="%.2f", key="igi_add_cv")
+            with _ai2:
+                _sd  = st.date_input("Start Date", value=date.today(), key="igi_add_sd")
+                _md  = st.date_input("Maturity Date", value=date.today(), key="igi_add_md")
+                _yld = st.number_input("Expected Yield %", min_value=0.0, max_value=100.0, step=0.1, format="%.2f", key="igi_add_yld")
+                _pps = st.selectbox("Profit Payment Structure", PROFIT_PAYMENT_STRUCTURES, key="igi_add_pps")
+                _liq = st.selectbox("Liquidity Type", LIQUIDITY_TYPES, key="igi_add_liq")
+            _mi  = st.selectbox("Maturity Instruction", MATURITY_INSTRUCTIONS, key="igi_add_mi")
+            _stat = st.selectbox("Status", IGI_STATUSES[:2], key="igi_add_stat")
+            with st.expander("Sharia Metadata (optional)"):
+                _sstr = st.selectbox("Sharia Structure", SHARIA_STRUCTURES, key="igi_add_sstr")
+                _sstat = st.selectbox("Sharia Compliance Status", SHARIA_COMPLIANCE_STATUSES,
+                                      index=SHARIA_COMPLIANCE_STATUSES.index("Not Applicable"),
+                                      key="igi_add_sstat")
+                _snotes = st.text_area("Sharia Notes", key="igi_add_snotes", max_chars=300)
+            _notes = st.text_area("Notes", key="igi_add_notes", max_chars=500)
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save", type="primary", use_container_width=True, key="igi_add_save"):
+                    _inv, _err = add_igi_investment(
+                        investment_name=_n, institution=_in, currency=_cur,
+                        principal_amount=_pa, current_value=_cv or _pa,
+                        start_date=_sd.isoformat(), maturity_date=_md.isoformat(),
+                        expected_yield_pct=_yld, profit_payment_structure=_pps,
+                        liquidity_type=_liq, maturity_instruction=_mi,
+                        notes=_notes, sharia_structure=_sstr,
+                        sharia_status=_sstat, sharia_notes=_snotes, status=_stat,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast(f"Investment added: {_inv.investment_name}", icon="✅")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key="igi_add_cancel"):
+                    st.rerun()
+
+        @st.dialog("✏️ Edit Investment")
+        def _dlg_igi_edit(inv):
+            _ei1, _ei2 = st.columns(2)
+            with _ei1:
+                _n  = st.text_input("Investment Name", value=inv.investment_name, key=f"igi_e_n_{inv.investment_id}")
+                _in = st.text_input("Institution", value=inv.institution, key=f"igi_e_in_{inv.investment_id}")
+                _cv = st.number_input("Current Value", value=float(inv.current_value), min_value=0.0, step=100.0, format="%.2f", key=f"igi_e_cv_{inv.investment_id}")
+                _yld = st.number_input("Expected Yield %", value=float(inv.expected_yield_pct), min_value=0.0, max_value=100.0, step=0.1, format="%.2f", key=f"igi_e_yld_{inv.investment_id}")
+            with _ei2:
+                _md  = st.date_input("Maturity Date", value=date.fromisoformat(inv.maturity_date) if inv.maturity_date else date.today(), key=f"igi_e_md_{inv.investment_id}")
+                _pps = st.selectbox("Profit Payment Structure", PROFIT_PAYMENT_STRUCTURES,
+                                    index=PROFIT_PAYMENT_STRUCTURES.index(inv.profit_payment_structure) if inv.profit_payment_structure in PROFIT_PAYMENT_STRUCTURES else 0,
+                                    key=f"igi_e_pps_{inv.investment_id}")
+                _liq = st.selectbox("Liquidity Type", LIQUIDITY_TYPES,
+                                    index=LIQUIDITY_TYPES.index(inv.liquidity_type) if inv.liquidity_type in LIQUIDITY_TYPES else 0,
+                                    key=f"igi_e_liq_{inv.investment_id}")
+                _mi  = st.selectbox("Maturity Instruction", MATURITY_INSTRUCTIONS,
+                                    index=MATURITY_INSTRUCTIONS.index(inv.maturity_instruction) if inv.maturity_instruction in MATURITY_INSTRUCTIONS else 0,
+                                    key=f"igi_e_mi_{inv.investment_id}")
+            _notes = st.text_area("Notes", value=inv.notes, max_chars=500, key=f"igi_e_notes_{inv.investment_id}")
+            with st.expander("Sharia Metadata"):
+                _sstr  = st.selectbox("Structure", SHARIA_STRUCTURES,
+                                      index=SHARIA_STRUCTURES.index(inv.sharia_structure) if inv.sharia_structure in SHARIA_STRUCTURES else 0,
+                                      key=f"igi_e_sstr_{inv.investment_id}")
+                _sstat = st.selectbox("Compliance Status", SHARIA_COMPLIANCE_STATUSES,
+                                      index=SHARIA_COMPLIANCE_STATUSES.index(inv.sharia_status) if inv.sharia_status in SHARIA_COMPLIANCE_STATUSES else 0,
+                                      key=f"igi_e_sstat_{inv.investment_id}")
+                _snotes = st.text_area("Sharia Notes", value=inv.sharia_notes, max_chars=300, key=f"igi_e_snotes_{inv.investment_id}")
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save", type="primary", use_container_width=True, key=f"igi_e_save_{inv.investment_id}"):
+                    _, _err = edit_igi_investment(
+                        inv.investment_id,
+                        investment_name=_n, institution=_in, current_value=_cv,
+                        expected_yield_pct=_yld, maturity_date=_md.isoformat(),
+                        profit_payment_structure=_pps, liquidity_type=_liq,
+                        maturity_instruction=_mi, notes=_notes,
+                        sharia_structure=_sstr, sharia_status=_sstat, sharia_notes=_snotes,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast("Investment updated", icon="💾")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"igi_e_cancel_{inv.investment_id}"):
+                    st.rerun()
+
+        @st.dialog("💰 Add Transaction")
+        def _dlg_igi_txn(inv):
+            st.caption(f"**{inv.investment_name}** · {inv.institution} · {inv.currency}")
+            _t1, _t2, _t3 = st.columns(3)
+            with _t1:
+                _tt  = st.selectbox("Type", IGI_TRANSACTION_TYPES, key=f"igi_t_type_{inv.investment_id}")
+            with _t2:
+                _amt = st.number_input("Amount", min_value=0.01, step=100.0, format="%.2f", key=f"igi_t_amt_{inv.investment_id}")
+            with _t3:
+                _dt  = st.date_input("Date", value=date.today(), key=f"igi_t_dt_{inv.investment_id}")
+            _notes = st.text_area("Notes *", key=f"igi_t_notes_{inv.investment_id}", max_chars=300)
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save", type="primary", use_container_width=True, key=f"igi_t_save_{inv.investment_id}"):
+                    _, _err = record_igi_transaction(
+                        investment_id=inv.investment_id, txn_type=_tt,
+                        amount=_amt, txn_date=_dt.isoformat(), notes=_notes,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast(f"{_tt}: {_amt:,.2f} {inv.currency}", icon="✅")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"igi_t_cancel_{inv.investment_id}"):
+                    st.rerun()
+
+        @st.dialog("🔔 Process Maturity")
+        def _dlg_igi_maturity(inv):
+            st.caption(
+                f"**{inv.investment_name}** · Principal: **{inv.principal_amount:,.2f} {inv.currency}**  \n"
+                "Enter the actual amount received. The system calculates the split."
+            )
+            _actual = st.number_input(
+                "Actual Total Amount Received", min_value=0.0,
+                value=float(inv.principal_amount), step=100.0, format="%.2f",
+                key=f"igi_mat_act_{inv.investment_id}",
+            )
+            _act_date = st.date_input("Actual Maturity Date", value=date.today(), key=f"igi_mat_dt_{inv.investment_id}")
+            _notes    = st.text_area("Notes (min. 10 characters)", key=f"igi_mat_notes_{inv.investment_id}", max_chars=500)
+            st.caption(f"{len(_notes.strip())} / 10 minimum characters")
+
+            # Show split preview
+            from portfolio.alt_investments import compute_maturity_split
+            _split = compute_maturity_split(inv.principal_amount, _actual)
+            _final_action = inv.maturity_instruction
+            if inv.maturity_instruction == "Manual Decision At Maturity":
+                _final_action = st.selectbox(
+                    "Final Action *",
+                    [m for m in MATURITY_INSTRUCTIONS if m != "Manual Decision At Maturity"],
+                    key=f"igi_mat_fa_{inv.investment_id}",
+                )
+            st.divider()
+            st.markdown("**📊 Calculated Split**")
+            _ms1, _ms2, _ms3 = st.columns(3)
+            _ms1.metric("Principal Returned", f"{_split['principal_returned']:,.2f}")
+            _ms2.metric("Profit Received",    f"{_split['profit_received']:,.2f}")
+            _ms3.metric("Principal Loss",     f"{_split['principal_loss']:,.2f}")
+            if _split["principal_loss"] > 0:
+                st.warning("⚠️ Actual amount is less than principal — a loss will be recorded.", icon="⚠️")
+            st.caption(f"Action: **{_final_action}**")
+
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("✅ Confirm Maturity", type="primary", use_container_width=True, key=f"igi_mat_save_{inv.investment_id}"):
+                    _res, _err = process_maturity(
+                        investment_id=inv.investment_id,
+                        actual_total_received=_actual,
+                        actual_maturity_date=_act_date.isoformat(),
+                        notes=_notes,
+                        final_action=_final_action if inv.maturity_instruction == "Manual Decision At Maturity" else None,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        _child_msg = f" · New draft: {_res['child_investment_id']}" if _res.get("child_investment_id") else ""
+                        st.toast(f"Maturity processed: {_res['action_taken']}{_child_msg}", icon="✅")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"igi_mat_cancel_{inv.investment_id}"):
+                    st.rerun()
+
+        @st.dialog("📤 Early Withdrawal")
+        def _dlg_igi_withdraw(inv):
+            st.caption(
+                f"**{inv.investment_name}** · Principal: **{inv.principal_amount:,.2f} {inv.currency}**  \n"
+                "Full early withdrawal only (MVP). Enter actual amount received after any penalties."
+            )
+            _wd   = st.date_input("Withdrawal Date", value=date.today(), key=f"igi_wd_dt_{inv.investment_id}")
+            _tot  = st.number_input("Actual Total Amount Received", min_value=0.0,
+                                    value=float(inv.principal_amount), step=100.0, format="%.2f",
+                                    key=f"igi_wd_tot_{inv.investment_id}")
+            _cost = st.number_input("Early Withdrawal Cost (penalty/fee)", min_value=0.0,
+                                    step=10.0, format="%.2f", key=f"igi_wd_cost_{inv.investment_id}")
+            _notes = st.text_area("Notes (min. 10 characters)", key=f"igi_wd_notes_{inv.investment_id}", max_chars=500)
+            st.caption(f"{len(_notes.strip())} / 10 minimum characters")
+
+            from portfolio.alt_investments import compute_maturity_split
+            _split = compute_maturity_split(inv.principal_amount, _tot)
+            st.divider()
+            _ws1, _ws2, _ws3 = st.columns(3)
+            _ws1.metric("Principal Returned",    f"{_split['principal_returned']:,.2f}")
+            _ws2.metric("Profit Received",       f"{_split['profit_received']:,.2f}")
+            _ws3.metric("Withdrawal Cost",       f"{_cost:,.2f}")
+
+            _conf = st.checkbox("I understand this closes the investment permanently", key=f"igi_wd_conf_{inv.investment_id}")
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("✅ Confirm Withdrawal", type="primary", use_container_width=True,
+                             disabled=not _conf, key=f"igi_wd_save_{inv.investment_id}"):
+                    _res, _err = process_early_withdrawal(
+                        investment_id=inv.investment_id, withdrawal_date=_wd.isoformat(),
+                        actual_total=_tot, early_withdrawal_cost=_cost, notes=_notes,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast("Early withdrawal processed — investment closed", icon="✅")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"igi_wd_cancel_{inv.investment_id}"):
+                    st.rerun()
+
+        # ── Load data ─────────────────────────────────────────────────────
+        _igi_investments = load_igi_investments()
+        _igi_txns        = load_igi_transactions()
+
+        # ── Summary metrics ────────────────────────────────────────────────
+        _igi_all  = list(_igi_investments.values())
+        _igi_open = [i for i in _igi_all if i.status not in ("Closed",)]
+        _total_cv = sum(i.current_value for i in _igi_open)
+        _total_pa = sum(i.principal_amount for i in _igi_open)
+        _total_pr = sum(t.amount for t in _igi_txns if t.txn_type == "Profit Received")
+        _maturity_due = [i for i in _igi_all if i.status == "Maturity Action Required"]
+
+        _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
+        _sm1.metric("Total Investments",     len(_igi_all))
+        _sm2.metric("Open",                  len(_igi_open))
+        _sm3.metric("Total Principal (open)", f"{_total_pa:,.0f}")
+        _sm4.metric("Total Current Value",   f"{_total_cv:,.0f}")
+        _sm5.metric("Total Profit Received", f"{_total_pr:,.0f}")
+        if _maturity_due:
+            st.warning(
+                f"⏰ **{len(_maturity_due)} investment(s) require maturity action.** "
+                "See 🔔 Process Maturity below.",
+                icon="⏰",
+            )
+
+        # ── Add button + status filter ─────────────────────────────────────
+        _igi_c1, _igi_c2 = st.columns([3, 1])
+        with _igi_c1:
+            _igi_status_filter = st.selectbox(
+                "Filter by Status",
+                ["All"] + IGI_STATUSES,
+                key="igi_status_filter",
+            )
+        with _igi_c2:
+            if st.button("➕ Add Investment", use_container_width=True,
+                         type="primary", key="igi_open_add"):
+                _dlg_igi_add()
+
+        # ── Investment list ────────────────────────────────────────────────
+        _filtered_igi = _igi_all
+        if _igi_status_filter != "All":
+            _filtered_igi = [i for i in _igi_all if i.status == _igi_status_filter]
+        _filtered_igi = sorted(_filtered_igi, key=lambda x: (x.status, x.maturity_date or ""))
+
+        if not _igi_all:
+            st.info(
+                "No investments yet. Click **➕ Add Investment** to get started.",
+                icon="💡",
+            )
+        elif not _filtered_igi:
+            st.info("No investments match the current filter.", icon="🔍")
+        else:
+            for _inv in _filtered_igi:
+                _inv_txns = [t for t in _igi_txns if t.investment_id == _inv.investment_id]
+                _status_icon = {
+                    "Pending Funding": "⏳",
+                    "Active": "✅",
+                    "Maturity Action Required": "⏰",
+                    "Closed": "📁",
+                }.get(_inv.status, "•")
+
+                with st.expander(
+                    f"{_status_icon} **{_inv.investment_name}** · {_inv.institution} · "
+                    f"{_inv.current_value:,.2f} {_inv.currency} · "
+                    f"Yield {_inv.expected_yield_pct:.2f}% · "
+                    f"Maturity {_inv.maturity_date or '—'}",
+                    expanded=(_inv.status == "Maturity Action Required"),
+                ):
+                    # Info row
+                    _ri1, _ri2, _ri3, _ri4 = st.columns(4)
+                    _ri1.caption(f"**Status:** {_inv.status}")
+                    _ri2.caption(f"**Principal:** {_inv.principal_amount:,.2f} {_inv.currency}")
+                    _ri3.caption(f"**Structure:** {_inv.profit_payment_structure}")
+                    _ri4.caption(f"**Liquidity:** {_inv.liquidity_type}")
+                    if _inv.sharia_structure != "Not Specified":
+                        st.caption(f"🕌 Sharia: {_inv.sharia_structure} · {_inv.sharia_status}")
+                    if _inv.parent_investment_id or _inv.child_investment_id:
+                        _chain_parts = []
+                        if _inv.parent_investment_id:
+                            _chain_parts.append(f"Parent: `{_inv.parent_investment_id}`")
+                        if _inv.child_investment_id:
+                            _chain_parts.append(f"Child: `{_inv.child_investment_id}`")
+                        st.caption("🔗 Chain: " + " · ".join(_chain_parts))
+
+                    # Metrics
+                    _m = compute_igi_metrics(_inv.investment_id)
+                    if _m:
+                        _met1, _met2, _met3, _met4 = st.columns(4)
+                        _met1.metric("Total Profit Received", f"{_m.get('total_profit_received', 0):,.2f}")
+                        _met2.metric("Unrealized Profit",     f"{_m.get('unrealized_profit', 0):,.2f}")
+                        _met3.metric("Total Return",          f"{_m.get('total_return', 0):,.2f}")
+                        _xirr_val = _m.get("xirr")
+                        _met4.metric("XIRR", f"{_xirr_val*100:.2f}%" if _xirr_val is not None else "N/A")
+
+                    # Transaction mini-table
+                    if _inv_txns:
+                        _txn_rows = [
+                            {"Date": t.date, "Type": t.txn_type,
+                             "Amount": t.amount, "Notes": t.notes}
+                            for t in sorted(_inv_txns, key=lambda x: x.date, reverse=True)
+                        ]
+                        st.dataframe(pd.DataFrame(_txn_rows), use_container_width=True, hide_index=True)
+
+                    # Action buttons
+                    _ab_cols = [1, 1, 1, 1, 1]
+                    _can_mature   = _inv.status in ("Maturity Action Required", "Active")
+                    _can_withdraw = _inv.status not in ("Closed", "Pending Funding")
+                    _act1, _act2, _act3, _act4, _act5 = st.columns(_ab_cols)
+                    with _act1:
+                        if st.button("💰 Add Txn", key=f"igi_atxn_{_inv.investment_id}", use_container_width=True):
+                            _dlg_igi_txn(_inv)
+                    with _act2:
+                        if st.button("✏️ Edit", key=f"igi_edit_{_inv.investment_id}", use_container_width=True):
+                            _dlg_igi_edit(_inv)
+                    with _act3:
+                        if st.button(
+                            "🔔 Maturity", key=f"igi_mat_{_inv.investment_id}",
+                            use_container_width=True, disabled=not _can_mature,
+                            type="primary" if _inv.status == "Maturity Action Required" else "secondary",
+                        ):
+                            _dlg_igi_maturity(_inv)
+                    with _act4:
+                        if st.button(
+                            "📤 Withdraw", key=f"igi_wd_{_inv.investment_id}",
+                            use_container_width=True, disabled=not _can_withdraw,
+                        ):
+                            _dlg_igi_withdraw(_inv)
+                    with _act5:
+                        _inv_id_display = _inv.investment_id
+                        st.caption(f"ID: `{_inv_id_display}`")
+                    if _inv.notes:
+                        st.caption(f"📝 {_inv.notes}")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SECTION B — CROWDFUNDING
+    # ═══════════════════════════════════════════════════════════════════════
+    else:
+
+        # ── Dialogs ───────────────────────────────────────────────────────
+
+        @st.dialog("➕ Add Crowdfunding Account")
+        def _dlg_cf_add():
+            _ca1, _ca2 = st.columns(2)
+            with _ca1:
+                _pn  = st.text_input("Platform Name *", key="cf_add_pn")
+                _an  = st.text_input("Account Name *", key="cf_add_an")
+                _cft = st.selectbox("Crowdfunding Type", CROWDFUNDING_TYPES, key="cf_add_type")
+                _ins = st.text_input("Institution *", key="cf_add_inst")
+                _cur = st.selectbox("Currency", CURRENCIES,
+                                    index=CURRENCIES.index("SAR") if "SAR" in CURRENCIES else 0,
+                                    key="cf_add_ccy")
+            with _ca2:
+                _cav = st.number_input("Current Account Value", min_value=0.0, step=100.0, format="%.2f", key="cf_add_cav")
+                _ac  = st.number_input("Available Cash", min_value=0.0, step=100.0, format="%.2f", key="cf_add_ac")
+                _ai  = st.number_input("Active Investments", min_value=0.0, step=100.0, format="%.2f", key="cf_add_ai")
+                _di  = st.number_input("Delayed Investments", min_value=0.0, step=100.0, format="%.2f", key="cf_add_di")
+                _def = st.number_input("Defaulted Investments", min_value=0.0, step=100.0, format="%.2f", key="cf_add_def")
+            _cf1, _cf2 = st.columns(2)
+            with _cf1:
+                _td = st.number_input("Total Deposits", min_value=0.0, step=100.0, format="%.2f", key="cf_add_td")
+                _tw = st.number_input("Total Withdrawals", min_value=0.0, step=100.0, format="%.2f", key="cf_add_tw")
+            with _cf2:
+                _tp = st.number_input("Total Profit Received", min_value=0.0, step=100.0, format="%.2f", key="cf_add_tp")
+                _tl = st.number_input("Total Losses", min_value=0.0, step=100.0, format="%.2f", key="cf_add_tl")
+            _lud  = st.date_input("Last Update Date", value=date.today(), key="cf_add_lud")
+            with st.expander("Sharia Metadata (optional)"):
+                _sstr  = st.selectbox("Sharia Structure", SHARIA_STRUCTURES, key="cf_add_sstr")
+                _sstat = st.selectbox("Compliance Status", SHARIA_COMPLIANCE_STATUSES,
+                                      index=SHARIA_COMPLIANCE_STATUSES.index("Not Applicable"),
+                                      key="cf_add_sstat")
+                _sn    = st.text_area("Sharia Notes", key="cf_add_sn", max_chars=300)
+            _notes = st.text_area("Notes", key="cf_add_notes", max_chars=500)
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save", type="primary", use_container_width=True, key="cf_add_save"):
+                    _acct, _err = add_cf_account(
+                        platform_name=_pn, account_name=_an, crowdfunding_type=_cft,
+                        institution=_ins, currency=_cur, current_account_value=_cav,
+                        available_cash=_ac, active_investments=_ai,
+                        delayed_investments=_di, defaulted_investments=_def,
+                        total_deposits=_td, total_withdrawals=_tw,
+                        total_profit_received=_tp, total_losses=_tl,
+                        last_update_date=_lud.isoformat(),
+                        notes=_notes, sharia_structure=_sstr,
+                        sharia_status=_sstat, sharia_notes=_sn,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast(f"Account added: {_acct.platform_name} – {_acct.account_name}", icon="✅")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key="cf_add_cancel"):
+                    st.rerun()
+
+        @st.dialog("✏️ Edit CF Account")
+        def _dlg_cf_edit(acct):
+            _ec1, _ec2 = st.columns(2)
+            with _ec1:
+                _pn  = st.text_input("Platform Name", value=acct.platform_name, key=f"cf_e_pn_{acct.account_id}")
+                _an  = st.text_input("Account Name", value=acct.account_name, key=f"cf_e_an_{acct.account_id}")
+                _ins = st.text_input("Institution", value=acct.institution, key=f"cf_e_ins_{acct.account_id}")
+                _cft = st.selectbox("Type", CROWDFUNDING_TYPES,
+                                    index=CROWDFUNDING_TYPES.index(acct.crowdfunding_type) if acct.crowdfunding_type in CROWDFUNDING_TYPES else 0,
+                                    key=f"cf_e_type_{acct.account_id}")
+            with _ec2:
+                _stat = st.selectbox("Status", CF_STATUSES,
+                                     index=CF_STATUSES.index(acct.status) if acct.status in CF_STATUSES else 0,
+                                     key=f"cf_e_stat_{acct.account_id}")
+                _td   = st.number_input("Total Deposits", value=float(acct.total_deposits), min_value=0.0, step=100.0, format="%.2f", key=f"cf_e_td_{acct.account_id}")
+                _tw   = st.number_input("Total Withdrawals", value=float(acct.total_withdrawals), min_value=0.0, step=100.0, format="%.2f", key=f"cf_e_tw_{acct.account_id}")
+                _tp   = st.number_input("Total Profit Received", value=float(acct.total_profit_received), min_value=0.0, step=100.0, format="%.2f", key=f"cf_e_tp_{acct.account_id}")
+                _tl   = st.number_input("Total Losses", value=float(acct.total_losses), min_value=0.0, step=100.0, format="%.2f", key=f"cf_e_tl_{acct.account_id}")
+            _notes = st.text_area("Notes", value=acct.notes, max_chars=500, key=f"cf_e_notes_{acct.account_id}")
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save", type="primary", use_container_width=True, key=f"cf_e_save_{acct.account_id}"):
+                    _, _err = edit_cf_account(
+                        acct.account_id, platform_name=_pn, account_name=_an,
+                        institution=_ins, crowdfunding_type=_cft, status=_stat,
+                        total_deposits=_td, total_withdrawals=_tw,
+                        total_profit_received=_tp, total_losses=_tl, notes=_notes,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast("Account updated", icon="💾")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"cf_e_cancel_{acct.account_id}"):
+                    st.rerun()
+
+        @st.dialog("💰 Add CF Transaction")
+        def _dlg_cf_txn(acct):
+            st.caption(f"**{acct.platform_name}** · {acct.account_name} · {acct.currency}")
+            _ct1, _ct2, _ct3 = st.columns(3)
+            with _ct1:
+                _tt  = st.selectbox("Type", CF_TRANSACTION_TYPES, key=f"cf_t_type_{acct.account_id}")
+            with _ct2:
+                _amt = st.number_input("Amount", min_value=0.01, step=100.0, format="%.2f", key=f"cf_t_amt_{acct.account_id}")
+            with _ct3:
+                _dt  = st.date_input("Date", value=date.today(), key=f"cf_t_dt_{acct.account_id}")
+            _notes = st.text_area("Notes", key=f"cf_t_notes_{acct.account_id}", max_chars=300)
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save", type="primary", use_container_width=True, key=f"cf_t_save_{acct.account_id}"):
+                    _, _err = record_cf_transaction(
+                        account_id=acct.account_id, txn_type=_tt,
+                        amount=_amt, txn_date=_dt.isoformat(), notes=_notes,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast(f"{_tt}: {_amt:,.2f} {acct.currency}", icon="✅")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"cf_t_cancel_{acct.account_id}"):
+                    st.rerun()
+
+        @st.dialog("📸 Update Snapshot")
+        def _dlg_cf_snap(acct):
+            st.caption(
+                f"**{acct.platform_name}** · {acct.account_name}  \n"
+                "Captures the current state. Historical snapshots are never overwritten."
+            )
+            _sd  = st.date_input("Snapshot Date", value=date.today(), key=f"cf_s_dt_{acct.account_id}")
+            _sc1, _sc2 = st.columns(2)
+            with _sc1:
+                _cav = st.number_input("Current Account Value", value=float(acct.current_account_value), min_value=0.0, step=100.0, format="%.2f", key=f"cf_s_cav_{acct.account_id}")
+                _ac  = st.number_input("Available Cash", value=float(acct.available_cash), min_value=0.0, step=100.0, format="%.2f", key=f"cf_s_ac_{acct.account_id}")
+                _ai  = st.number_input("Active Investments", value=float(acct.active_investments), min_value=0.0, step=100.0, format="%.2f", key=f"cf_s_ai_{acct.account_id}")
+            with _sc2:
+                _di  = st.number_input("Delayed Investments", value=float(acct.delayed_investments), min_value=0.0, step=100.0, format="%.2f", key=f"cf_s_di_{acct.account_id}")
+                _def = st.number_input("Defaulted Investments", value=float(acct.defaulted_investments), min_value=0.0, step=100.0, format="%.2f", key=f"cf_s_def_{acct.account_id}")
+            _notes = st.text_area("Notes", key=f"cf_s_notes_{acct.account_id}", max_chars=300)
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("💾 Save Snapshot", type="primary", use_container_width=True, key=f"cf_s_save_{acct.account_id}"):
+                    _, _err = add_cf_snapshot(
+                        account_id=acct.account_id,
+                        snapshot_date=_sd.isoformat(),
+                        current_account_value=_cav, available_cash=_ac,
+                        active_investments=_ai, delayed_investments=_di,
+                        defaulted_investments=_def, notes=_notes,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast("Snapshot saved — account position updated", icon="📸")
+                        st.rerun()
+            with _b2:
+                if st.button("Cancel", use_container_width=True, key=f"cf_s_cancel_{acct.account_id}"):
+                    st.rerun()
+
+        # ── Load data ─────────────────────────────────────────────────────
+        _cf_accounts  = load_cf_accounts()
+        _cf_txns      = load_cf_transactions()
+        _cf_snapshots = load_cf_snapshots()
+
+        # ── Summary metrics ────────────────────────────────────────────────
+        _cf_all    = list(_cf_accounts.values())
+        _cf_active = [a for a in _cf_all if a.status == "Active"]
+        _cf_total  = sum(a.current_account_value for a in _cf_active)
+        _cf_dep    = sum(a.total_deposits for a in _cf_active)
+        _cf_profit = sum(a.total_profit_received for a in _cf_active)
+        _cf_losses = sum(a.total_losses for a in _cf_active)
+
+        _csm1, _csm2, _csm3, _csm4, _csm5 = st.columns(5)
+        _csm1.metric("Accounts",          len(_cf_all))
+        _csm2.metric("Active",            len(_cf_active))
+        _csm3.metric("Total Value",       f"{_cf_total:,.0f}")
+        _csm4.metric("Total Deposits",    f"{_cf_dep:,.0f}")
+        _csm5.metric("Net Profit / Loss", f"{_cf_profit - _cf_losses:,.0f}")
+
+        # ── Add button + status filter ─────────────────────────────────────
+        _cf_c1, _cf_c2 = st.columns([3, 1])
+        with _cf_c1:
+            _cf_stat_filter = st.selectbox("Filter by Status", ["All"] + CF_STATUSES, key="cf_status_filter")
+        with _cf_c2:
+            if st.button("➕ Add Account", use_container_width=True, type="primary", key="cf_open_add"):
+                _dlg_cf_add()
+
+        # ── Account list ────────────────────────────────────────────────────
+        _filtered_cf = _cf_all
+        if _cf_stat_filter != "All":
+            _filtered_cf = [a for a in _cf_all if a.status == _cf_stat_filter]
+        _filtered_cf = sorted(_filtered_cf, key=lambda x: x.platform_name)
+
+        if not _cf_all:
+            st.info("No crowdfunding accounts yet. Click **➕ Add Account** to get started.", icon="💡")
+        elif not _filtered_cf:
+            st.info("No accounts match the current filter.", icon="🔍")
+        else:
+            for _acct in _filtered_cf:
+                _acct_txns  = [t for t in _cf_txns if t.account_id == _acct.account_id]
+                _acct_snaps = [s for s in _cf_snapshots if s.account_id == _acct.account_id]
+                _rec        = compute_cf_reconciliation(_acct.account_id)
+                _udiff      = _rec.get("unreconciled_diff", 0.0)
+                _udiff_icon = "✅" if abs(_udiff) < 0.01 else "⚠️"
+
+                with st.expander(
+                    f"**{_acct.platform_name}** · {_acct.account_name} · "
+                    f"{_acct.current_account_value:,.2f} {_acct.currency} · "
+                    f"{_acct.crowdfunding_type} · {_acct.status} · "
+                    f"{_udiff_icon} Recon diff: {_udiff:+,.2f}",
+                    expanded=False,
+                ):
+                    # Info row
+                    _rci1, _rci2, _rci3, _rci4 = st.columns(4)
+                    _rci1.caption(f"**Institution:** {_acct.institution}")
+                    _rci2.caption(f"**Available Cash:** {_acct.available_cash:,.2f}")
+                    _rci3.caption(f"**Delayed:** {_acct.delayed_investments:,.2f}")
+                    _rci4.caption(f"**Defaulted:** {_acct.defaulted_investments:,.2f}")
+                    if _acct.sharia_structure != "Not Specified":
+                        st.caption(f"🕌 Sharia: {_acct.sharia_structure} · {_acct.sharia_status}")
+
+                    # Metrics
+                    _cm = compute_cf_metrics(_acct.account_id)
+                    if _cm:
+                        _cmet1, _cmet2, _cmet3, _cmet4, _cmet5 = st.columns(5)
+                        _cmet1.metric("Net Deposits",    f"{_cm.get('net_deposits', 0):,.2f}")
+                        _cmet2.metric("Total Profit",    f"{_cm.get('total_profit_received', 0):,.2f}")
+                        _cmet3.metric("Total Losses",    f"{_cm.get('total_losses', 0):,.2f}")
+                        _cmet4.metric("Net P&L",         f"{_cm.get('net_profit_loss', 0):,.2f}")
+                        _cxirr = _cm.get("xirr")
+                        _cmet5.metric("XIRR", f"{_cxirr*100:.2f}%" if _cxirr is not None else "N/A")
+
+                    # Reconciliation detail
+                    with st.expander("📊 Reconciliation Detail", expanded=False):
+                        _rc1, _rc2, _rc3 = st.columns(3)
+                        _rc1.metric("Deposits",       f"{_rec.get('deposits', 0):,.2f}")
+                        _rc2.metric("Withdrawals",    f"{_rec.get('withdrawals', 0):,.2f}")
+                        _rc3.metric("Profits",        f"{_rec.get('profits', 0):,.2f}")
+                        _rc4, _rc5, _rc6 = st.columns(3)
+                        _rc4.metric("Losses",         f"{_rec.get('losses', 0):,.2f}")
+                        _rc5.metric("Expected Balance", f"{_rec.get('expected_balance', 0):,.2f}")
+                        _rc6.metric("Unreconciled Diff", f"{_udiff:+,.2f}")
+                        if abs(_udiff) > 0.01:
+                            st.caption(
+                                "Possible causes: auto-invest activity, platform timing, "
+                                "unrecorded transactions, fees, valuation changes, or data entry."
+                            )
+
+                    # Transaction mini-table
+                    if _acct_txns:
+                        with st.expander(f"💰 Transactions ({len(_acct_txns)})", expanded=False):
+                            _ct_rows = [
+                                {"Date": t.date, "Type": t.txn_type,
+                                 "Amount": t.amount, "Notes": t.notes}
+                                for t in sorted(_acct_txns, key=lambda x: x.date, reverse=True)
+                            ]
+                            st.dataframe(pd.DataFrame(_ct_rows), use_container_width=True, hide_index=True)
+
+                    # Snapshot history
+                    if _acct_snaps:
+                        with st.expander(f"📸 Snapshots ({len(_acct_snaps)})", expanded=False):
+                            _snap_rows = [
+                                {"Date": s.snapshot_date,
+                                 "Value": s.current_account_value,
+                                 "Cash": s.available_cash,
+                                 "Active": s.active_investments,
+                                 "Delayed": s.delayed_investments,
+                                 "Defaulted": s.defaulted_investments,
+                                 "Notes": s.notes}
+                                for s in sorted(_acct_snaps, key=lambda x: x.snapshot_date, reverse=True)
+                            ]
+                            st.dataframe(pd.DataFrame(_snap_rows), use_container_width=True, hide_index=True)
+
+                    # Action buttons
+                    _cact1, _cact2, _cact3 = st.columns(3)
+                    with _cact1:
+                        if st.button("💰 Add Txn", key=f"cf_atxn_{_acct.account_id}", use_container_width=True):
+                            _dlg_cf_txn(_acct)
+                    with _cact2:
+                        if st.button("📸 Snapshot", key=f"cf_snap_{_acct.account_id}", use_container_width=True):
+                            _dlg_cf_snap(_acct)
+                    with _cact3:
+                        if st.button("✏️ Edit", key=f"cf_edit_{_acct.account_id}", use_container_width=True):
+                            _dlg_cf_edit(_acct)
+                    if _acct.notes:
+                        st.caption(f"📝 {_acct.notes}")
+
+
 # ── Developer Mode: SAHMK Discovery Console ──────────────────────────────────
 
 def render_sahmk_discovery_tab() -> None:
@@ -7260,7 +7945,7 @@ render_global_header()
 (tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions, tab_cash,
  tab_decisions, tab_risk, tab_command,
  tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
- tab_test, tab_discovery) = st.tabs([
+ tab_test, tab_discovery, tab_alt_inv) = st.tabs([
     "💼 Holdings",
     "📊 Allocation",
     "📁 Closed Holdings",
@@ -7277,6 +7962,7 @@ render_global_header()
     "📂 Upload Filing",
     "🧪 Test Runner",
     "🔍 SAHMK Discovery",
+    "🏦 Alt Investments",
 ])
 
 _shared_bundle = _load_valuation_bundle(st.session_state.get("global_base_ccy", "SAR"))
@@ -7396,3 +8082,6 @@ with tab_test:
 
 with tab_discovery:
     render_sahmk_discovery_tab()
+
+with tab_alt_inv:
+    render_alt_investments_tab()
