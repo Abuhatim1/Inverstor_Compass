@@ -1,0 +1,663 @@
+Investor Compass – Alternative Investments Module (MVP)
+
+Objective
+
+Add a new investment module to Investor Compass for investments that are not adequately represented by the existing Holdings structure.
+
+The existing Holdings module shall continue to manage:
+
+* Stocks
+* ETFs
+* REITs
+* Precious Metals
+* Tradable Assets
+* Any asset tracked primarily by units and market prices
+
+The new module shall manage:
+
+* Investment Grade Income
+* Crowdfunding
+
+without modifying the existing Holdings transaction engine.
+
+All investments in this module must contribute to:
+
+* Total Portfolio Value
+* Asset Allocation
+* Performance Dashboard
+* Cash Flow Summary
+* Risk Summary
+
+⸻
+
+Module Name
+
+Alternative Investments
+
+⸻
+
+Main Screen
+
+Display a radio button at the top of the screen:
+
+Investment Type
+
+Options:
+
+* Investment Grade Income
+* Crowdfunding
+
+The screen shall dynamically display the relevant fields based on the selected option.
+
+⸻
+
+COMMON FIELDS
+
+The following fields are available for both investment types.
+
+Identification
+
+* Internal Investment ID (system generated)
+* Investment Name
+* Institution / Counterparty
+* Currency
+* Notes
+
+Shariah Metadata (Optional)
+
+Sharia Structure
+
+Options:
+
+* Not Specified
+* Unknown
+* Murabaha
+* Mudaraba
+* Musharaka
+* Ijara
+* Wakala
+* Sukuk Ijara
+* Sukuk Murabaha
+* Sukuk Wakala
+* Commodity Murabaha / Tawarruq
+* Hybrid Structure
+* Other
+
+Sharia Compliance Status
+
+Options:
+
+* Shariah Compliant
+* Conventional
+* Mixed / Unclear
+* Under Review
+* Not Applicable
+
+Sharia Notes
+
+Free text memo field.
+
+This information is informational only and must not affect calculations.
+
+⸻
+
+SECTION A – INVESTMENT GRADE INCOME
+
+Purpose
+
+Track relatively low-risk income-producing investments.
+
+Examples:
+
+* Islamic savings accounts
+* Profit-bearing accounts
+* Islamic deposits
+* Murabaha placements
+* Government Sukuk
+* Corporate Sukuk
+* Money Market Products
+
+⸻
+
+Investment Record
+
+Each record represents a single investment product.
+
+Required Fields
+
+* Investment Name
+* Institution
+* Currency
+* Principal Amount
+* Current Value
+* Start Date
+* Maturity Date
+* Expected Yield %
+* Notes
+
+⸻
+
+Profit Payment Structure
+
+Required field.
+
+Options:
+
+* At Maturity
+* Periodic
+* Mixed
+
+At Maturity
+
+Profit expected only at maturity.
+
+Periodic
+
+Profit may be received throughout the investment life.
+
+Mixed
+
+Periodic profit plus maturity profit.
+
+⸻
+
+Liquidity Type
+
+Options:
+
+* Daily
+* Monthly
+* Locked Until Maturity
+* Other
+
+⸻
+
+Status
+
+Options:
+
+* Pending Funding
+* Active
+* Maturity Action Required
+* Closed
+
+⸻
+
+Maturity Instruction
+
+Selected when creating the investment.
+
+Options:
+
+* Principal Returned
+* Reinvest Principal
+* Reinvest Principal + Profit
+* Manual Decision At Maturity
+
+This represents the intended action only.
+
+No action shall occur automatically.
+
+⸻
+
+Investment Grade Income Transactions
+
+Supported transaction types:
+
+* Initial Investment
+* Additional Investment
+* Profit Received
+* Principal Returned
+* Withdrawal
+* Manual Adjustment
+
+All transactions must be stored historically.
+
+⸻
+
+Maturity Processing
+
+When maturity date is reached:
+
+Status becomes:
+
+Maturity Action Required
+
+The investment appears in an Action Required section.
+
+No automatic processing shall occur.
+
+⸻
+
+Maturity Confirmation
+
+User enters:
+
+* Actual Total Amount Received
+* Actual Maturity Date
+* Notes
+
+User does NOT enter:
+
+* Principal Returned
+* Profit Received
+
+The system calculates these automatically.
+
+Calculation Rules
+
+If Actual Total Amount Received >= Principal Outstanding:
+
+Principal Returned =
+Principal Outstanding
+
+Profit Received =
+Actual Total Amount Received − Principal Outstanding
+
+If Actual Total Amount Received < Principal Outstanding:
+
+Principal Returned =
+Actual Total Amount Received
+
+Profit Received =
+0
+
+Principal Loss =
+Principal Outstanding − Actual Total Amount Received
+
+Expected profit must never be treated as actual profit.
+
+Actual values always override expected values.
+
+⸻
+
+Maturity Actions
+
+Principal Returned
+
+System shall:
+
+* Record principal returned
+* Record profit received
+* Close investment
+* Move to Closed Investments
+
+⸻
+
+Reinvest Principal
+
+System shall:
+
+* Close investment
+* Create new draft investment
+* Pre-populate principal amount only
+* Require user confirmation of:
+    * Investment Name
+    * Institution
+    * Yield
+    * Start Date
+    * Maturity Date
+
+No automatic cloning of terms.
+
+⸻
+
+Reinvest Principal + Profit
+
+System shall:
+
+* Close investment
+* Create new draft investment
+* Pre-populate:
+    Principal + Actual Profit
+* Require user confirmation of all new terms
+
+No automatic cloning of terms.
+
+⸻
+
+Manual Decision At Maturity
+
+System shall:
+
+* Close nothing automatically
+* Require user to manually select final action
+
+⸻
+
+Early Withdrawal
+
+MVP supports Full Early Withdrawal only.
+
+Partial withdrawals are not supported.
+
+⸻
+
+Required Inputs
+
+* Withdrawal Date
+* Actual Total Amount Received
+* Early Withdrawal Cost
+* Notes
+
+⸻
+
+Calculation
+
+Use the same logic as maturity processing.
+
+System automatically determines:
+
+* Principal Returned
+* Profit Received
+* Principal Loss
+
+⸻
+
+Result
+
+System shall:
+
+* Override any previous maturity instruction
+* Close investment
+* Move to Closed Investments
+* Preserve complete history
+
+⸻
+
+Reinvestment Chain Tracking
+
+Each investment shall support:
+
+* Parent Investment ID
+* Child Investment ID
+
+Purpose:
+
+Track rollovers and reinvestments.
+
+Example:
+
+Investment A
+→ Investment B
+→ Investment C
+
+Provide:
+
+View Reinvestment History
+
+showing the complete chain.
+
+Investment IDs must never be reused.
+
+Closed investments must never be deleted.
+
+⸻
+
+Performance Metrics
+
+Calculate:
+
+* Current Value
+* Total Profit Received
+* Unrealized Profit
+* Total Return
+* XIRR
+* Portfolio Weight
+
+XIRR must use actual cash flows only.
+
+Expected profit must never be used in calculations.
+
+⸻
+
+SECTION B – CROWDFUNDING
+
+Purpose
+
+Track crowdfunding platform investments.
+
+Crowdfunding shall be account-based.
+
+It shall not require tracking every individual financing deal.
+
+⸻
+
+Crowdfunding Types
+
+Options:
+
+* Debt Crowdfunding
+* Equity Crowdfunding
+
+⸻
+
+Crowdfunding Record
+
+Each record represents one platform account.
+
+Examples:
+
+* Platform Account A
+* Platform Account B
+* Real Estate Crowdfunding Account
+* SME Financing Account
+
+⸻
+
+Required Fields
+
+* Platform Name
+* Account Name
+* Crowdfunding Type
+* Institution
+* Currency
+* Current Account Value
+* Available Cash
+* Active Investments
+* Delayed Investments
+* Defaulted Investments
+* Total Deposits
+* Total Withdrawals
+* Total Profit Received
+* Total Losses
+* Last Update Date
+* Notes
+
+⸻
+
+Status
+
+Options:
+
+* Active
+* Closed
+* Suspended
+
+⸻
+
+Crowdfunding Transactions
+
+All cash movements must be recorded individually.
+
+Supported transaction types:
+
+* Deposit
+* Withdrawal
+* Profit Received
+* Recovery Received
+* Capital Returned
+* Loss Write-Off
+* Fee
+* Tax
+* Manual Adjustment
+
+⸻
+
+Important Rule
+
+The system SHALL NOT require tracking:
+
+* Individual Murabaha deals
+* Individual financing contracts
+* Individual invoice financing transactions
+* Platform auto-invest activity
+* Internal reinvestment activity
+
+Crowdfunding is account-based.
+
+Only account-level cash flows and account snapshots are tracked.
+
+⸻
+
+Snapshot Updates
+
+Provide action:
+
+Update Snapshot
+
+Purpose:
+
+Capture the current state of the crowdfunding account.
+
+⸻
+
+Snapshot Fields
+
+* Snapshot Date
+* Current Account Value
+* Available Cash
+* Active Investments
+* Delayed Investments
+* Defaulted Investments
+* Notes
+
+Each snapshot must be stored historically.
+
+Latest snapshot updates the displayed account position.
+
+⸻
+
+Reconciliation
+
+Crowdfunding shall support reconciliation between:
+
+* Deposits
+* Withdrawals
+* Profits
+* Losses
+* Current Account Value
+
+Show:
+
+Unreconciled Difference
+
+Do not automatically treat differences as errors.
+
+Possible causes:
+
+* Auto-invest activity
+* Platform timing differences
+* Unrecorded transactions
+* Fees
+* Valuation changes
+* Data entry mistakes
+
+⸻
+
+Crowdfunding Performance Metrics
+
+Calculate:
+
+* Current Account Value
+* Net Deposits
+* Total Withdrawals
+* Total Profit Received
+* Total Losses
+* Net Profit / Loss
+* XIRR
+* Delayed Amount
+* Defaulted Amount
+* Available Cash
+* Active Investments
+* Portfolio Weight
+
+⸻
+
+Manual Adjustments
+
+Supported for both investment types.
+
+Required fields:
+
+* Adjustment Date
+* Adjustment Amount
+* Adjustment Reason
+
+System shall automatically record:
+
+* Before Value
+* After Value
+* Timestamp
+
+Manual adjustment history must be immutable.
+
+⸻
+
+Institution / Counterparty Tracking
+
+Institution is mandatory.
+
+Examples:
+
+* Al Rajhi Bank
+* Alinma Bank
+* Riyad Bank
+* Crowdfunding Platform
+* Sukuk Issuer
+
+Purpose:
+
+* Risk concentration reporting
+* Exposure analysis
+* Diversification reporting
+
+⸻
+
+Currency
+
+Currency is mandatory.
+
+All transactions for an investment/account must use the same currency.
+
+Portfolio reporting shall use the application’s existing currency conversion logic.
+
+⸻
+
+MVP Restrictions
+
+Do NOT build:
+
+* Individual crowdfunding deal tracking
+* Partial withdrawals
+* Advanced fee models
+* Tax engine
+* Automated platform APIs
+* Notification escalation workflows
+* Institutional accounting features
+* Loan management functionality
+* Credit scoring engine
+
+The goal is a practical investor-focused portfolio tracking system, not a banking system.
+
+⸻
+
+Data Integrity Rules
+
+* Internal IDs are system generated
+* IDs must never be reused
+* Closed investments remain permanently available in history
+* Deleted records must not be recoverable through ID reuse
+* All transactions remain auditable
+* Historical snapshots must never be overwritten
+* Actual values always override expected values

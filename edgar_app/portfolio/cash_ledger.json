@@ -22,5 +22,41 @@
     "linked_ticker": "2222.SE",
     "notes": "Xxxxxxxxxxxxxxxxx ",
     "recorded_at": "2026-06-03T14:34:27.166497"
+  },
+  {
+    "entry_id": "c49d61b4-3e8",
+    "date": "2026-06-03",
+    "account_id": "488be063",
+    "transaction_type": "FEE",
+    "currency": "SAR",
+    "amount": 1000.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "2222.SE",
+    "notes": "[Deleted TXN_fbf8addf] Xxxxxxxxxxxxxxxxx ",
+    "recorded_at": "2026-06-03T14:57:52.689923"
+  },
+  {
+    "entry_id": "7b3f88f4-504",
+    "date": "2026-06-03",
+    "account_id": "488be063",
+    "transaction_type": "FEE",
+    "currency": "SAR",
+    "amount": 2000.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "[Deleted TXN_4ee390e8] Testing1 zzxxvf",
+    "recorded_at": "2026-06-03T14:58:09.339743"
+  },
+  {
+    "entry_id": "70e52cf6-a80",
+    "date": "2026-06-03",
+    "account_id": "c2d0a7c6",
+    "transaction_type": "INITIAL_BALANCE",
+    "currency": "SAR",
+    "amount": 700000.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Opening balance",
+    "recorded_at": "2026-06-03T15:20:29.831773"
   }
 ]
