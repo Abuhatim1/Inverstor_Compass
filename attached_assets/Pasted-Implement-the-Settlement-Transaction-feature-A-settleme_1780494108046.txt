@@ -1,0 +1,108 @@
+Implement the Settlement Transaction feature.
+
+A settlement records a financial event that is not a buy or sell — dividends, fees, taxes, zakat, purification payments, or corrections. Settlements affect the investor’s real return but never change share quantity, cost basis, avg cost, or FIFO lots.
+
+BACKEND
+
+	1.	Add three fields to the Transaction dataclass in portfolio/holdings.py. All must have defaults so existing data loads unchanged:
+
+settlement_amount: float = 0.0 (positive = income, negative = expense)
+settlement_category: str = “” (from the categories below)
+settlement_currency: str = “” (ISO currency code)
+
+	2.	Add this constant in holdings.py:
+
+SETTLEMENT_CATEGORIES = [“Dividend”, “Fee”, “Tax”, “Zakat”, “Purification”, “Adjustment”]
+
+	3.	Create record_settlement() in holdings.py. Do NOT modify record_transaction(). Signature:
+
+def record_settlement(amount: float, category: str, currency: str, settlement_date: str | None = None, notes: str = “”, asset_id: str = “”, account_id: str = “”) -> tuple[Transaction, str | None]:
+
+Validation: amount != 0, category in SETTLEMENT_CATEGORIES, len(notes) >= 10, asset_id exists if provided, account_id exists and is active if provided.
+
+On success do three things in order:
+
+	•	Create a Transaction with side=“SETTLEMENT”, quantity=0.0, price=0.0, the three settlement fields populated, and transaction_id in the existing TXN_{uuid8} format. If asset_id is given, look up the holding and set ticker from it. If no asset_id, set ticker=””. Append to transactions and save.
+	•	If account_id is provided, call append_cash_entry() from portfolio/cash_ledger.py with this type mapping: Dividend→DIVIDEND, Fee→FEE, Tax→FEE, Zakat→FEE, Purification→FEE, Adjustment→OTHER. Set linked_ticker to the holding’s ticker if asset-linked.
+	•	If account_id is provided, call update_account_cash() to adjust the balance (positive amount adds, negative subtracts).
+
+Return (transaction, None) on success or (None, error_message) on failure.
+
+	4.	Create edit_settlement() in holdings.py:
+
+def edit_settlement(transaction_id: str, amount: float | None = None, category: str | None = None, currency: str | None = None, settlement_date: str | None = None, notes: str | None = None, asset_id: str | None = None, account_id: str | None = None) -> tuple[Transaction, str | None]:
+
+Find the transaction, verify side==“SETTLEMENT”. Reverse old cash effects (subtract old amount from old account). Apply new values for any field that is not None. Apply new cash effects. Save.
+
+	5.	Create delete_settlement() in holdings.py:
+
+def delete_settlement(transaction_id: str) -> str | None:
+
+Find the transaction, verify side==“SETTLEMENT”. Reverse cash balance if account was linked. Remove from transaction list. Save. Return None on success, error string on failure.
+
+	6.	Export record_settlement, edit_settlement, delete_settlement, and SETTLEMENT_CATEGORIES from portfolio/init.py.
+	7.	Verify the FIFO engine in closed_holdings.py naturally ignores side=“SETTLEMENT”. It should — it only processes BUY/SELL. Do not modify closed_holdings.py.
+
+UI
+
+	8.	Add a Settlement button to the Holdings tab top action bar as the fourth button:
+
+[ ➕ Add New Position ] [ ➕ Buy More ] [ 📤 Sell / Close ] [ 📋 Settlement ]
+
+Use default button style, not primary. Disabled only when there are zero holdings AND zero accounts.
+
+	9.	Add a Settle button to the per-row action bar between Sell and Edit:
+
+[ ➕ Buy ] [ 📤 Sell ] [ 📋 Settle ] [ ✏️ Edit ] [ 🗑️ Del ]
+
+	10.	Create the Settlement dialog:
+
+@st.dialog(“📋 Record Settlement”, width=“large”)
+
+Layout:
+
+	•	Radio selector: “Specific Holding” / “Portfolio Level”. Hidden when opened from per-row (holding is pre-selected).
+	•	Holding picker dropdown (only when Specific Holding selected). Shows “{ticker} — {company_name} ({quantity} shares)”. Below it display read-only: asset_id, asset_type, currency.
+	•	Date picker, default today.
+	•	Amount number input (step=0.01, format=”%.2f”). Below it show dynamic label: positive → “Income / Credit”, negative → “Expense / Debit”.
+	•	Currency dropdown from CURRENCIES. Default to holding’s currency if asset-linked, otherwise base portfolio currency.
+	•	Category dropdown from SETTLEMENT_CATEGORIES. Default “Adjustment”.
+	•	Account dropdown filtered by selected currency. First option “— no account —”. If account selected, show current cash balance for reference.
+	•	Notes text area. Show character count. Validate minimum 10 characters.
+	•	Divider.
+	•	Impact Preview section (read-only, updates dynamically): “This settlement will:” — show what applies: Always: “Record {±amount} {currency} as {category}”. If account: “Credit/Debit {account_name} {±amount} {currency}”. If holding: “Count toward {ticker} holding return”. “This settlement will NOT:” — always show all three: “Change cost basis or average cost”, “Change FIFO realized P&L”, “Change share quantity”.
+	•	Buttons: [ ✅ Save Settlement ] (primary) and [ Cancel ]
+
+On save call record_settlement(), show st.toast on success, st.rerun(). Show st.error on failure.
+
+	11.	Update render_transactions_tab() in app.py:
+
+Add a fourth filter column for Type with options: [“All”, “Trades”, “Settlements”]. “Trades” filters to side in (“BUY”, “SELL”). “Settlements” filters to side == “SETTLEMENT”.
+
+For settlement rows in the table, display: Side column: “SETTLEMENT”. Detail column: “{settlement_amount:+,.2f} {settlement_currency}” instead of “qty × price”. Add a Category column: shows settlement_category for settlements, “—” for trades. Ticker column: show ticker if asset-linked, “Portfolio” if not.
+
+Add two more summary metrics: “Settlements” (count) and “Net Settlement” (sum of settlement_amount).
+
+TESTS
+
+	12.	Add a new test group “SETTLE” in dev_test_runner.py with these 8 tests:
+
+SETTLE-01: Record asset-level settlement (Dividend, +500, linked to a test holding). Verify transaction exists in list with side=“SETTLEMENT”, correct amount, category, currency, and asset_id.
+
+SETTLE-02: Record portfolio-level settlement (Zakat, -1000, no asset_id). Verify asset_id==”” and ticker==””.
+
+SETTLE-03: FIFO ignores settlements. Create a holding via BUY transaction, record a settlement on it, then call _build_fifo_queue(). Queue must contain only the BUY. Settlement must not appear.
+
+SETTLE-04: Settlement does not change holding. Record a settlement on a holding. Reload holdings. Quantity and avg_cost must be identical to before.
+
+SETTLE-05: Reject notes shorter than 10 characters. Expect error message.
+
+SETTLE-06: Reject amount = 0. Expect error message.
+
+SETTLE-07: Reject invalid category “InvalidCat”. Expect error message.
+
+SETTLE-08: Cash ledger type mapping. Record a Dividend settlement with an account. Verify CashEntry has transaction_type=“DIVIDEND”. Record a Zakat settlement. Verify CashEntry has transaction_type=“FEE”.
+
+Use temp files for all test data. Follow the existing test pattern: each test returns (expected, actual, passed_bool). Register with results.append(_run(“SETTLE-01”, “description”, fn)).
+
+After completing everything, run the full test suite and confirm all tests pass including the 8 new ones.
