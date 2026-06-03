@@ -243,18 +243,18 @@ SETTLEMENT_CATEGORIES: list[str] = [
     "Fee",
     "Tax",
     "Zakat",
-    "Purification",
+    "Islamic Purification",
     "Adjustment",
 ]
 
 # Cash-ledger type mapping for each settlement category
 _SETTLE_LEDGER_TYPE: dict[str, str] = {
-    "Dividend":    "DIVIDEND",
-    "Fee":         "FEE",
-    "Tax":         "FEE",
-    "Zakat":       "FEE",
-    "Purification":"FEE",
-    "Adjustment":  "OTHER",
+    "Dividend":           "DIVIDEND",
+    "Fee":                "FEE",
+    "Tax":                "FEE",
+    "Zakat":              "FEE",
+    "Islamic Purification":"FEE",
+    "Adjustment":         "OTHER",
 }
 
 

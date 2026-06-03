@@ -3693,15 +3693,38 @@ def render_holdings_tab(bundle: dict) -> None:
                 _si2.caption(f"**Type:** {getattr(_s_holding, 'asset_type', 'Stock')}")
                 _si3.caption(f"**Currency:** {getattr(_s_holding, 'currency', 'USD')}")
 
+            # ── Category (first) ──────────────────────────────────────────────
+            _s_cat = st.selectbox(
+                "Category", SETTLEMENT_CATEGORIES,
+                index=SETTLEMENT_CATEGORIES.index("Dividend"),
+                key="settle_cat",
+            )
+
+            # ── Income / Expense direction — auto-locked by category ───────────
+            _INCOME_CATS  = {"Dividend"}
+            _EXPENSE_CATS = {"Fee", "Tax", "Zakat", "Islamic Purification"}
+            if _s_cat in _INCOME_CATS:
+                _s_direction = "Income"
+                st.info("✅ **Income / Credit** — auto-set for this category", icon="ℹ️")
+            elif _s_cat in _EXPENSE_CATS:
+                _s_direction = "Expense"
+                st.info("💸 **Expense / Debit** — auto-set for this category", icon="ℹ️")
+            else:
+                _s_direction = st.radio(
+                    "Direction", ["Income", "Expense"],
+                    horizontal=True,
+                    key="settle_direction",
+                )
+
             # ── Date / Amount / Currency ───────────────────────────────────────
             _sd1, _sd2, _sd3 = st.columns(3)
             with _sd1:
                 _s_date = st.date_input("Date", value=date.today(), key="settle_date")
             with _sd2:
                 _s_amount = st.number_input(
-                    "Amount", value=0.0, step=0.01, format="%.2f",
+                    "Amount", value=0.0, min_value=0.0, step=0.01, format="%.2f",
                     key="settle_amount",
-                    help="Positive = income / credit.  Negative = expense / debit.",
+                    help="Enter the absolute amount — direction is determined by the category above.",
                 )
             with _sd3:
                 _s_def_ccy = (
@@ -3711,17 +3734,9 @@ def render_holdings_tab(bundle: dict) -> None:
                 _s_ccy = st.selectbox(
                     "Currency", CURRENCIES, index=_s_ccy_idx, key="settle_ccy"
                 )
-            if _s_amount > 0:
-                st.caption("✅ Income / Credit")
-            elif _s_amount < 0:
-                st.caption("💸 Expense / Debit")
 
-            # ── Category ──────────────────────────────────────────────────────
-            _s_cat = st.selectbox(
-                "Category", SETTLEMENT_CATEGORIES,
-                index=SETTLEMENT_CATEGORIES.index("Dividend"),
-                key="settle_cat",
-            )
+            # Final signed amount (negative for expenses)
+            _s_signed_amount = _s_amount if _s_direction == "Income" else -_s_amount
 
             # ── Account ───────────────────────────────────────────────────────
             _s_acct_sorted = sorted(
@@ -3760,12 +3775,12 @@ def render_holdings_tab(bundle: dict) -> None:
             _ip1, _ip2 = st.columns(2)
             with _ip1:
                 st.markdown("**This settlement WILL:**")
-                _sgn = "+" if _s_amount >= 0 else ""
+                _sgn = "+" if _s_signed_amount >= 0 else ""
                 st.markdown(
-                    f"- Record **{_sgn}{_s_amount:,.2f} {_s_ccy}** as **{_s_cat}**"
+                    f"- Record **{_sgn}{_s_signed_amount:,.2f} {_s_ccy}** as **{_s_cat}**"
                 )
                 if _s_acct_id:
-                    _dir = "Credit" if _s_amount >= 0 else "Debit"
+                    _dir = "Credit" if _s_signed_amount >= 0 else "Debit"
                     _acct_disp = _s_acct_labels[_s_acct_idx].split("  ⚠️")[0]
                     st.markdown(f"- {_dir} account **{_acct_disp}**")
                 if _s_asset_id:
@@ -3791,7 +3806,7 @@ def render_holdings_tab(bundle: dict) -> None:
                     use_container_width=True, key="settle_save"
                 ):
                     _s_txn, _s_err = record_settlement(
-                        amount=_s_amount,
+                        amount=_s_signed_amount,
                         category=_s_cat,
                         currency=_s_ccy,
                         settlement_date=_s_date.isoformat(),
@@ -3802,10 +3817,10 @@ def render_holdings_tab(bundle: dict) -> None:
                     if _s_err:
                         st.error(_s_err)
                     else:
-                        _sgn2 = "+" if _s_amount >= 0 else ""
+                        _sgn2 = "+" if _s_signed_amount >= 0 else ""
                         st.toast(
                             f"Settlement recorded: {_s_cat} "
-                            f"{_sgn2}{_s_amount:,.2f} {_s_ccy}",
+                            f"{_sgn2}{_s_signed_amount:,.2f} {_s_ccy}",
                             icon="✅",
                         )
                         st.rerun()
