@@ -109,26 +109,26 @@
     "child_investment_id": "",
     "created_at": "2026-06-03T20:52:31Z"
   },
-  "d827a58b": {
-    "investment_id": "d827a58b",
+  "14967c9a": {
+    "investment_id": "14967c9a",
     "investment_name": "Test",
     "institution": "Test",
     "currency": "SAR",
-    "principal_amount": 300000.0,
-    "current_value": 350000.0,
-    "start_date": "2025-06-04",
-    "maturity_date": "2026-12-01",
+    "principal_amount": 40000.0,
+    "current_value": 40000.0,
+    "start_date": "2026-06-01",
+    "maturity_date": "2026-06-04",
     "expected_yield_pct": 3.0,
-    "profit_payment_structure": "Periodic",
-    "liquidity_type": "Monthly",
+    "profit_payment_structure": "At Maturity",
+    "liquidity_type": "Locked Until Maturity",
     "status": "Pending Funding",
-    "maturity_instruction": "Reinvest Principal + Profit",
+    "maturity_instruction": "Principal Returned",
     "notes": "",
     "sharia_structure": "Not Specified",
     "sharia_status": "Not Applicable",
     "sharia_notes": "",
     "parent_investment_id": "",
     "child_investment_id": "",
-    "created_at": "2026-06-04T17:00:20Z"
+    "created_at": "2026-06-04T18:41:19Z"
   }
 }

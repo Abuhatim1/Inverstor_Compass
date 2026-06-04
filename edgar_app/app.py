@@ -7939,7 +7939,7 @@ def render_alt_investments_tab() -> None:
 
                     # Action buttons
                     _can_mature   = _inv.status in ("Maturity Action Required", "Active")
-                    _can_withdraw = _inv.status not in ("Closed", "Pending Funding")
+                    _can_withdraw = _inv.status != "Closed"
                     _can_delete   = _inv.status == "Pending Funding"
                     _act1, _act2, _act3, _act4, _act5 = st.columns(5)
                     with _act1:
