@@ -75,7 +75,7 @@
     "start_date": "2026-06-03",
     "maturity_date": "2026-06-23",
     "expected_yield_pct": 4.2,
-    "profit_payment_structure": "Periodic",
+    "profit_payment_structure": "At Maturity",
     "liquidity_type": "Monthly",
     "status": "Pending Funding",
     "maturity_instruction": "Reinvest Principal + Profit",
