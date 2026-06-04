@@ -7169,7 +7169,7 @@ def render_alt_investments_tab() -> None:
         MATURITY_INSTRUCTIONS, IGI_TRANSACTION_TYPES,
         load_igi_investments, load_igi_transactions,
         add_igi_investment, edit_igi_investment, delete_igi_investment,
-        record_igi_transaction, delete_igi_transaction, edit_igi_transaction,
+        record_igi_transaction, edit_igi_transaction,
         process_maturity, process_early_withdrawal,
         compute_igi_metrics,
     )
@@ -7401,29 +7401,6 @@ def render_alt_investments_tab() -> None:
             with _eb2:
                 if st.button("Cancel", use_container_width=True,
                              key=f"igi_et_cancel_{txn.txn_id}"):
-                    st.rerun()
-
-        @st.dialog("🗑️ Delete Transaction")
-        def _dlg_igi_del_txn(txn):
-            st.warning(
-                f"Delete **{txn.txn_type}** · {txn.date} · "
-                f"**{txn.amount:,.2f}**?  \nThis cannot be undone.",
-                icon="⚠️",
-            )
-            _db1, _db2 = st.columns(2)
-            with _db1:
-                if st.button("🗑️ Confirm Delete", type="primary",
-                             use_container_width=True,
-                             key=f"igi_del_confirm_{txn.txn_id}"):
-                    _ok, _err = delete_igi_transaction(txn_id=txn.txn_id)
-                    if _err:
-                        st.error(_err)
-                    else:
-                        st.toast("Transaction deleted", icon="🗑️")
-                        st.rerun()
-            with _db2:
-                if st.button("Cancel", use_container_width=True,
-                             key=f"igi_del_cancel_{txn.txn_id}"):
                     st.rerun()
 
         @st.dialog("🔔 Process Maturity")
@@ -7908,32 +7885,25 @@ def render_alt_investments_tab() -> None:
                             use_container_width=True,
                             hide_index=True,
                         )
-                        with st.expander("✏️ Edit / 🗑️ Delete a transaction"):
+                        with st.expander("✏️ Edit a transaction"):
                             _txn_labels = [
                                 f"{t.date}  ·  {t.txn_type}  ·  {t.amount:,.2f}"
                                 for t in _sorted_txns
                             ]
                             _sel_idx = st.selectbox(
-                                "Select transaction to act on",
+                                "Select transaction to edit",
                                 options=range(len(_sorted_txns)),
                                 format_func=lambda i: _txn_labels[i],
                                 key=f"igi_sel_txn_{_inv.investment_id}",
                             )
                             if _sel_idx is not None:
                                 _sel_t = _sorted_txns[_sel_idx]
-                                _ea, _eb = st.columns(2)
-                                if _ea.button(
+                                if st.button(
                                     "✏️ Edit selected",
                                     use_container_width=True,
                                     key=f"igi_tedit_{_sel_t.txn_id}",
                                 ):
                                     _dlg_igi_edit_txn(_sel_t)
-                                if _eb.button(
-                                    "🗑️ Delete selected",
-                                    use_container_width=True,
-                                    key=f"igi_tdel_{_sel_t.txn_id}",
-                                ):
-                                    _dlg_igi_del_txn(_sel_t)
                     else:
                         st.caption("_No transactions recorded yet._")
 
