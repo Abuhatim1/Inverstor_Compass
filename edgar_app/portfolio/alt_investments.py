@@ -635,6 +635,43 @@ def compute_igi_metrics(
 
     xirr = compute_xirr(xirr_flows)
 
+    # ── Yield schedule (projection from expected_yield_pct) ───────────────
+    # NOTE: expected_yield_pct is used ONLY here for planning/scheduling
+    # purposes. It never touches P&L accounting — that stays cash-flow-only.
+    _projected_profit: float | None = None
+    _accrued_to_date:  float        = 0.0
+
+    if inv.status != "Pending Funding" and inv.start_date and inv.maturity_date:
+        _start    = _date.fromisoformat(inv.start_date)
+        _maturity = _date.fromisoformat(inv.maturity_date)
+        _tenor    = max(0, (_maturity - _start).days)
+
+        if _tenor > 0:
+            _projected_profit = round(
+                inv.principal_amount * (inv.expected_yield_pct / 100) * (_tenor / 365), 2
+            )
+
+            if inv.status == "Closed":
+                _close_dates = [t.date for t in txns if t.txn_type == "Principal Returned"]
+                _close_iso   = max(_close_dates) if _close_dates else inv.maturity_date
+                _end         = min(_date.fromisoformat(_close_iso), _maturity)
+            else:
+                _end = min(_date.today(), _maturity)
+
+            _elapsed         = max(0, (_end - _start).days)
+            _accrued_to_date = round(
+                inv.principal_amount * (inv.expected_yield_pct / 100) * (_elapsed / 365), 2
+            )
+
+    _outstanding = (
+        round(_projected_profit - total_profit_received, 2)
+        if _projected_profit is not None else None
+    )
+    _collection_rate = (
+        round(total_profit_received / _accrued_to_date * 100, 1)
+        if _accrued_to_date > 0 else None
+    )
+
     return {
         "investment_id":         investment_id,
         "current_value":         current_value,
@@ -644,4 +681,9 @@ def compute_igi_metrics(
         "unrealized_profit":     unrealized_profit,
         "total_return":          total_return,
         "xirr":                  xirr,
+        # Yield schedule (projection layer — not accounting)
+        "projected_total_profit": _projected_profit,
+        "accrued_to_date":        _accrued_to_date,
+        "outstanding":            _outstanding,
+        "collection_rate_pct":    _collection_rate,
     }

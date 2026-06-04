@@ -7666,6 +7666,50 @@ def render_alt_investments_tab() -> None:
                         _xirr_val = _m.get("xirr")
                         _met4.metric("XIRR", f"{_xirr_val*100:.2f}%" if _xirr_val is not None else "N/A")
 
+                        # ── Yield Schedule (projection — not accounting) ──────
+                        _proj = _m.get("projected_total_profit")
+                        if _proj is not None:
+                            _acc  = _m.get("accrued_to_date", 0.0)
+                            _recv = _m.get("total_profit_received", 0.0)
+                            _out  = _m.get("outstanding", 0.0) or 0.0
+                            _ccy  = _inv.currency
+                            st.caption(
+                                "📈 **Yield Schedule** — projected from expected rate · "
+                                "*informational only, not accounting*"
+                            )
+                            _ys1, _ys2, _ys3, _ys4 = st.columns(4)
+                            _ys1.metric(
+                                "Projected Total",
+                                f"{_proj:,.2f} {_ccy}",
+                            )
+                            _ys2.metric(
+                                "Accrued to Date",
+                                f"{_acc:,.2f} {_ccy}",
+                            )
+                            _delta_vs_acc = (
+                                f"{_recv - _acc:+,.2f} vs accrued"
+                                if _acc > 0 else None
+                            )
+                            _ys3.metric(
+                                "Received",
+                                f"{_recv:,.2f} {_ccy}",
+                                delta=_delta_vs_acc,
+                            )
+                            _ys4.metric(
+                                "Outstanding",
+                                f"{_out:,.2f} {_ccy}",
+                            )
+                            _prog_val = min(1.0, _recv / _proj) if _proj > 0 else 0.0
+                            _prog_pct = _recv / _proj * 100 if _proj > 0 else 0.0
+                            _acc_pct  = _acc  / _proj * 100 if _proj > 0 else 0.0
+                            st.progress(
+                                _prog_val,
+                                text=(
+                                    f"{_prog_pct:.0f}% of projected total received"
+                                    + (f" · {_acc_pct:.0f}% accrued to date" if _acc > 0 else "")
+                                ),
+                            )
+
                     # Transaction list — always shown, empty state if none
                     st.caption(f"**Transactions** ({len(_inv_txns)})")
                     if _inv_txns:
