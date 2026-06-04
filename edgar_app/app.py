@@ -7619,7 +7619,15 @@ def render_alt_investments_tab() -> None:
             import plotly.express as px
             from collections import defaultdict
 
-            _VIVID = px.colors.qualitative.Vivid
+            _CALM = [
+                "#4E8FA8",  # muted steel blue
+                "#6A9E76",  # muted sage green
+                "#B87A56",  # muted terracotta
+                "#7B7BAB",  # muted slate purple
+                "#A89B50",  # muted warm gold
+                "#5A9E96",  # muted teal
+                "#8A7060",  # muted brown
+            ]
 
             # Monthly buckets by institution (thousands)
             _mdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -7640,7 +7648,7 @@ def render_alt_investments_tab() -> None:
 
             _ladder_fig = go.Figure()
             for _idx, _inst in enumerate(_inst_order):
-                _clr    = _VIVID[_idx % len(_VIVID)]
+                _clr    = _CALM[_idx % len(_CALM)]
                 _vals_k = [_mdata[m].get(_inst, 0) for m in _months]
                 _labels: list[str] = []
                 _hovers: list[str] = []
@@ -7661,7 +7669,7 @@ def render_alt_investments_tab() -> None:
                         text=_labels,
                         textposition="inside",
                         insidetextanchor="middle",
-                        textfont=dict(size=10, color="white"),
+                        textfont=dict(size=13, color="white"),
                         customdata=_hovers,
                         hovertemplate=(
                             "<b>%{x}</b><br>"
