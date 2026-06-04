@@ -13,8 +13,6 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import date
 
-import streamlit as st
-
 from .delta import DeltaRecord, detect_delta, save_delta
 
 _STATE_FILE = os.path.join(os.path.dirname(__file__), "portfolio_state.json")
@@ -40,7 +38,6 @@ class PortfolioEntry:
     uncertainty_level:  str = "Unknown"  # from Explainability layer
 
 
-@st.cache_data(show_spinner=False)
 def load_portfolio() -> dict[str, PortfolioEntry]:
     if not os.path.exists(_STATE_FILE):
         return {}
@@ -72,7 +69,6 @@ def save_portfolio(portfolio: dict[str, PortfolioEntry]) -> None:
             {t: asdict(e) for t, e in portfolio.items()},
             f, indent=2, ensure_ascii=False,
         )
-    load_portfolio.clear()
 
 
 def update_portfolio(

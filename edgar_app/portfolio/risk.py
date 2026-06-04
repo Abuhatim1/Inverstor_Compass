@@ -29,8 +29,6 @@ from datetime import datetime
 
 from .holdings import Holding, portfolio_weights
 
-import streamlit as st
-
 
 # ── Storage locations ─────────────────────────────────────────────────────────
 
@@ -144,7 +142,6 @@ class PortfolioRiskResult:
 
 # ── Market intel state persistence ────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
 def load_market_intel_state() -> dict[str, dict]:
     if not os.path.exists(_MARKET_INTEL_FILE):
         return {}
@@ -173,7 +170,6 @@ def save_market_intel_for_ticker(
     os.makedirs(_DIR, exist_ok=True)
     with open(_MARKET_INTEL_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
-    load_market_intel_state.clear()
 
 
 # ── Position assembly: join holdings + watchlist + market intel ───────────────

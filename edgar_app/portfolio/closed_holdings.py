@@ -21,8 +21,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 
-import streamlit as st
-
 
 _DIR              = os.path.dirname(__file__)
 _CLOSED_LOTS_FILE = os.path.join(_DIR, "closed_lots.json")
@@ -123,7 +121,6 @@ def _save_lots_raw(lots: list[dict]) -> None:
     atomic_json_write(_CLOSED_LOTS_FILE, lots)
 
 
-@st.cache_data(show_spinner=False)
 def load_closed_lots() -> list[ClosedLot]:
     import dataclasses
     valid = {f.name for f in dataclasses.fields(ClosedLot)}
@@ -140,14 +137,12 @@ def load_closed_lots() -> list[ClosedLot]:
 
 def save_closed_lots(lots: list[ClosedLot]) -> None:
     _save_lots_raw([asdict(lot) for lot in lots])
-    load_closed_lots.clear()
 
 
 def append_closed_lots(new_lots: list[ClosedLot]) -> None:
     raw = _load_lots_raw()
     raw.extend(asdict(lot) for lot in new_lots)
     _save_lots_raw(raw)
-    load_closed_lots.clear()
 
 
 # ── Query helpers ──────────────────────────────────────────────────────────────

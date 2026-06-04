@@ -28,8 +28,6 @@ import uuid
 from dataclasses import dataclass, asdict
 from datetime import date as _date, datetime
 
-import streamlit as st
-
 _BASE         = os.path.dirname(__file__)
 _IGI_FILE     = os.path.join(_BASE, "alt_investments.json")
 _IGI_TXN_FILE = os.path.join(_BASE, "alt_igi_transactions.json")
@@ -222,17 +220,7 @@ def _from_dict_igi_txn(d: dict) -> IGITransaction:
 
 def load_igi_investments(path: str | None = None) -> dict[str, IGIInvestment]:
     """Load IGI investments and auto-flag maturity where applicable."""
-    if path is not None:
-        return _load_igi_investments_impl(path)
-    return _load_igi_investments_cached()
-
-
-@st.cache_data(show_spinner=False)
-def _load_igi_investments_cached() -> dict[str, IGIInvestment]:
-    return _load_igi_investments_impl(_IGI_FILE)
-
-
-def _load_igi_investments_impl(p: str) -> dict[str, IGIInvestment]:
+    p = path or _IGI_FILE
     if not os.path.exists(p):
         return {}
     with open(p, encoding="utf-8") as fh:
@@ -255,22 +243,10 @@ def save_igi_investments(investments: dict[str, IGIInvestment], path: str | None
     p = path or _IGI_FILE
     with open(p, "w", encoding="utf-8") as fh:
         json.dump({k: asdict(v) for k, v in investments.items()}, fh, indent=2)
-    if path is None:
-        _load_igi_investments_cached.clear()
 
 
 def load_igi_transactions(path: str | None = None) -> list[IGITransaction]:
-    if path is not None:
-        return _load_igi_txns_impl(path)
-    return _load_igi_txns_cached()
-
-
-@st.cache_data(show_spinner=False)
-def _load_igi_txns_cached() -> list[IGITransaction]:
-    return _load_igi_txns_impl(_IGI_TXN_FILE)
-
-
-def _load_igi_txns_impl(p: str) -> list[IGITransaction]:
+    p = path or _IGI_TXN_FILE
     if not os.path.exists(p):
         return []
     with open(p, encoding="utf-8") as fh:
@@ -282,8 +258,6 @@ def save_igi_transactions(txns: list[IGITransaction], path: str | None = None) -
     p = path or _IGI_TXN_FILE
     with open(p, "w", encoding="utf-8") as fh:
         json.dump([asdict(t) for t in txns], fh, indent=2)
-    if path is None:
-        _load_igi_txns_cached.clear()
 
 
 # ── Maturity split calculation ─────────────────────────────────────────────────

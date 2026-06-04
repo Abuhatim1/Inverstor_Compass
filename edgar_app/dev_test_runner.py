@@ -2300,7 +2300,7 @@ def _cat_n() -> list[TestResult]:
     # ── N09: A9 — Data persistence: save → load round-trip ───────────────────
     def n09():
         import tempfile
-        from portfolio.holdings import Holding, save_holdings, load_holdings, _load_holdings_cached
+        from portfolio.holdings import Holding, save_holdings, load_holdings
         import portfolio.holdings as _hm
 
         orig_file = _hm._HOLDINGS_FILE
@@ -2346,7 +2346,6 @@ def _cat_n() -> list[TestResult]:
                 )
             finally:
                 _hm._HOLDINGS_FILE = orig_file
-                _load_holdings_cached.clear()   # prevent stale test data poisoning subsequent tests
     results.append(_run("N09", "A9 — Data persistence: Holding save→load preserves all fields",
                         CAT, "portfolio.holdings", "P0", True, n09))
 
@@ -2599,8 +2598,6 @@ def _cat_acc_ui() -> list[TestResult]:
 
     def _setup_sandbox_account():
         """Ensure sandbox account exists; return account_id."""
-        from portfolio.holdings import _load_holdings_cached
-        _load_holdings_cached.clear()   # guarantee we read from disk, not a stale test cache
         upsert_account(
             account_id=_SB_AID,
             account_name="Sandbox AccUI",
@@ -2613,8 +2610,6 @@ def _cat_acc_ui() -> list[TestResult]:
 
     def _teardown_sandbox(ticker=_SB_TK, aid=_SB_AID):
         """Remove sandbox holding and account (best-effort)."""
-        from portfolio.holdings import _load_holdings_cached
-        _load_holdings_cached.clear()   # ensure we see disk state, not a stale cache
         try:
             live = load_holdings()
             h_aid = next((k for k, hh in live.items() if hh.ticker == ticker), None)
@@ -5247,16 +5242,18 @@ def _cat_acc_ui_ext() -> list[TestResult]:
 
     def acc_ui_06():
         """
-        load_accounts() must be decorated with @st.cache_data so disk reads
-        are cached across Streamlit reruns.
+        load_accounts() must read from disk on every call.
+        Confirm: no @st.cache_data, @st.cache_resource, or @lru_cache on it.
         """
         from portfolio.accounts import load_accounts as _la
         src = _inspect.getsource(_la)
-        has_cache_data = "@st.cache_data" in src
-        ok = has_cache_data
+        no_cache_data     = "@st.cache_data"     not in src
+        no_cache_resource = "@st.cache_resource" not in src
+        no_lru_cache      = "@lru_cache"         not in src
+        ok = no_cache_data and no_cache_resource and no_lru_cache
         return (
-            "load_accounts has @st.cache_data decorator — reads are cached",
-            f"has_cache_data={has_cache_data}",
+            "load_accounts has no caching decorator — always reads from disk",
+            f"no_cache_data={no_cache_data}, no_cache_resource={no_cache_resource}, no_lru_cache={no_lru_cache}",
             ok,
         )
 
@@ -5286,7 +5283,6 @@ def _cat_acc_ui_ext() -> list[TestResult]:
                 json.dump(data, tf)
                 tmp_path = tf.name
             _pac._ACCOUNTS_FILE = tmp_path
-            _pac.load_accounts.clear()
             result = _aa()
             active_ids   = set(result.keys())
             inactive_out = "BBBB2222" not in active_ids
@@ -5958,7 +5954,6 @@ def _cat_settle() -> list[TestResult]:
         from unittest.mock import patch
         from portfolio.holdings import (
             record_settlement, Holding, save_holdings,
-            _load_holdings_cached, load_transactions,
         )
         with tempfile.TemporaryDirectory() as tmp:
             h_path = os.path.join(tmp, "holdings.json")
@@ -5971,21 +5966,15 @@ def _cat_settle() -> list[TestResult]:
             save_holdings({"AST_990001": h}, path=h_path)
             with open(t_path, "w") as f:
                 f.write("[]")
-            _load_holdings_cached.clear()
-            load_transactions.clear()
-            try:
-                with (
-                    patch("portfolio.holdings._HOLDINGS_FILE", h_path),
-                    patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
-                ):
-                    txn, err = record_settlement(
-                        amount=500.0, category="Dividend", currency="SAR",
-                        notes="Q2 2026 dividend from S01TST holding",
-                        asset_id="AST_990001",
-                    )
-            finally:
-                _load_holdings_cached.clear()
-                load_transactions.clear()
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                txn, err = record_settlement(
+                    amount=500.0, category="Dividend", currency="SAR",
+                    notes="Q2 2026 dividend from S01TST holding",
+                    asset_id="AST_990001",
+                )
         ok_no_err   = err is None
         ok_side     = txn is not None and txn.side == "SETTLEMENT"
         ok_amount   = txn is not None and txn.settlement_amount == 500.0
@@ -6041,7 +6030,6 @@ def _cat_settle() -> list[TestResult]:
         from portfolio.holdings import (
             record_transaction, record_settlement,
             Holding, save_holdings, load_holdings,
-            _load_holdings_cached, load_transactions,
         )
         from portfolio.closed_holdings import _build_fifo_queue
         with tempfile.TemporaryDirectory() as tmp:
@@ -6058,29 +6046,23 @@ def _cat_settle() -> list[TestResult]:
             save_holdings({"AST_990003": pre_h}, path=h_path)
             with open(t_path, "w") as f:
                 f.write("[]")
-            _load_holdings_cached.clear()
-            load_transactions.clear()
-            try:
-                with (
-                    patch("portfolio.holdings._HOLDINGS_FILE", h_path),
-                    patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
-                ):
-                    # Record a BUY targeting the existing holding
-                    record_transaction(
-                        ticker="S03TST", side="BUY",
-                        quantity=5.0, price=100.0,
-                        notes="test buy for FIFO isolation",
-                        asset_id="AST_990003",
-                    )
-                    record_settlement(
-                        amount=50.0, category="Dividend", currency="USD",
-                        notes="dividend for FIFO isolation test",
-                        asset_id="AST_990003",
-                    )
-                    queue = _build_fifo_queue("S03TST")
-            finally:
-                _load_holdings_cached.clear()
-                load_transactions.clear()
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                # Record a BUY targeting the existing holding
+                record_transaction(
+                    ticker="S03TST", side="BUY",
+                    quantity=5.0, price=100.0,
+                    notes="test buy for FIFO isolation",
+                    asset_id="AST_990003",
+                )
+                record_settlement(
+                    amount=50.0, category="Dividend", currency="USD",
+                    notes="dividend for FIFO isolation test",
+                    asset_id="AST_990003",
+                )
+                queue = _build_fifo_queue("S03TST")
         ok = len(queue) == 1
         return (
             "FIFO queue has exactly 1 BUY lot; SETTLEMENT is invisible",
@@ -6093,7 +6075,6 @@ def _cat_settle() -> list[TestResult]:
         from unittest.mock import patch
         from portfolio.holdings import (
             record_settlement, Holding, save_holdings, load_holdings,
-            _load_holdings_cached, load_transactions,
         )
         with tempfile.TemporaryDirectory() as tmp:
             h_path = os.path.join(tmp, "holdings.json")
@@ -6106,22 +6087,16 @@ def _cat_settle() -> list[TestResult]:
             save_holdings({"AST_990004": h}, path=h_path)
             with open(t_path, "w") as f:
                 f.write("[]")
-            _load_holdings_cached.clear()
-            load_transactions.clear()
-            try:
-                with (
-                    patch("portfolio.holdings._HOLDINGS_FILE", h_path),
-                    patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
-                ):
-                    _, err = record_settlement(
-                        amount=-200.0, category="Fee", currency="USD",
-                        notes="Custody fee for SETTLE-04 isolation test",
-                        asset_id="AST_990004",
-                    )
-                    holdings_after = load_holdings()
-            finally:
-                _load_holdings_cached.clear()
-                load_transactions.clear()
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+            ):
+                _, err = record_settlement(
+                    amount=-200.0, category="Fee", currency="USD",
+                    notes="Custody fee for SETTLE-04 isolation test",
+                    asset_id="AST_990004",
+                )
+                holdings_after = load_holdings()
         h_after = holdings_after.get("AST_990004")
         qty_ok = h_after is not None and abs(h_after.quantity - 200.0) < 1e-9
         avg_ok = h_after is not None and abs(h_after.avg_cost - 75.0) < 1e-9
@@ -6214,8 +6189,8 @@ def _cat_settle() -> list[TestResult]:
         import tempfile, os, json
         from unittest.mock import patch
         from dataclasses import asdict
-        from portfolio.holdings import record_settlement, save_holdings, _load_holdings_cached, load_transactions
-        from portfolio.accounts import Account, save_accounts, load_accounts
+        from portfolio.holdings import record_settlement, save_holdings
+        from portfolio.accounts import Account, save_accounts
         with tempfile.TemporaryDirectory() as tmp:
             h_path  = os.path.join(tmp, "holdings.json")
             t_path  = os.path.join(tmp, "transactions.json")
@@ -6224,40 +6199,32 @@ def _cat_settle() -> list[TestResult]:
             save_holdings({}, path=h_path)
             with open(t_path, "w") as f:
                 f.write("[]")
-            _load_holdings_cached.clear()
-            load_transactions.clear()
-            load_accounts.clear()
-            try:
-                with (
-                    patch("portfolio.holdings._HOLDINGS_FILE", h_path),
-                    patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
-                    patch("portfolio.accounts._ACCOUNTS_FILE", a_path),
-                    patch("portfolio.cash_ledger._LEDGER_FILE", cl_path),
-                ):
-                    acct = Account(
-                        account_id="ACC_S08TST",
-                        account_name="Test Brokerage S08",
-                        account_type="Brokerage",
-                        base_currency="SAR",
-                        cash_balance=10000.0,
-                    )
-                    save_accounts({"ACC_S08TST": acct})
-                    record_settlement(
-                        amount=300.0, category="Dividend", currency="SAR",
-                        notes="Q2 dividend for ledger mapping test",
-                        account_id="ACC_S08TST",
-                    )
-                    record_settlement(
-                        amount=-500.0, category="Zakat", currency="SAR",
-                        notes="Annual zakat for ledger mapping test",
-                        account_id="ACC_S08TST",
-                    )
-                    with open(cl_path) as f:
-                        raw_entries = json.load(f)
-            finally:
-                _load_holdings_cached.clear()
-                load_transactions.clear()
-                load_accounts.clear()
+            with (
+                patch("portfolio.holdings._HOLDINGS_FILE", h_path),
+                patch("portfolio.holdings._TRANSACTIONS_FILE", t_path),
+                patch("portfolio.accounts._ACCOUNTS_FILE", a_path),
+                patch("portfolio.cash_ledger._LEDGER_FILE", cl_path),
+            ):
+                acct = Account(
+                    account_id="ACC_S08TST",
+                    account_name="Test Brokerage S08",
+                    account_type="Brokerage",
+                    base_currency="SAR",
+                    cash_balance=10000.0,
+                )
+                save_accounts({"ACC_S08TST": acct})
+                record_settlement(
+                    amount=300.0, category="Dividend", currency="SAR",
+                    notes="Q2 dividend for ledger mapping test",
+                    account_id="ACC_S08TST",
+                )
+                record_settlement(
+                    amount=-500.0, category="Zakat", currency="SAR",
+                    notes="Annual zakat for ledger mapping test",
+                    account_id="ACC_S08TST",
+                )
+                with open(cl_path) as f:
+                    raw_entries = json.load(f)
         types = [e.get("transaction_type", "") for e in raw_entries]
         ok_div  = "DIVIDEND" in types
         ok_zkat = "FEE" in types

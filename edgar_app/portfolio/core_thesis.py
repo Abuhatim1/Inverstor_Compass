@@ -37,8 +37,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 
-import streamlit as st
-
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
@@ -265,7 +263,6 @@ def _coerce_event(x) -> ThesisValidationEvent | None:
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
 def load_all_core_theses() -> dict[str, CoreThesis]:
     """Load every core thesis from disk. Returns {} on missing/corrupt file."""
     if not os.path.exists(_THESES_FILE):
@@ -293,7 +290,6 @@ def save_all_core_theses(theses: dict[str, CoreThesis]) -> None:
     payload = {t.upper(): asdict(c) for t, c in theses.items()}
     with open(_THESES_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
-    load_all_core_theses.clear()
 
 
 def load_core_thesis(ticker: str) -> CoreThesis | None:

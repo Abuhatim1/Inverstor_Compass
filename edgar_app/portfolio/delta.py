@@ -16,8 +16,6 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
-import streamlit as st
-
 _HISTORY_FILE = os.path.join(os.path.dirname(__file__), "delta_history.json")
 _MAX_HISTORY  = 100
 
@@ -202,7 +200,6 @@ def detect_delta(
 
 # ── History file I/O ──────────────────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
 def load_delta_history() -> list[DeltaRecord]:
     """Load all delta records from disk, newest first. Returns [] if no file."""
     if not os.path.exists(_HISTORY_FILE):
@@ -223,4 +220,3 @@ def save_delta(record: DeltaRecord) -> None:
     os.makedirs(os.path.dirname(_HISTORY_FILE), exist_ok=True)
     with open(_HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump([asdict(r) for r in history], f, indent=2, ensure_ascii=False)
-    load_delta_history.clear()
