@@ -142,5 +142,29 @@
     "valuation_impact": "Value Accretive",
     "priority_score": 72,
     "uncertainty_level": "Medium Confidence"
+  },
+  "7010.SR": {
+    "ticker": "7010.SR",
+    "company_name": "STC",
+    "last_filing_type": "Annual Report",
+    "thesis_status": "Strong",
+    "catalysts": [
+      "Accelerating revenue growth in high-margin software segment",
+      "New multi-year enterprise contract wins announced in the quarter",
+      "Share buyback program expanded by $500M"
+    ],
+    "risks": [
+      "Macroeconomic headwinds could pressure discretionary spending",
+      "Increasing competition from well-funded new entrants",
+      "Foreign exchange exposure on ~35% of international revenues"
+    ],
+    "conviction_score": 84,
+    "recommended_action": "Buy",
+    "last_updated": "2026-06-03",
+    "analyses_count": 1,
+    "source_label": "SEC",
+    "valuation_impact": "Value Accretive",
+    "priority_score": 72,
+    "uncertainty_level": "Medium Confidence"
   }
 }

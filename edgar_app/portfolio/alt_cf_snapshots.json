@@ -1,0 +1,26 @@
+[
+  {
+    "snapshot_id": "2226c7ce",
+    "account_id": "2be853a0",
+    "snapshot_date": "2026-06-03",
+    "current_account_value": 0.0,
+    "available_cash": 0.0,
+    "active_investments": 1000.0,
+    "delayed_investments": 1000.0,
+    "defaulted_investments": 0.0,
+    "notes": "",
+    "recorded_at": "2026-06-03T21:04:32Z"
+  },
+  {
+    "snapshot_id": "67ee0b63",
+    "account_id": "d6303027",
+    "snapshot_date": "2026-06-03",
+    "current_account_value": 0.0,
+    "available_cash": 0.0,
+    "active_investments": 2000.0,
+    "delayed_investments": 0.0,
+    "defaulted_investments": 2000.0,
+    "notes": "",
+    "recorded_at": "2026-06-03T21:09:37Z"
+  }
+]

@@ -1,5 +1,27 @@
 [
   {
+    "ticker": "7010.SR",
+    "company_name": "STC",
+    "filing_type": "Annual Report",
+    "timestamp": "2026-06-03T23:15:57",
+    "thesis_prev": "—",
+    "thesis_new": "Strong",
+    "thesis_changed": false,
+    "action_prev": "—",
+    "action_new": "Buy",
+    "action_changed": false,
+    "conviction_prev": 0,
+    "conviction_new": 72,
+    "conviction_delta": 0,
+    "catalyst_trend": "same",
+    "risk_trend": "same",
+    "what_changed": [
+      "First analysis recorded for 7010.SR."
+    ],
+    "alerts": [],
+    "is_first_analysis": true
+  },
+  {
     "ticker": "CPRX",
     "company_name": "CATALYST PHARMACEUTICALS, INC.",
     "filing_type": "10-K",
