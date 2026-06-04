@@ -430,6 +430,52 @@ def record_igi_transaction(
     return txn, None
 
 
+def delete_igi_transaction(
+    txn_id:   str,
+    path:     str | None = None,
+    txn_path: str | None = None,
+) -> tuple[bool, str | None]:
+    """Delete a transaction by ID. Returns (True, None) on success."""
+    txns   = load_igi_transactions(path=txn_path)
+    before = len(txns)
+    txns   = [t for t in txns if t.txn_id != txn_id]
+    if len(txns) == before:
+        return False, f"Transaction {txn_id!r} not found."
+    save_igi_transactions(txns, path=txn_path)
+    return True, None
+
+
+def edit_igi_transaction(
+    txn_id:   str,
+    txn_type: str,
+    amount:   float,
+    txn_date: str,
+    notes:    str = "",
+    path:     str | None = None,
+    txn_path: str | None = None,
+) -> tuple["IGITransaction | None", str | None]:
+    """Edit an existing transaction in-place (preserves original recorded_at)."""
+    if txn_type not in IGI_TRANSACTION_TYPES:
+        return None, f"Invalid transaction type: {txn_type!r}."
+    if amount <= 0:
+        return None, "Amount must be positive."
+    txns = load_igi_transactions(path=txn_path)
+    for i, t in enumerate(txns):
+        if t.txn_id == txn_id:
+            txns[i] = IGITransaction(
+                txn_id=t.txn_id,
+                investment_id=t.investment_id,
+                date=txn_date,
+                txn_type=txn_type,
+                amount=round(amount, 6),
+                notes=notes.strip(),
+                recorded_at=t.recorded_at,
+            )
+            save_igi_transactions(txns, path=txn_path)
+            return txns[i], None
+    return None, f"Transaction {txn_id!r} not found."
+
+
 def process_maturity(
     investment_id:         str,
     actual_total_received: float,

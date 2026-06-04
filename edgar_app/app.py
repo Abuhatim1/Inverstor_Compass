@@ -7169,7 +7169,8 @@ def render_alt_investments_tab() -> None:
         MATURITY_INSTRUCTIONS, IGI_TRANSACTION_TYPES,
         load_igi_investments, load_igi_transactions,
         add_igi_investment, edit_igi_investment,
-        record_igi_transaction, process_maturity, process_early_withdrawal,
+        record_igi_transaction, delete_igi_transaction, edit_igi_transaction,
+        process_maturity, process_early_withdrawal,
         compute_igi_metrics,
     )
     from portfolio.crowdfunding import (
@@ -7324,6 +7325,74 @@ def render_alt_investments_tab() -> None:
                         st.rerun()
             with _b2:
                 if st.button("Cancel", use_container_width=True, key=f"igi_t_cancel_{inv.investment_id}"):
+                    st.rerun()
+
+        @st.dialog("✏️ Edit Transaction")
+        def _dlg_igi_edit_txn(txn):
+            st.caption(
+                f"Editing: **{txn.txn_type}** · {txn.date} · **{txn.amount:,.2f}**"
+            )
+            _et1, _et2, _et3 = st.columns(3)
+            with _et1:
+                _ett = st.selectbox(
+                    "Type", IGI_TRANSACTION_TYPES,
+                    index=IGI_TRANSACTION_TYPES.index(txn.txn_type)
+                          if txn.txn_type in IGI_TRANSACTION_TYPES else 0,
+                    key=f"igi_et_type_{txn.txn_id}",
+                )
+            with _et2:
+                _eta = st.number_input(
+                    "Amount", value=float(txn.amount), min_value=0.01,
+                    step=100.0, format="%.2f", key=f"igi_et_amt_{txn.txn_id}",
+                )
+            with _et3:
+                _etd = st.date_input(
+                    "Date", value=date.fromisoformat(txn.date),
+                    key=f"igi_et_dt_{txn.txn_id}",
+                )
+            _etn = st.text_area(
+                "Notes", value=txn.notes, key=f"igi_et_notes_{txn.txn_id}",
+                max_chars=300,
+            )
+            _eb1, _eb2 = st.columns(2)
+            with _eb1:
+                if st.button("💾 Save", type="primary", use_container_width=True,
+                             key=f"igi_et_save_{txn.txn_id}"):
+                    _, _err = edit_igi_transaction(
+                        txn_id=txn.txn_id, txn_type=_ett, amount=_eta,
+                        txn_date=_etd.isoformat(), notes=_etn,
+                    )
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast("Transaction updated", icon="✅")
+                        st.rerun()
+            with _eb2:
+                if st.button("Cancel", use_container_width=True,
+                             key=f"igi_et_cancel_{txn.txn_id}"):
+                    st.rerun()
+
+        @st.dialog("🗑️ Delete Transaction")
+        def _dlg_igi_del_txn(txn):
+            st.warning(
+                f"Delete **{txn.txn_type}** · {txn.date} · "
+                f"**{txn.amount:,.2f}**?  \nThis cannot be undone.",
+                icon="⚠️",
+            )
+            _db1, _db2 = st.columns(2)
+            with _db1:
+                if st.button("🗑️ Confirm Delete", type="primary",
+                             use_container_width=True,
+                             key=f"igi_del_confirm_{txn.txn_id}"):
+                    _ok, _err = delete_igi_transaction(txn_id=txn.txn_id)
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast("Transaction deleted", icon="🗑️")
+                        st.rerun()
+            with _db2:
+                if st.button("Cancel", use_container_width=True,
+                             key=f"igi_del_cancel_{txn.txn_id}"):
                     st.rerun()
 
         @st.dialog("🔔 Process Maturity")
@@ -7555,10 +7624,9 @@ def render_alt_investments_tab() -> None:
             for _li in _ladder_inv:
                 _mdata[_li.maturity_date[:7]][_li.institution] += _li.principal_amount / 1_000
 
-            _months      = sorted(_mdata.keys())
-            _inst_order  = sorted({i.institution for i in _ladder_inv})
-            _mon_totals  = {m: sum(_mdata[m].values()) for m in _months}
-            _win_end_idx = min(5, len(_months) - 1)
+            _months     = sorted(_mdata.keys())
+            _inst_order = sorted({i.institution for i in _ladder_inv})
+            _mon_totals = {m: sum(_mdata[m].values()) for m in _months}
 
             _ladder_fig = go.Figure()
             for _idx, _inst in enumerate(_inst_order):
@@ -7609,7 +7677,6 @@ def render_alt_investments_tab() -> None:
                 paper_bgcolor="rgba(0,0,0,0)",
                 xaxis=dict(
                     type="category",
-                    range=[-0.5, _win_end_idx + 0.5],
                     tickfont=dict(size=11),
                 ),
             )
@@ -7767,15 +7834,27 @@ def render_alt_investments_tab() -> None:
                                 ),
                             )
 
-                    # Transaction list — always shown, empty state if none
+                    # Transaction list — editable rows
                     st.caption(f"**Transactions** ({len(_inv_txns)})")
                     if _inv_txns:
-                        _txn_rows = [
-                            {"Date": t.date, "Type": t.txn_type,
-                             "Amount": f"{t.amount:,.2f}", "Notes": t.notes}
-                            for t in sorted(_inv_txns, key=lambda x: x.date, reverse=True)
-                        ]
-                        st.dataframe(pd.DataFrame(_txn_rows), use_container_width=True, hide_index=True)
+                        for _t in sorted(_inv_txns, key=lambda x: x.date, reverse=True):
+                            _tc1, _tc2, _tc3, _tc4, _tc5, _tc6 = st.columns(
+                                [2, 3, 2, 4, 1, 1]
+                            )
+                            _tc1.caption(_t.date)
+                            _tc2.caption(_t.txn_type)
+                            _tc3.caption(f"{_t.amount:,.2f}")
+                            _tc4.caption(_t.notes or "—")
+                            if _tc5.button(
+                                "✏️", key=f"igi_tedit_{_t.txn_id}",
+                                use_container_width=True, help="Edit transaction",
+                            ):
+                                _dlg_igi_edit_txn(_t)
+                            if _tc6.button(
+                                "🗑️", key=f"igi_tdel_{_t.txn_id}",
+                                use_container_width=True, help="Delete transaction",
+                            ):
+                                _dlg_igi_del_txn(_t)
                     else:
                         st.caption("_No transactions recorded yet._")
 

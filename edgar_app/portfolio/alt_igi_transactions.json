@@ -25,5 +25,14 @@
     "amount": 10000.0,
     "notes": "",
     "recorded_at": "2026-06-04T15:09:53Z"
+  },
+  {
+    "txn_id": "36de3d88",
+    "investment_id": "c316b831",
+    "date": "2026-06-04",
+    "txn_type": "Initial Investment",
+    "amount": 55544.0,
+    "notes": "",
+    "recorded_at": "2026-06-04T15:44:01Z"
   }
 ]
