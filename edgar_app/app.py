@@ -7486,26 +7486,26 @@ def render_alt_investments_tab() -> None:
 
             _VIVID = px.colors.qualitative.Vivid
 
-            # Exact-date buckets by institution (thousands)
-            _ddata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+            # Monthly buckets by institution (thousands)
+            _mdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
             for _li in _ladder_inv:
-                _ddata[_li.maturity_date][_li.institution] += _li.principal_amount / 1_000
+                _mdata[_li.maturity_date[:7]][_li.institution] += _li.principal_amount / 1_000
 
-            _dates       = sorted(_ddata.keys())
+            _months      = sorted(_mdata.keys())
             _inst_order  = sorted({i.institution for i in _ladder_inv})
-            _date_totals = {d: sum(_ddata[d].values()) for d in _dates}
-            _win_end_idx = min(5, len(_dates) - 1)
+            _mon_totals  = {m: sum(_mdata[m].values()) for m in _months}
+            _win_end_idx = min(5, len(_months) - 1)
 
             _ladder_fig = go.Figure()
             for _idx, _inst in enumerate(_inst_order):
                 _clr    = _VIVID[_idx % len(_VIVID)]
-                _vals_k = [_ddata[d].get(_inst, 0) for d in _dates]
+                _vals_k = [_mdata[m].get(_inst, 0) for m in _months]
                 _labels: list[str] = []
                 _hovers: list[str] = []
-                for _d, _v in zip(_dates, _vals_k):
+                for _m, _v in zip(_months, _vals_k):
                     if _v > 0:
-                        _pct = _v / _date_totals[_d] * 100
-                        _labels.append(f"{_inst}<br>{_pct:.0f}%")
+                        _pct = _v / _mon_totals[_m] * 100
+                        _labels.append(f"{_pct:.0f}%")
                         _hovers.append(f"{_pct:.0f}%")
                     else:
                         _labels.append("")
@@ -7513,7 +7513,7 @@ def render_alt_investments_tab() -> None:
                 if any(v > 0 for v in _vals_k):
                     _ladder_fig.add_trace(go.Bar(
                         name=_inst,
-                        x=_dates,
+                        x=_months,
                         y=_vals_k,
                         marker_color=_clr,
                         marker_line_width=0,
@@ -7531,8 +7531,9 @@ def render_alt_investments_tab() -> None:
 
             _ladder_fig.update_layout(
                 barmode="stack",
+                dragmode="pan",
                 height=280,
-                bargap=0.4,
+                bargap=0.35,
                 margin=dict(l=40, r=10, t=10, b=50),
                 legend=dict(
                     orientation="h",
@@ -7545,9 +7546,7 @@ def render_alt_investments_tab() -> None:
                 xaxis=dict(
                     type="category",
                     range=[-0.5, _win_end_idx + 0.5],
-                    rangeslider=dict(visible=True, thickness=0.04),
                     tickfont=dict(size=11),
-                    tickangle=-30,
                 ),
             )
             _ladder_fig.update_yaxes(
@@ -7558,13 +7557,13 @@ def render_alt_investments_tab() -> None:
                 tickfont=dict(size=11),
             )
             st.caption(
-                "📅 **Maturity Ladder** — principal per exact maturity date · "
-                "each colour = one institution · labels show share of that date's total"
+                "📅 **Maturity Ladder** — principal per month · "
+                "drag to pan · scroll to zoom · double-click to reset"
             )
             st.plotly_chart(
                 _ladder_fig,
                 use_container_width=True,
-                config={"displayModeBar": "hover", "displaylogo": False},
+                config={"displayModeBar": False, "scrollZoom": True},
             )
 
         # ── Add button + filter expander (below chart) ─────────────────────
