@@ -423,6 +423,13 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.divider()
+    st.radio(
+        "main_nav_label",
+        ["💼 Holdings", "🏦 Alt Investments"],
+        key="main_nav",
+        label_visibility="collapsed",
+    )
+    st.divider()
     st.header("⚙️ Settings")
 
     demo_mode = st.toggle(
@@ -8080,14 +8087,6 @@ def render_sahmk_discovery_tab() -> None:
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🗂️ Section")
-    st.radio(
-        "main_nav_label",
-        ["💼 Holdings", "🏦 Alt Investments"],
-        key="main_nav",
-        label_visibility="collapsed",
-    )
-    st.divider()
     st.markdown("### ⚙️ App Settings")
     st.checkbox(
         "🔧 Developer Mode",
