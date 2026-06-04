@@ -431,6 +431,36 @@ def record_igi_transaction(
     return txn, None
 
 
+def delete_igi_investment(
+    investment_id: str,
+    path:          str | None = None,
+    txn_path:      str | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Delete an IGI investment and all its transactions.
+    Allowed only when status is 'Pending Funding'.
+    Active / Maturity Action Required investments with real capital must be
+    closed via Withdraw / Maturity instead.
+    """
+    investments = load_igi_investments(path=path)
+    if investment_id not in investments:
+        return False, f"Investment {investment_id!r} not found."
+    inv = investments[investment_id]
+    if inv.status == "Closed":
+        return False, "Closed investments cannot be deleted (kept as archive record)."
+    if inv.status != "Pending Funding":
+        return False, (
+            f"Only 'Pending Funding' investments can be deleted. "
+            f"This investment is '{inv.status}'. Use Withdraw or Maturity to close it."
+        )
+    del investments[investment_id]
+    save_igi_investments(investments, path=path)
+    txns = load_igi_transactions(path=txn_path)
+    txns = [t for t in txns if t.investment_id != investment_id]
+    save_igi_transactions(txns, path=txn_path)
+    return True, None
+
+
 def delete_igi_transaction(
     txn_id:   str,
     path:     str | None = None,

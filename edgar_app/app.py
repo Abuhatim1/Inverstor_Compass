@@ -7168,7 +7168,7 @@ def render_alt_investments_tab() -> None:
         PROFIT_PAYMENT_STRUCTURES, LIQUIDITY_TYPES, IGI_STATUSES,
         MATURITY_INSTRUCTIONS, IGI_TRANSACTION_TYPES,
         load_igi_investments, load_igi_transactions,
-        add_igi_investment, edit_igi_investment,
+        add_igi_investment, edit_igi_investment, delete_igi_investment,
         record_igi_transaction, delete_igi_transaction, edit_igi_transaction,
         process_maturity, process_early_withdrawal,
         compute_igi_metrics,
@@ -7300,6 +7300,35 @@ def render_alt_investments_tab() -> None:
                         st.rerun()
             with _b2:
                 if st.button("Cancel", use_container_width=True, key=f"igi_e_cancel_{inv.investment_id}"):
+                    st.rerun()
+
+        @st.dialog("🗑️ Delete Investment")
+        def _dlg_igi_del_inv(inv):
+            st.warning(
+                f"Permanently delete **{inv.investment_name}**"
+                f" ({inv.institution})?\n\n"
+                "All associated transactions will also be removed. "
+                "This cannot be undone.",
+                icon="⚠️",
+            )
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button(
+                    "🗑️ Confirm Delete", type="primary",
+                    use_container_width=True,
+                    key=f"igi_del_inv_ok_{inv.investment_id}",
+                ):
+                    _ok, _err = delete_igi_investment(inv.investment_id)
+                    if _err:
+                        st.error(_err)
+                    else:
+                        st.toast(f"'{inv.investment_name}' deleted", icon="🗑️")
+                        st.rerun()
+            with _b2:
+                if st.button(
+                    "Cancel", use_container_width=True,
+                    key=f"igi_del_inv_cancel_{inv.investment_id}",
+                ):
                     st.rerun()
 
         @st.dialog("💰 Add Transaction")
@@ -7911,7 +7940,8 @@ def render_alt_investments_tab() -> None:
                     # Action buttons
                     _can_mature   = _inv.status in ("Maturity Action Required", "Active")
                     _can_withdraw = _inv.status not in ("Closed", "Pending Funding")
-                    _act1, _act2, _act3, _act4 = st.columns(4)
+                    _can_delete   = _inv.status == "Pending Funding"
+                    _act1, _act2, _act3, _act4, _act5 = st.columns(5)
                     with _act1:
                         if st.button("💰 Add Txn", key=f"igi_atxn_{_inv.investment_id}", use_container_width=True):
                             _dlg_igi_txn(_inv)
@@ -7931,6 +7961,13 @@ def render_alt_investments_tab() -> None:
                             use_container_width=True, disabled=not _can_withdraw,
                         ):
                             _dlg_igi_withdraw(_inv)
+                    with _act5:
+                        if st.button(
+                            "🗑️ Delete", key=f"igi_delinv_{_inv.investment_id}",
+                            use_container_width=True, disabled=not _can_delete,
+                            help="Only available for Pending Funding investments",
+                        ):
+                            _dlg_igi_del_inv(_inv)
 
     # ═══════════════════════════════════════════════════════════════════════
     # SECTION B — CROWDFUNDING
