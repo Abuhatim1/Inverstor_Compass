@@ -7834,27 +7834,52 @@ def render_alt_investments_tab() -> None:
                                 ),
                             )
 
-                    # Transaction list — editable rows
+                    # Transaction list — table view + separate edit/delete
                     st.caption(f"**Transactions** ({len(_inv_txns)})")
                     if _inv_txns:
-                        for _t in sorted(_inv_txns, key=lambda x: x.date, reverse=True):
-                            _tc1, _tc2, _tc3, _tc4, _tc5, _tc6 = st.columns(
-                                [2, 3, 2, 4, 1, 1]
+                        _sorted_txns = sorted(
+                            _inv_txns, key=lambda x: x.date, reverse=True
+                        )
+                        _txn_df_rows = [
+                            {
+                                "Date":   t.date,
+                                "Type":   t.txn_type,
+                                "Amount": f"{t.amount:,.2f}",
+                                "Notes":  t.notes or "—",
+                            }
+                            for t in _sorted_txns
+                        ]
+                        st.dataframe(
+                            pd.DataFrame(_txn_df_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                        with st.expander("✏️ Edit / 🗑️ Delete a transaction"):
+                            _txn_labels = [
+                                f"{t.date}  ·  {t.txn_type}  ·  {t.amount:,.2f}"
+                                for t in _sorted_txns
+                            ]
+                            _sel_idx = st.selectbox(
+                                "Select transaction to act on",
+                                options=range(len(_sorted_txns)),
+                                format_func=lambda i: _txn_labels[i],
+                                key=f"igi_sel_txn_{_inv.investment_id}",
                             )
-                            _tc1.caption(_t.date)
-                            _tc2.caption(_t.txn_type)
-                            _tc3.caption(f"{_t.amount:,.2f}")
-                            _tc4.caption(_t.notes or "—")
-                            if _tc5.button(
-                                "✏️", key=f"igi_tedit_{_t.txn_id}",
-                                use_container_width=True, help="Edit transaction",
-                            ):
-                                _dlg_igi_edit_txn(_t)
-                            if _tc6.button(
-                                "🗑️", key=f"igi_tdel_{_t.txn_id}",
-                                use_container_width=True, help="Delete transaction",
-                            ):
-                                _dlg_igi_del_txn(_t)
+                            if _sel_idx is not None:
+                                _sel_t = _sorted_txns[_sel_idx]
+                                _ea, _eb = st.columns(2)
+                                if _ea.button(
+                                    "✏️ Edit selected",
+                                    use_container_width=True,
+                                    key=f"igi_tedit_{_sel_t.txn_id}",
+                                ):
+                                    _dlg_igi_edit_txn(_sel_t)
+                                if _eb.button(
+                                    "🗑️ Delete selected",
+                                    use_container_width=True,
+                                    key=f"igi_tdel_{_sel_t.txn_id}",
+                                ):
+                                    _dlg_igi_del_txn(_sel_t)
                     else:
                         st.caption("_No transactions recorded yet._")
 
