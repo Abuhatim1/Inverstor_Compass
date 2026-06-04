@@ -7441,6 +7441,54 @@ def render_alt_investments_tab() -> None:
                 icon="⏰",
             )
 
+        # ── Maturity Ladder ────────────────────────────────────────────────
+        _ladder_inv = [i for i in _igi_all if i.status != "Closed" and i.maturity_date]
+        if _ladder_inv:
+            import plotly.graph_objects as go
+            from collections import defaultdict
+
+            _qdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+            for _li in _ladder_inv:
+                _yr, _mo = int(_li.maturity_date[:4]), int(_li.maturity_date[5:7])
+                _qkey = f"{_yr} Q{(_mo - 1) // 3 + 1}"
+                _qdata[_qkey][_li.status] += _li.principal_amount
+
+            _quarters = sorted(
+                _qdata.keys(),
+                key=lambda q: (int(q[:4]), int(q[-1])),
+            )
+            _status_cfg = [
+                ("Active",                   "#2196F3"),
+                ("Pending Funding",          "#9E9E9E"),
+                ("Maturity Action Required", "#FF5722"),
+            ]
+            _ladder_fig = go.Figure()
+            for _st_name, _st_color in _status_cfg:
+                _vals = [_qdata[q].get(_st_name, 0) for q in _quarters]
+                if any(v > 0 for v in _vals):
+                    _ladder_fig.add_trace(go.Bar(
+                        name=_st_name,
+                        x=_quarters,
+                        y=_vals,
+                        marker_color=_st_color,
+                        text=[f"{v:,.0f}" if v > 0 else "" for v in _vals],
+                        textposition="inside",
+                    ))
+            _ladder_fig.update_layout(
+                barmode="stack",
+                title="📅 Maturity Ladder — Principal by Quarter",
+                xaxis_title=None,
+                yaxis_title="Principal",
+                height=300,
+                margin=dict(l=0, r=0, t=40, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                            xanchor="right", x=1),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            _ladder_fig.update_yaxes(showgrid=True, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(_ladder_fig, use_container_width=True)
+
         # ── Add button + institution filter ───────────────────────────────
         _igi_institutions = sorted({i.institution for i in _igi_all}) if _igi_all else []
         _igi_c1, _igi_c2 = st.columns([3, 1])
