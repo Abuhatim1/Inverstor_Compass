@@ -7630,6 +7630,14 @@ def render_alt_investments_tab() -> None:
             _inst_order = sorted({i.institution for i in _ladder_inv})
             _mon_totals = {m: sum(_mdata[m].values()) for m in _months}
 
+            def _fmt_amount(v_thousands: float) -> str:
+                """Format a value (stored in thousands) as a readable amount label."""
+                v = v_thousands * 1_000
+                if v >= 1_000_000:
+                    return f"{v / 1_000_000:,.2f}M"
+                rounded = round(v, -3)
+                return f"{rounded:,.0f}"
+
             _ladder_fig = go.Figure()
             for _idx, _inst in enumerate(_inst_order):
                 _clr    = _VIVID[_idx % len(_VIVID)]
@@ -7638,9 +7646,8 @@ def render_alt_investments_tab() -> None:
                 _hovers: list[str] = []
                 for _m, _v in zip(_months, _vals_k):
                     if _v > 0:
-                        _pct = _v / _mon_totals[_m] * 100
-                        _labels.append(f"{_pct:.0f}%")
-                        _hovers.append(f"{_pct:.0f}%")
+                        _labels.append(_fmt_amount(_v))
+                        _hovers.append(f"{_v * 1_000:,.0f}")
                     else:
                         _labels.append("")
                         _hovers.append("")
@@ -7658,7 +7665,7 @@ def render_alt_investments_tab() -> None:
                         customdata=_hovers,
                         hovertemplate=(
                             "<b>%{x}</b><br>"
-                            + _inst + ": %{y:,.1f}K · %{customdata}"
+                            + _inst + ": %{customdata}"
                             + "<extra></extra>"
                         ),
                     ))
