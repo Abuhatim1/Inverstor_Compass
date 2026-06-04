@@ -121,7 +121,7 @@
     "expected_yield_pct": 3.0,
     "profit_payment_structure": "At Maturity",
     "liquidity_type": "Locked Until Maturity",
-    "status": "Pending Funding",
+    "status": "Closed",
     "maturity_instruction": "Principal Returned",
     "notes": "",
     "sharia_structure": "Not Specified",
