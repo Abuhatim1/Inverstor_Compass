@@ -7441,20 +7441,133 @@ def render_alt_investments_tab() -> None:
                 icon="⏰",
             )
 
-        # ── Add button + multi-filter ─────────────────────────────────────
+        # ── Build option lists + purge stale state ────────────────────────
         _igi_institutions = sorted({i.institution for i in _igi_all}) if _igi_all else []
         _igi_sharia_opts  = sorted({
             i.sharia_structure for i in _igi_all
             if i.sharia_structure and i.sharia_structure != "Not Specified"
         }) if _igi_all else []
 
-        # Purge stale multiselect state (institution/sharia value no longer exists)
         for _fk, _fvalid in [("igi_f_inst", _igi_institutions),
                               ("igi_f_sharia", _igi_sharia_opts)]:
             _stored = st.session_state.get(_fk)
             if _stored and not all(v in _fvalid for v in _stored):
                 st.session_state.pop(_fk, None)
 
+        # ── Read filter state BEFORE widgets (chart renders first) ─────────
+        _f_inst     = st.session_state.get("igi_f_inst",   _igi_institutions)
+        _f_sharia   = st.session_state.get("igi_f_sharia", _igi_sharia_opts)
+        _f_mat_from = st.session_state.get("igi_f_mat_from")
+        _f_mat_to   = st.session_state.get("igi_f_mat_to")
+
+        # Apply all filters (AND logic)
+        _filtered_igi = _igi_all
+        if _f_inst and set(_f_inst) != set(_igi_institutions):
+            _filtered_igi = [i for i in _filtered_igi if i.institution in _f_inst]
+        if _f_sharia and set(_f_sharia) != set(_igi_sharia_opts):
+            _filtered_igi = [i for i in _filtered_igi
+                             if i.sharia_structure in _f_sharia]
+        if _f_mat_from:
+            _s = _f_mat_from.isoformat()
+            _filtered_igi = [i for i in _filtered_igi
+                             if i.maturity_date and i.maturity_date >= _s]
+        if _f_mat_to:
+            _e = _f_mat_to.isoformat()
+            _filtered_igi = [i for i in _filtered_igi
+                             if i.maturity_date and i.maturity_date <= _e]
+        _filtered_igi = sorted(_filtered_igi, key=lambda x: (x.institution, x.start_date or ""))
+
+        # ── Maturity Ladder — chart FIRST ──────────────────────────────────
+        _ladder_inv = [i for i in _filtered_igi if i.status != "Closed" and i.maturity_date]
+        if _ladder_inv:
+            import plotly.graph_objects as go
+            import plotly.express as px
+            from collections import defaultdict
+
+            _VIVID = px.colors.qualitative.Vivid
+
+            # Exact-date buckets by institution (thousands)
+            _ddata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+            for _li in _ladder_inv:
+                _ddata[_li.maturity_date][_li.institution] += _li.principal_amount / 1_000
+
+            _dates       = sorted(_ddata.keys())
+            _inst_order  = sorted({i.institution for i in _ladder_inv})
+            _date_totals = {d: sum(_ddata[d].values()) for d in _dates}
+            _win_end_idx = min(5, len(_dates) - 1)
+
+            _ladder_fig = go.Figure()
+            for _idx, _inst in enumerate(_inst_order):
+                _clr    = _VIVID[_idx % len(_VIVID)]
+                _vals_k = [_ddata[d].get(_inst, 0) for d in _dates]
+                _labels: list[str] = []
+                _hovers: list[str] = []
+                for _d, _v in zip(_dates, _vals_k):
+                    if _v > 0:
+                        _pct = _v / _date_totals[_d] * 100
+                        _labels.append(f"{_inst}<br>{_pct:.0f}%")
+                        _hovers.append(f"{_pct:.0f}%")
+                    else:
+                        _labels.append("")
+                        _hovers.append("")
+                if any(v > 0 for v in _vals_k):
+                    _ladder_fig.add_trace(go.Bar(
+                        name=_inst,
+                        x=_dates,
+                        y=_vals_k,
+                        marker_color=_clr,
+                        marker_line_width=0,
+                        text=_labels,
+                        textposition="inside",
+                        insidetextanchor="middle",
+                        textfont=dict(size=10, color="white"),
+                        customdata=_hovers,
+                        hovertemplate=(
+                            "<b>%{x}</b><br>"
+                            + _inst + ": %{y:,.1f}K · %{customdata}"
+                            + "<extra></extra>"
+                        ),
+                    ))
+
+            _ladder_fig.update_layout(
+                barmode="stack",
+                height=280,
+                bargap=0.4,
+                margin=dict(l=40, r=10, t=10, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="top", y=-0.15,
+                    xanchor="left", x=0,
+                    font=dict(size=11),
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(
+                    type="category",
+                    range=[-0.5, _win_end_idx + 0.5],
+                    rangeslider=dict(visible=True, thickness=0.04),
+                    tickfont=dict(size=11),
+                    tickangle=-30,
+                ),
+            )
+            _ladder_fig.update_yaxes(
+                showgrid=True,
+                gridcolor="rgba(128,128,128,0.15)",
+                ticksuffix="K",
+                tickformat=",.0f",
+                tickfont=dict(size=11),
+            )
+            st.caption(
+                "📅 **Maturity Ladder** — principal per exact maturity date · "
+                "each colour = one institution · labels show share of that date's total"
+            )
+            st.plotly_chart(
+                _ladder_fig,
+                use_container_width=True,
+                config={"displayModeBar": "hover", "displaylogo": False},
+            )
+
+        # ── Add button + filter expander (below chart) ─────────────────────
         _fab_c1, _fab_c2 = st.columns([5, 1])
         with _fab_c2:
             if st.button("➕ Add Investment", use_container_width=True,
@@ -7482,95 +7595,6 @@ def render_alt_investments_tab() -> None:
                 for _k in ("igi_f_inst", "igi_f_sharia", "igi_f_mat_from", "igi_f_mat_to"):
                     st.session_state.pop(_k, None)
                 st.rerun()
-
-        # Read current filter state
-        _f_inst   = st.session_state.get("igi_f_inst",   _igi_institutions)
-        _f_sharia = st.session_state.get("igi_f_sharia", _igi_sharia_opts)
-        _f_mat_from = st.session_state.get("igi_f_mat_from")
-        _f_mat_to   = st.session_state.get("igi_f_mat_to")
-
-        # Apply all filters (AND logic)
-        _filtered_igi = _igi_all
-        if _f_inst and set(_f_inst) != set(_igi_institutions):
-            _filtered_igi = [i for i in _filtered_igi if i.institution in _f_inst]
-        if _f_sharia and set(_f_sharia) != set(_igi_sharia_opts):
-            _filtered_igi = [i for i in _filtered_igi
-                             if i.sharia_structure in _f_sharia]
-        if _f_mat_from:
-            _s = _f_mat_from.isoformat()
-            _filtered_igi = [i for i in _filtered_igi
-                             if i.maturity_date and i.maturity_date >= _s]
-        if _f_mat_to:
-            _e = _f_mat_to.isoformat()
-            _filtered_igi = [i for i in _filtered_igi
-                             if i.maturity_date and i.maturity_date <= _e]
-        _filtered_igi = sorted(_filtered_igi, key=lambda x: (x.institution, x.start_date or ""))
-
-        # ── Maturity Ladder (reads from filtered list) ─────────────────────
-        _ladder_inv = [i for i in _filtered_igi if i.status != "Closed" and i.maturity_date]
-        if _ladder_inv:
-            import plotly.graph_objects as go
-            import plotly.express as px
-            from collections import defaultdict
-
-            _VIVID = px.colors.qualitative.Vivid
-
-            # Monthly buckets by institution (thousands)
-            _mdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-            for _li in _ladder_inv:
-                _mdata[_li.maturity_date[:7]][_li.institution] += _li.principal_amount / 1_000
-
-            _months     = sorted(_mdata.keys())
-            _inst_order = sorted({i.institution for i in _ladder_inv})
-            _vis_start  = _months[0]
-            _vis_end    = _months[min(5, len(_months) - 1)]
-
-            _ladder_fig = go.Figure()
-            for _idx, _inst in enumerate(_inst_order):
-                _clr    = _VIVID[_idx % len(_VIVID)]
-                _vals_k = [_mdata[m].get(_inst, 0) for m in _months]
-                if any(v > 0 for v in _vals_k):
-                    _ladder_fig.add_trace(go.Bar(
-                        name=_inst,
-                        x=_months,
-                        y=_vals_k,
-                        marker_color=_clr,
-                        marker_line_width=0,
-                        hovertemplate="<b>%{x}</b><br>" + _inst + ": %{y:,.1f}K<extra></extra>",
-                    ))
-
-            _ladder_fig.update_layout(
-                barmode="stack",
-                height=260,
-                bargap=0.25,
-                margin=dict(l=40, r=10, t=10, b=50),
-                legend=dict(
-                    orientation="h",
-                    yanchor="top", y=-0.15,
-                    xanchor="left", x=0,
-                    font=dict(size=11),
-                ),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(
-                    range=[_vis_start, _vis_end],
-                    rangeslider=dict(visible=True, thickness=0.04),
-                    tickfont=dict(size=11),
-                ),
-            )
-            _ladder_fig.update_yaxes(
-                showgrid=True,
-                gridcolor="rgba(128,128,128,0.15)",
-                ticksuffix="K",
-                tickformat=",.0f",
-                tickfont=dict(size=11),
-            )
-            st.caption("📅 **Maturity Ladder** — IGI principal by month, coloured by institution (thousands)")
-            st.plotly_chart(
-                _ladder_fig,
-                use_container_width=True,
-                config={"displayModeBar": "hover", "displaylogo": False},
-            )
 
         if not _igi_all:
             st.info(
