@@ -7498,6 +7498,15 @@ def render_alt_investments_tab() -> None:
         _igi_investments = load_igi_investments()
         _igi_txns        = load_igi_transactions()
 
+        # ── Display currency + FX rate (all IGI amounts are SAR) ──────────
+        from fx_rates import get_rates_for_holdings as _igi_get_fx
+        _igi_disp_ccy = st.session_state.get("global_base_ccy", "SAR")
+        if _igi_disp_ccy != "SAR":
+            _igi_fx_map = _igi_get_fx(["SAR"], _igi_disp_ccy)
+            _igi_rate   = _igi_fx_map["SAR"].rate if "SAR" in _igi_fx_map else 1.0
+        else:
+            _igi_rate = 1.0
+
         # ── Summary metrics ────────────────────────────────────────────────
         _igi_all  = list(_igi_investments.values())
         _igi_open = [i for i in _igi_all if i.status not in ("Closed",)]
@@ -7509,9 +7518,9 @@ def render_alt_investments_tab() -> None:
         _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
         _sm1.metric("Total Investments",     len(_igi_all))
         _sm2.metric("Open",                  len(_igi_open))
-        _sm3.metric("Total Principal (open)", f"{_total_pa:,.0f}")
-        _sm4.metric("Total Current Value",   f"{_total_cv:,.0f}")
-        _sm5.metric("Total Profit Received", f"{_total_pr:,.0f}")
+        _sm3.metric(f"Total Principal (open) · {_igi_disp_ccy}", f"{_total_pa * _igi_rate:,.0f}")
+        _sm4.metric(f"Total Current Value · {_igi_disp_ccy}",    f"{_total_cv * _igi_rate:,.0f}")
+        _sm5.metric(f"Total Profit Received · {_igi_disp_ccy}",  f"{_total_pr * _igi_rate:,.0f}")
 
         # ── Yield summary — Tier 2 (portfolio-level projection) ───────────
         from datetime import date as _dt_cls
@@ -7556,17 +7565,17 @@ def render_alt_investments_tab() -> None:
                 "projected from expected rates · *informational only*"
             )
             _ts1, _ts2, _ts3, _ts4, _ts5 = st.columns(5)
-            _ts1.metric("Projected Total",  f"{_ys_proj:,.0f}")
-            _ts2.metric("Accrued to Date",  f"{_ys_acc:,.0f}")
+            _ts1.metric(f"Projected Total · {_igi_disp_ccy}",  f"{_ys_proj * _igi_rate:,.0f}")
+            _ts2.metric(f"Accrued to Date · {_igi_disp_ccy}", f"{_ys_acc * _igi_rate:,.0f}")
             _ts3.metric(
-                "Received",
-                f"{_ys_recv:,.0f}",
+                f"Received · {_igi_disp_ccy}",
+                f"{_ys_recv * _igi_rate:,.0f}",
                 delta=(
-                    f"{_ys_recv - _ys_acc:+,.0f} vs accrued"
+                    f"{(_ys_recv - _ys_acc) * _igi_rate:+,.0f} vs accrued"
                     if _ys_acc > 0 else None
                 ),
             )
-            _ts4.metric("Outstanding",      f"{_ys_out:,.0f}")
+            _ts4.metric(f"Outstanding · {_igi_disp_ccy}",     f"{_ys_out * _igi_rate:,.0f}")
             _ts5.metric("Wtd Avg Yield",    f"{_ys_wavg:.2f}%")
 
         if _maturity_due:
@@ -7632,7 +7641,7 @@ def render_alt_investments_tab() -> None:
             # Monthly buckets by institution (thousands)
             _mdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
             for _li in _ladder_inv:
-                _mdata[_li.maturity_date[:7]][_li.institution] += _li.principal_amount / 1_000
+                _mdata[_li.maturity_date[:7]][_li.institution] += _li.principal_amount * _igi_rate / 1_000
 
             _months     = sorted(_mdata.keys())
             _inst_order = sorted({i.institution for i in _ladder_inv})
@@ -7700,12 +7709,12 @@ def render_alt_investments_tab() -> None:
             _ladder_fig.update_yaxes(
                 showgrid=True,
                 gridcolor="rgba(128,128,128,0.15)",
-                ticksuffix="K",
+                ticksuffix=f"K {_igi_disp_ccy}",
                 tickformat=",.0f",
                 tickfont=dict(size=11),
             )
             st.caption(
-                "📅 **Maturity Ladder** — principal per month · "
+                f"📅 **Maturity Ladder** — principal per month · {_igi_disp_ccy} · "
                 "drag to pan · scroll to zoom · double-click to reset"
             )
             st.plotly_chart(
@@ -7769,7 +7778,7 @@ def render_alt_investments_tab() -> None:
 
                 with st.expander(
                     f"{_status_icon} **{_inv.investment_name}** · "
-                    f"{_inv.current_value:,.2f} {_inv.currency} · "
+                    f"{_inv.current_value * _igi_rate:,.2f} {_igi_disp_ccy} · "
                     f"Yield {_inv.expected_yield_pct:.2f}% · "
                     f"{_inv.status} · "
                     f"Maturity {_inv.maturity_date or '—'}",
@@ -7777,7 +7786,7 @@ def render_alt_investments_tab() -> None:
                 ):
                     # Info row
                     _ri1, _ri2, _ri3, _ri4 = st.columns(4)
-                    _ri1.caption(f"**Principal:** {_inv.principal_amount:,.2f} {_inv.currency}")
+                    _ri1.caption(f"**Principal:** {_inv.principal_amount * _igi_rate:,.2f} {_igi_disp_ccy}")
                     _ri2.caption(f"**Structure:** {_inv.profit_payment_structure}")
                     _ri3.caption(f"**Liquidity:** {_inv.liquidity_type}")
                     _ri4.caption(f"**Maturity Instruction:** {_inv.maturity_instruction}")
@@ -7801,9 +7810,9 @@ def render_alt_investments_tab() -> None:
                     )
                     if _m:
                         _met1, _met2, _met3, _met4 = st.columns(4)
-                        _met1.metric("Total Profit Received", f"{_m.get('total_profit_received', 0):,.2f}")
-                        _met2.metric("Unrealized Profit",     f"{_m.get('unrealized_profit', 0):,.2f}")
-                        _met3.metric("Total Return",          f"{_m.get('total_return', 0):,.2f}")
+                        _met1.metric(f"Total Profit Received · {_igi_disp_ccy}", f"{_m.get('total_profit_received', 0) * _igi_rate:,.2f}")
+                        _met2.metric(f"Unrealized Profit · {_igi_disp_ccy}",     f"{_m.get('unrealized_profit', 0) * _igi_rate:,.2f}")
+                        _met3.metric(f"Total Return · {_igi_disp_ccy}",          f"{_m.get('total_return', 0) * _igi_rate:,.2f}")
                         _xirr_val = _m.get("xirr")
                         _met4.metric("XIRR", f"{_xirr_val*100:.2f}%" if _xirr_val is not None else "N/A")
 
@@ -7813,32 +7822,31 @@ def render_alt_investments_tab() -> None:
                             _acc  = _m.get("accrued_to_date", 0.0)
                             _recv = _m.get("total_profit_received", 0.0)
                             _out  = _m.get("outstanding", 0.0) or 0.0
-                            _ccy  = _inv.currency
                             st.caption(
                                 "📈 **Yield Schedule** — projected from expected rate · "
                                 "*informational only, not accounting*"
                             )
                             _ys1, _ys2, _ys3, _ys4 = st.columns(4)
                             _ys1.metric(
-                                "Projected Total",
-                                f"{_proj:,.2f} {_ccy}",
+                                f"Projected Total · {_igi_disp_ccy}",
+                                f"{_proj * _igi_rate:,.2f}",
                             )
                             _ys2.metric(
-                                "Accrued to Date",
-                                f"{_acc:,.2f} {_ccy}",
+                                f"Accrued to Date · {_igi_disp_ccy}",
+                                f"{_acc * _igi_rate:,.2f}",
                             )
                             _delta_vs_acc = (
-                                f"{_recv - _acc:+,.2f} vs accrued"
+                                f"{(_recv - _acc) * _igi_rate:+,.2f} vs accrued"
                                 if _acc > 0 else None
                             )
                             _ys3.metric(
-                                "Received",
-                                f"{_recv:,.2f} {_ccy}",
+                                f"Received · {_igi_disp_ccy}",
+                                f"{_recv * _igi_rate:,.2f}",
                                 delta=_delta_vs_acc,
                             )
                             _ys4.metric(
-                                "Outstanding",
-                                f"{_out:,.2f} {_ccy}",
+                                f"Outstanding · {_igi_disp_ccy}",
+                                f"{_out * _igi_rate:,.2f}",
                             )
                             _prog_val = min(1.0, _recv / _proj) if _proj > 0 else 0.0
                             _prog_pct = _recv / _proj * 100 if _proj > 0 else 0.0
