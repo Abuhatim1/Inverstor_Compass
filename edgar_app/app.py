@@ -8080,6 +8080,14 @@ def render_sahmk_discovery_tab() -> None:
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("### 🗂️ Section")
+    st.radio(
+        "main_nav_label",
+        ["💼 Holdings", "🏦 Alt Investments"],
+        key="main_nav",
+        label_visibility="collapsed",
+    )
+    st.divider()
     st.markdown("### ⚙️ App Settings")
     st.checkbox(
         "🔧 Developer Mode",
@@ -8090,146 +8098,148 @@ with st.sidebar:
 
 render_global_header()
 
-(tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions, tab_cash,
- tab_decisions, tab_risk, tab_command,
- tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
- tab_test, tab_discovery, tab_alt_inv) = st.tabs([
-    "💼 Holdings",
-    "📊 Allocation",
-    "📁 Closed Holdings",
-    "💳 Accounts",
-    "📜 Transaction History",
-    "💵 Cash Ledger",
-    "🎯 Decision Queue",
-    "🛡️ Portfolio Risk",
-    "🧭 Command Center",
-    "📝 Thesis Memory",
-    "🌍 Market Intel",
-    "📄 Filing Search",
-    "🔬 Research Watchlist",
-    "📂 Upload Filing",
-    "🧪 Test Runner",
-    "🔍 SAHMK Discovery",
-    "🏦 Alt Investments",
-])
+_main_nav = st.session_state.get("main_nav", "💼 Holdings")
 
-_shared_bundle = _load_valuation_bundle(st.session_state.get("global_base_ccy", "SAR"))
+if _main_nav == "🏦 Alt Investments":
+    render_alt_investments_tab()
 
-with tab_holdings:
-    render_holdings_tab(_shared_bundle)
+else:
+    (tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions, tab_cash,
+     tab_decisions, tab_risk, tab_command,
+     tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
+     tab_test, tab_discovery) = st.tabs([
+        "💼 Holdings",
+        "📊 Allocation",
+        "📁 Closed Holdings",
+        "💳 Accounts",
+        "📜 Transaction History",
+        "💵 Cash Ledger",
+        "🎯 Decision Queue",
+        "🛡️ Portfolio Risk",
+        "🧭 Command Center",
+        "📝 Thesis Memory",
+        "🌍 Market Intel",
+        "📄 Filing Search",
+        "🔬 Research Watchlist",
+        "📂 Upload Filing",
+        "🧪 Test Runner",
+        "🔍 SAHMK Discovery",
+    ])
 
-with tab_allocation:
-    render_allocation_tab(_shared_bundle)
+    _shared_bundle = _load_valuation_bundle(st.session_state.get("global_base_ccy", "SAR"))
 
-with tab_closed:
-    render_closed_holdings_tab()
+    with tab_holdings:
+        render_holdings_tab(_shared_bundle)
 
-with tab_accounts:
-    render_accounts_tab()
+    with tab_allocation:
+        render_allocation_tab(_shared_bundle)
 
-with tab_transactions:
-    render_transactions_tab()
+    with tab_closed:
+        render_closed_holdings_tab()
 
-with tab_cash:
-    render_cash_ledger_tab()
+    with tab_accounts:
+        render_accounts_tab()
 
-with tab_decisions:
-    render_decision_queue_tab()
+    with tab_transactions:
+        render_transactions_tab()
 
-with tab_risk:
-    render_portfolio_risk_tab()
+    with tab_cash:
+        render_cash_ledger_tab()
 
-with tab_command:
-    render_command_center_tab()
+    with tab_decisions:
+        render_decision_queue_tab()
 
-with tab_thesis:
-    render_thesis_memory_tab()
+    with tab_risk:
+        render_portfolio_risk_tab()
 
-with tab_market_intel:
-    render_market_intel_tab()
+    with tab_command:
+        render_command_center_tab()
 
-with tab_watchlist:
-    render_portfolio_dashboard()
+    with tab_thesis:
+        render_thesis_memory_tab()
 
-with tab_upload:
-    render_upload_tab()
+    with tab_market_intel:
+        render_market_intel_tab()
 
-with tab_search:
-    st.divider()
+    with tab_watchlist:
+        render_portfolio_dashboard()
 
-    col_input, col_btn = st.columns([3, 1])
-    with col_input:
-        ticker_input = st.text_input(
-            "Stock Ticker Symbol",
-            placeholder="e.g. AAPL, MSFT, VCYT",
-            label_visibility="collapsed",
-        ).strip().upper()
-    with col_btn:
-        search_clicked = st.button("Search", type="primary", use_container_width=True)
+    with tab_upload:
+        render_upload_tab()
 
-    if search_clicked or ticker_input:
-        if not ticker_input:
-            st.error("Please enter a ticker symbol.")
-            st.stop()
+    with tab_search:
+        st.divider()
 
-        with st.spinner(f"Looking up {ticker_input}…"):
-            try:
-                company = lookup_company(ticker_input)
-            except EdgarAPIError as e:
-                st.error(str(e))
+        col_input, col_btn = st.columns([3, 1])
+        with col_input:
+            ticker_input = st.text_input(
+                "Stock Ticker Symbol",
+                placeholder="e.g. AAPL, MSFT, VCYT",
+                label_visibility="collapsed",
+            ).strip().upper()
+        with col_btn:
+            search_clicked = st.button("Search", type="primary", use_container_width=True)
+
+        if search_clicked or ticker_input:
+            if not ticker_input:
+                st.error("Please enter a ticker symbol.")
                 st.stop()
 
-        st.divider()
-        st.markdown(f"### {company.name}")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Ticker", company.ticker)
-        col2.metric("CIK", company.cik)
-        col3.metric("Filings Source", "SEC EDGAR")
-        st.divider()
-
-        with st.spinner("Fetching filings from SEC EDGAR…"):
-            results: dict[str, list[Filing]] = {}
-            fetch_errors: dict[str, str] = {}
-            for form_type, cfg in FILING_TYPES.items():
+            with st.spinner(f"Looking up {ticker_input}…"):
                 try:
-                    results[form_type] = get_filings(company, form_type, limit=cfg["limit"])
+                    company = lookup_company(ticker_input)
                 except EdgarAPIError as e:
-                    results[form_type] = []
-                    fetch_errors[form_type] = str(e)
+                    st.error(str(e))
+                    st.stop()
 
-        for form_type, msg in fetch_errors.items():
-            st.warning(f"Could not fetch {form_type} filings: {msg}")
+            st.divider()
+            st.markdown(f"### {company.name}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Ticker", company.ticker)
+            col2.metric("CIK", company.cik)
+            col3.metric("Filings Source", "SEC EDGAR")
+            st.divider()
 
-        filing_tabs = st.tabs([cfg["label"] for cfg in FILING_TYPES.values()])
-        for ftab, (form_type, cfg) in zip(filing_tabs, FILING_TYPES.items()):
-            with ftab:
-                render_section(
-                    form_type=form_type,
-                    filings=results.get(form_type, []),
-                    company_name=company.name,
-                    ticker=company.ticker,
-                    label=cfg["label"],
-                )
+            with st.spinner("Fetching filings from SEC EDGAR…"):
+                results: dict[str, list[Filing]] = {}
+                fetch_errors: dict[str, str] = {}
+                for form_type, cfg in FILING_TYPES.items():
+                    try:
+                        results[form_type] = get_filings(company, form_type, limit=cfg["limit"])
+                    except EdgarAPIError as e:
+                        results[form_type] = []
+                        fetch_errors[form_type] = str(e)
 
-    else:
-        st.info(
-            "Enter a US stock ticker above (e.g. **AAPL**, **MSFT**, **VCYT**) "
-            "and press **Search** to view the latest SEC filings."
-        )
-        with st.expander("What are these filings?"):
-            st.markdown("""
+            for form_type, msg in fetch_errors.items():
+                st.warning(f"Could not fetch {form_type} filings: {msg}")
+
+            filing_tabs = st.tabs([cfg["label"] for cfg in FILING_TYPES.values()])
+            for ftab, (form_type, cfg) in zip(filing_tabs, FILING_TYPES.items()):
+                with ftab:
+                    render_section(
+                        form_type=form_type,
+                        filings=results.get(form_type, []),
+                        company_name=company.name,
+                        ticker=company.ticker,
+                        label=cfg["label"],
+                    )
+
+        else:
+            st.info(
+                "Enter a US stock ticker above (e.g. **AAPL**, **MSFT**, **VCYT**) "
+                "and press **Search** to view the latest SEC filings."
+            )
+            with st.expander("What are these filings?"):
+                st.markdown("""
 | Form | Name | Description |
 |------|------|-------------|
 | **10-K** | Annual Report | Comprehensive yearly financial report |
 | **10-Q** | Quarterly Report | Unaudited financial report filed each quarter |
 | **8-K** | Current Report | Material events (earnings, mergers, leadership changes) |
-            """)
+                """)
 
-with tab_test:
-    render_test_runner_tab()
+    with tab_test:
+        render_test_runner_tab()
 
-with tab_discovery:
-    render_sahmk_discovery_tab()
-
-with tab_alt_inv:
-    render_alt_investments_tab()
+    with tab_discovery:
+        render_sahmk_discovery_tab()
