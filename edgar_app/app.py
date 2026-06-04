@@ -7441,6 +7441,63 @@ def render_alt_investments_tab() -> None:
         _sm3.metric("Total Principal (open)", f"{_total_pa:,.0f}")
         _sm4.metric("Total Current Value",   f"{_total_cv:,.0f}")
         _sm5.metric("Total Profit Received", f"{_total_pr:,.0f}")
+
+        # ── Yield summary — Tier 2 (portfolio-level projection) ───────────
+        from datetime import date as _dt_cls
+        _ys_active = {"Active", "Maturity Action Required"}
+        _ys_proj   = 0.0
+        _ys_acc    = 0.0
+        _ys_recv   = 0.0
+        _ys_wnum   = 0.0   # weighted-avg numerator  (principal × rate)
+        _ys_wden   = 0.0   # weighted-avg denominator (principal)
+        _ys_count  = 0
+
+        for _si in _igi_all:
+            if _si.status not in _ys_active:
+                continue
+            if not _si.start_date or not _si.maturity_date:
+                continue
+            _si_s = _dt_cls.fromisoformat(_si.start_date)
+            _si_m = _dt_cls.fromisoformat(_si.maturity_date)
+            _si_t = max(0, (_si_m - _si_s).days)
+            if _si_t == 0:
+                continue
+            _si_proj = _si.principal_amount * (_si.expected_yield_pct / 100) * (_si_t / 365)
+            _si_end  = min(_dt_cls.today(), _si_m)
+            _si_ela  = max(0, (_si_end - _si_s).days)
+            _si_acc  = _si.principal_amount * (_si.expected_yield_pct / 100) * (_si_ela / 365)
+            _si_recv = sum(
+                t.amount for t in _igi_txns
+                if t.investment_id == _si.investment_id and t.txn_type == "Profit Received"
+            )
+            _ys_proj  += _si_proj
+            _ys_acc   += _si_acc
+            _ys_recv  += _si_recv
+            _ys_wnum  += _si.principal_amount * _si.expected_yield_pct
+            _ys_wden  += _si.principal_amount
+            _ys_count += 1
+
+        if _ys_count > 0:
+            _ys_out  = round(_ys_proj - _ys_recv, 2)
+            _ys_wavg = round(_ys_wnum / _ys_wden, 2) if _ys_wden > 0 else 0.0
+            st.caption(
+                "📈 **Yield Summary** — active investments · "
+                "projected from expected rates · *informational only*"
+            )
+            _ts1, _ts2, _ts3, _ts4, _ts5 = st.columns(5)
+            _ts1.metric("Projected Total",  f"{_ys_proj:,.0f}")
+            _ts2.metric("Accrued to Date",  f"{_ys_acc:,.0f}")
+            _ts3.metric(
+                "Received",
+                f"{_ys_recv:,.0f}",
+                delta=(
+                    f"{_ys_recv - _ys_acc:+,.0f} vs accrued"
+                    if _ys_acc > 0 else None
+                ),
+            )
+            _ts4.metric("Outstanding",      f"{_ys_out:,.0f}")
+            _ts5.metric("Wtd Avg Yield",    f"{_ys_wavg:.2f}%")
+
         if _maturity_due:
             st.warning(
                 f"⏰ **{len(_maturity_due)} investment(s) require maturity action.** "
