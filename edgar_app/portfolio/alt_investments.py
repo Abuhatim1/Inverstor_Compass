@@ -383,7 +383,8 @@ def edit_igi_investment(
     inv = investments[investment_id]
 
     editable = {
-        "investment_name", "institution", "currency", "current_value",
+        "investment_name", "institution", "currency",
+        "principal_amount", "current_value",
         "expected_yield_pct", "profit_payment_structure", "liquidity_type",
         "maturity_date", "maturity_instruction", "notes",
         "sharia_structure", "sharia_status", "sharia_notes",

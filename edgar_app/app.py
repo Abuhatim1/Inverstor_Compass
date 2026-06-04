@@ -7258,6 +7258,7 @@ def render_alt_investments_tab() -> None:
             with _ei1:
                 _n  = st.text_input("Investment Name", value=inv.investment_name, key=f"igi_e_n_{inv.investment_id}")
                 _in = st.text_input("Institution", value=inv.institution, key=f"igi_e_in_{inv.investment_id}")
+                _pa = st.number_input("Principal Amount", value=float(inv.principal_amount), min_value=0.01, step=100.0, format="%.2f", key=f"igi_e_pa_{inv.investment_id}")
                 _cv = st.number_input("Current Value", value=float(inv.current_value), min_value=0.0, step=100.0, format="%.2f", key=f"igi_e_cv_{inv.investment_id}")
                 _yld = st.number_input("Expected Yield %", value=float(inv.expected_yield_pct), min_value=0.0, max_value=100.0, step=0.1, format="%.2f", key=f"igi_e_yld_{inv.investment_id}")
             with _ei2:
@@ -7285,7 +7286,8 @@ def render_alt_investments_tab() -> None:
                 if st.button("💾 Save", type="primary", use_container_width=True, key=f"igi_e_save_{inv.investment_id}"):
                     _, _err = edit_igi_investment(
                         inv.investment_id,
-                        investment_name=_n, institution=_in, current_value=_cv,
+                        investment_name=_n, institution=_in,
+                        principal_amount=_pa, current_value=_cv,
                         expected_yield_pct=_yld, maturity_date=_md.isoformat(),
                         profit_payment_structure=_pps, liquidity_type=_liq,
                         maturity_instruction=_mi, notes=_notes,
