@@ -13,6 +13,8 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
+import streamlit as st
+
 _HISTORY_FILE = os.path.join(os.path.dirname(__file__), "comparison_history.json")
 _MAX_HISTORY  = 50
 
@@ -70,6 +72,7 @@ GUIDANCE_ICON = {
 
 # ── Load / save ───────────────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
 def load_comparison_history() -> list[ComparisonRecord]:
     """Load all records from disk. Returns [] if file is missing."""
     if not os.path.exists(_HISTORY_FILE):
@@ -90,6 +93,7 @@ def save_comparison(record: ComparisonRecord) -> None:
     os.makedirs(os.path.dirname(_HISTORY_FILE), exist_ok=True)
     with open(_HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump([asdict(r) for r in history], f, indent=2, ensure_ascii=False)
+    load_comparison_history.clear()
 
 
 def build_comparison_record(

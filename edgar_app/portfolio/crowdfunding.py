@@ -29,6 +29,8 @@ from datetime import datetime
 
 from .alt_investments import compute_xirr
 
+import streamlit as st
+
 _BASE           = os.path.dirname(__file__)
 _CF_ACCT_FILE   = os.path.join(_BASE, "alt_cf_accounts.json")
 _CF_TXN_FILE    = os.path.join(_BASE, "alt_cf_transactions.json")
@@ -186,7 +188,17 @@ def _from_dict_cf_snap(d: dict) -> CFSnapshot:
 
 
 def load_cf_accounts(path: str | None = None) -> dict[str, CFAccount]:
-    p = path or _CF_ACCT_FILE
+    if path is not None:
+        return _load_cf_accounts_impl(path)
+    return _load_cf_accounts_cached()
+
+
+@st.cache_data(show_spinner=False)
+def _load_cf_accounts_cached() -> dict[str, CFAccount]:
+    return _load_cf_accounts_impl(_CF_ACCT_FILE)
+
+
+def _load_cf_accounts_impl(p: str) -> dict[str, CFAccount]:
     if not os.path.exists(p):
         return {}
     with open(p, encoding="utf-8") as fh:
@@ -198,10 +210,22 @@ def save_cf_accounts(accounts: dict[str, CFAccount], path: str | None = None) ->
     p = path or _CF_ACCT_FILE
     with open(p, "w", encoding="utf-8") as fh:
         json.dump({k: asdict(v) for k, v in accounts.items()}, fh, indent=2)
+    if path is None:
+        _load_cf_accounts_cached.clear()
 
 
 def load_cf_transactions(path: str | None = None) -> list[CFTransaction]:
-    p = path or _CF_TXN_FILE
+    if path is not None:
+        return _load_cf_txns_impl(path)
+    return _load_cf_txns_cached()
+
+
+@st.cache_data(show_spinner=False)
+def _load_cf_txns_cached() -> list[CFTransaction]:
+    return _load_cf_txns_impl(_CF_TXN_FILE)
+
+
+def _load_cf_txns_impl(p: str) -> list[CFTransaction]:
     if not os.path.exists(p):
         return []
     with open(p, encoding="utf-8") as fh:
@@ -213,10 +237,22 @@ def save_cf_transactions(txns: list[CFTransaction], path: str | None = None) -> 
     p = path or _CF_TXN_FILE
     with open(p, "w", encoding="utf-8") as fh:
         json.dump([asdict(t) for t in txns], fh, indent=2)
+    if path is None:
+        _load_cf_txns_cached.clear()
 
 
 def load_cf_snapshots(path: str | None = None) -> list[CFSnapshot]:
-    p = path or _CF_SNAP_FILE
+    if path is not None:
+        return _load_cf_snaps_impl(path)
+    return _load_cf_snaps_cached()
+
+
+@st.cache_data(show_spinner=False)
+def _load_cf_snaps_cached() -> list[CFSnapshot]:
+    return _load_cf_snaps_impl(_CF_SNAP_FILE)
+
+
+def _load_cf_snaps_impl(p: str) -> list[CFSnapshot]:
     if not os.path.exists(p):
         return []
     with open(p, encoding="utf-8") as fh:
@@ -228,6 +264,8 @@ def save_cf_snapshots(snaps: list[CFSnapshot], path: str | None = None) -> None:
     p = path or _CF_SNAP_FILE
     with open(p, "w", encoding="utf-8") as fh:
         json.dump([asdict(s) for s in snaps], fh, indent=2)
+    if path is None:
+        _load_cf_snaps_cached.clear()
 
 
 # ── Business logic ─────────────────────────────────────────────────────────────

@@ -23,6 +23,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date
 
+import streamlit as st
+
 
 _DIR           = os.path.dirname(__file__)
 _ACCOUNTS_FILE = os.path.join(_DIR, "accounts.json")
@@ -45,6 +47,7 @@ class Account:
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
 def load_accounts() -> dict[str, Account]:
     """Load accounts.json; return {} on missing or corrupt file."""
     if not os.path.exists(_ACCOUNTS_FILE):
@@ -71,6 +74,7 @@ def load_accounts() -> dict[str, Account]:
 def save_accounts(accounts: dict[str, Account]) -> None:
     from portfolio._io import atomic_json_write
     atomic_json_write(_ACCOUNTS_FILE, {aid: asdict(a) for aid, a in accounts.items()})
+    load_accounts.clear()
 
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────────

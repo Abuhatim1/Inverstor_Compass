@@ -31,6 +31,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 
+import streamlit as st
+
 
 _DIR         = os.path.dirname(__file__)
 _LEDGER_FILE = os.path.join(_DIR, "cash_ledger.json")
@@ -84,6 +86,7 @@ class CashEntry:
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
 def load_ledger() -> list[CashEntry]:
     """Load all ledger entries; return [] on missing or corrupt file."""
     if not os.path.exists(_LEDGER_FILE):
@@ -110,6 +113,7 @@ def load_ledger() -> list[CashEntry]:
 def save_ledger(entries: list[CashEntry]) -> None:
     from portfolio._io import atomic_json_write
     atomic_json_write(_LEDGER_FILE, [asdict(e) for e in entries])
+    load_ledger.clear()
 
 
 # ── Write helpers ─────────────────────────────────────────────────────────────

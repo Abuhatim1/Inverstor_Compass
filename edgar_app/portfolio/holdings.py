@@ -31,6 +31,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 
+import streamlit as st
+
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
@@ -271,7 +273,17 @@ def load_holdings(path: str | None = None) -> dict[str, "Holding"]:
 
     Pass *path* to target a specific file (useful in tests).
     """
-    filepath = path or _HOLDINGS_FILE
+    if path is not None:
+        return _load_holdings_impl(path)
+    return _load_holdings_cached()
+
+
+@st.cache_data(show_spinner=False)
+def _load_holdings_cached() -> dict[str, "Holding"]:
+    return _load_holdings_impl(_HOLDINGS_FILE)
+
+
+def _load_holdings_impl(filepath: str) -> dict[str, "Holding"]:
     if not os.path.exists(filepath):
         return {}
     try:
@@ -301,7 +313,7 @@ def load_holdings(path: str | None = None) -> dict[str, "Holding"]:
         except Exception:
             continue
     # Write migrated data back only for the real file (not test temp paths)
-    if needs_resave and path is None:
+    if needs_resave and filepath == _HOLDINGS_FILE:
         save_holdings(out)
     return out
 
@@ -312,6 +324,8 @@ def save_holdings(holdings: dict[str, "Holding"], path: str | None = None) -> No
     filepath = path or _HOLDINGS_FILE
     payload = {asset_id: asdict(h) for asset_id, h in holdings.items()}
     atomic_json_write(filepath, payload)
+    if path is None:
+        _load_holdings_cached.clear()
 
 
 def upsert_holding(
@@ -489,6 +503,7 @@ def update_current_price(
 
 # ── Transactions persistence ──────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
 def load_transactions() -> list[Transaction]:
     if not os.path.exists(_TRANSACTIONS_FILE):
         return []
@@ -519,6 +534,7 @@ def load_transactions() -> list[Transaction]:
 def save_transactions(txns: list[Transaction]) -> None:
     from portfolio._io import atomic_json_write
     atomic_json_write(_TRANSACTIONS_FILE, [asdict(t) for t in txns])
+    load_transactions.clear()
 
 
 def record_transaction(
