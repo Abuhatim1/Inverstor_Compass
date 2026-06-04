@@ -1,0 +1,584 @@
+[
+  {
+    "scenario_id": "S01",
+    "label": "Active \u00b7 mid-term \u00b7 no profit received (baseline)",
+    "verdict": "PASS",
+    "input": {
+      "principal": 100000.0,
+      "rate_pct": 5.0,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "status": "Active",
+      "current_value": 100000.0,
+      "transactions": [
+        {
+          "txn_id": "t01a",
+          "investment_id": "sc01aaaa",
+          "date": "2026-01-01",
+          "txn_type": "Initial Investment",
+          "amount": 100000.0,
+          "notes": "Initial",
+          "recorded_at": "2026-01-01T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 100000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "current_value": 100000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "tenor_days": 364,
+      "elapsed_days": 154,
+      "end_date": "2026-06-04",
+      "projected": 4986.3,
+      "accrued": 2109.59,
+      "received": 0,
+      "outstanding": 4986.3,
+      "collection_rate": 0.0,
+      "delta_vs_accrued": -2109.59
+    },
+    "actual": {
+      "total_invested": 100000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected_total_profit": 4986.3,
+      "accrued_to_date": 2109.59,
+      "outstanding": 4986.3,
+      "collection_rate_pct": 0.0,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S02",
+    "label": "Active \u00b7 past maturity date \u2192 accrued = projected",
+    "verdict": "PASS",
+    "input": {
+      "principal": 80000.0,
+      "rate_pct": 4.0,
+      "start_date": "2025-06-01",
+      "maturity_date": "2025-12-31",
+      "status": "Active",
+      "current_value": 80000.0,
+      "transactions": [
+        {
+          "txn_id": "t02a",
+          "investment_id": "sc02aaaa",
+          "date": "2025-06-01",
+          "txn_type": "Initial Investment",
+          "amount": 80000.0,
+          "notes": "",
+          "recorded_at": "2025-06-01T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 80000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "current_value": 80000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "tenor_days": 213,
+      "elapsed_days": 213,
+      "end_date": "2025-12-31",
+      "projected": 1867.4,
+      "accrued": 1867.4,
+      "received": 0,
+      "outstanding": 1867.4,
+      "collection_rate": 0.0,
+      "delta_vs_accrued": -1867.4
+    },
+    "actual": {
+      "total_invested": 80000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected_total_profit": 1867.4,
+      "accrued_to_date": 1867.4,
+      "outstanding": 1867.4,
+      "collection_rate_pct": 0.0,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S03",
+    "label": "Pending Funding \u2192 yield schedule hidden",
+    "verdict": "PASS",
+    "input": {
+      "principal": 50000.0,
+      "rate_pct": 6.0,
+      "start_date": "2026-07-01",
+      "maturity_date": "2027-06-30",
+      "status": "Pending Funding",
+      "current_value": 0.0,
+      "transactions": []
+    },
+    "expected": {
+      "total_invested": 0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "current_value": 0.0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected": null,
+      "accrued": 0.0,
+      "outstanding": null,
+      "collection_rate": null
+    },
+    "actual": {
+      "total_invested": 0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected_total_profit": null,
+      "accrued_to_date": 0.0,
+      "outstanding": null,
+      "collection_rate_pct": null,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S04",
+    "label": "Maturity Action Required \u00b7 past maturity \u2192 accrued = projected",
+    "verdict": "PASS",
+    "input": {
+      "principal": 120000.0,
+      "rate_pct": 5.5,
+      "start_date": "2025-09-01",
+      "maturity_date": "2026-03-01",
+      "status": "Maturity Action Required",
+      "current_value": 120000.0,
+      "transactions": [
+        {
+          "txn_id": "t04a",
+          "investment_id": "sc04aaaa",
+          "date": "2025-09-01",
+          "txn_type": "Initial Investment",
+          "amount": 120000.0,
+          "notes": "",
+          "recorded_at": "2025-09-01T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 120000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "current_value": 120000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "tenor_days": 181,
+      "elapsed_days": 181,
+      "end_date": "2026-03-01",
+      "projected": 3272.88,
+      "accrued": 3272.88,
+      "received": 0,
+      "outstanding": 3272.88,
+      "collection_rate": 0.0,
+      "delta_vs_accrued": -3272.88
+    },
+    "actual": {
+      "total_invested": 120000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected_total_profit": 3272.88,
+      "accrued_to_date": 3272.88,
+      "outstanding": 3272.88,
+      "collection_rate_pct": 0.0,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S05",
+    "label": "Closed \u00b7 fully paid at maturity \u00b7 outstanding = 0",
+    "verdict": "PASS",
+    "input": {
+      "principal": 200000.0,
+      "rate_pct": 3.5,
+      "start_date": "2025-01-01",
+      "maturity_date": "2025-12-31",
+      "status": "Closed",
+      "current_value": 0.0,
+      "transactions": [
+        {
+          "txn_id": "t05a",
+          "investment_id": "sc05aaaa",
+          "date": "2025-01-01",
+          "txn_type": "Initial Investment",
+          "amount": 200000.0,
+          "notes": "",
+          "recorded_at": "2025-01-01T00:00:00"
+        },
+        {
+          "txn_id": "t05b",
+          "investment_id": "sc05aaaa",
+          "date": "2025-12-31",
+          "txn_type": "Profit Received",
+          "amount": 6981.37,
+          "notes": "Full profit at maturity",
+          "recorded_at": "2025-12-31T00:00:00"
+        },
+        {
+          "txn_id": "t05c",
+          "investment_id": "sc05aaaa",
+          "date": "2025-12-31",
+          "txn_type": "Principal Returned",
+          "amount": 200000.0,
+          "notes": "Principal returned at maturity",
+          "recorded_at": "2025-12-31T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 200000.0,
+      "total_profit_received": 6981.37,
+      "total_returned": 200000.0,
+      "current_value": 0.0,
+      "unrealized_profit": 0.0,
+      "total_return": 6981.37,
+      "tenor_days": 364,
+      "elapsed_days": 364,
+      "end_date": "2025-12-31",
+      "projected": 6980.82,
+      "accrued": 6980.82,
+      "received": 6981.37,
+      "outstanding": -0.55,
+      "collection_rate": 100.0,
+      "delta_vs_accrued": 0.55
+    },
+    "actual": {
+      "total_invested": 200000.0,
+      "total_profit_received": 6981.37,
+      "total_returned": 200000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 6981.37,
+      "projected_total_profit": 6980.82,
+      "accrued_to_date": 6980.82,
+      "outstanding": -0.55,
+      "collection_rate_pct": 100.0,
+      "xirr": 0.03500441
+    }
+  },
+  {
+    "scenario_id": "S06",
+    "label": "Closed \u00b7 early withdrawal mid-term \u2192 accrual capped at close date",
+    "verdict": "PASS",
+    "input": {
+      "principal": 150000.0,
+      "rate_pct": 6.0,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "status": "Closed",
+      "current_value": 0.0,
+      "transactions": [
+        {
+          "txn_id": "t06a",
+          "investment_id": "sc06aaaa",
+          "date": "2026-01-01",
+          "txn_type": "Initial Investment",
+          "amount": 150000.0,
+          "notes": "",
+          "recorded_at": "2026-01-01T00:00:00"
+        },
+        {
+          "txn_id": "t06b",
+          "investment_id": "sc06aaaa",
+          "date": "2026-03-31",
+          "txn_type": "Profit Received",
+          "amount": 2000.0,
+          "notes": "Partial profit \u2014 early withdrawal penalty applied",
+          "recorded_at": "2026-03-31T00:00:00"
+        },
+        {
+          "txn_id": "t06c",
+          "investment_id": "sc06aaaa",
+          "date": "2026-03-31",
+          "txn_type": "Principal Returned",
+          "amount": 150000.0,
+          "notes": "Principal returned \u2014 early withdrawal",
+          "recorded_at": "2026-03-31T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 150000.0,
+      "total_profit_received": 2000.0,
+      "total_returned": 150000.0,
+      "current_value": 0.0,
+      "unrealized_profit": 0.0,
+      "total_return": 2000.0,
+      "tenor_days": 364,
+      "elapsed_days": 89,
+      "end_date": "2026-03-31",
+      "projected": 8975.34,
+      "accrued": 2194.52,
+      "received": 2000.0,
+      "outstanding": 6975.34,
+      "collection_rate": 91.1,
+      "delta_vs_accrued": -194.52
+    },
+    "actual": {
+      "total_invested": 150000.0,
+      "total_profit_received": 2000.0,
+      "total_returned": 150000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 2000.0,
+      "projected_total_profit": 8975.34,
+      "accrued_to_date": 2194.52,
+      "outstanding": 6975.34,
+      "collection_rate_pct": 91.1,
+      "xirr": 0.05582274
+    }
+  },
+  {
+    "scenario_id": "S07",
+    "label": "Active \u00b7 received AHEAD of accrual \u2192 positive delta",
+    "verdict": "PASS",
+    "input": {
+      "principal": 75000.0,
+      "rate_pct": 7.0,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "status": "Active",
+      "current_value": 75000.0,
+      "transactions": [
+        {
+          "txn_id": "t07a",
+          "investment_id": "sc07aaaa",
+          "date": "2026-01-01",
+          "txn_type": "Initial Investment",
+          "amount": 75000.0,
+          "notes": "",
+          "recorded_at": "2026-01-01T00:00:00"
+        },
+        {
+          "txn_id": "t07b",
+          "investment_id": "sc07aaaa",
+          "date": "2026-02-01",
+          "txn_type": "Profit Received",
+          "amount": 1000.0,
+          "notes": "Jan profit",
+          "recorded_at": "2026-02-01T00:00:00"
+        },
+        {
+          "txn_id": "t07c",
+          "investment_id": "sc07aaaa",
+          "date": "2026-03-01",
+          "txn_type": "Profit Received",
+          "amount": 1000.0,
+          "notes": "Feb profit",
+          "recorded_at": "2026-03-01T00:00:00"
+        },
+        {
+          "txn_id": "t07d",
+          "investment_id": "sc07aaaa",
+          "date": "2026-04-01",
+          "txn_type": "Profit Received",
+          "amount": 1000.0,
+          "notes": "Mar profit",
+          "recorded_at": "2026-04-01T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 75000.0,
+      "total_profit_received": 3000.0,
+      "total_returned": 0,
+      "current_value": 75000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 3000.0,
+      "tenor_days": 364,
+      "elapsed_days": 154,
+      "end_date": "2026-06-04",
+      "projected": 5235.62,
+      "accrued": 2215.07,
+      "received": 3000.0,
+      "outstanding": 2235.62,
+      "collection_rate": 135.4,
+      "delta_vs_accrued": 784.93
+    },
+    "actual": {
+      "total_invested": 75000.0,
+      "total_profit_received": 3000.0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 3000.0,
+      "projected_total_profit": 5235.62,
+      "accrued_to_date": 2215.07,
+      "outstanding": 2235.62,
+      "collection_rate_pct": 135.4,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S08",
+    "label": "Active \u00b7 received BEHIND accrual \u2192 negative delta",
+    "verdict": "PASS",
+    "input": {
+      "principal": 90000.0,
+      "rate_pct": 4.5,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "status": "Active",
+      "current_value": 90000.0,
+      "transactions": [
+        {
+          "txn_id": "t08a",
+          "investment_id": "sc08aaaa",
+          "date": "2026-01-01",
+          "txn_type": "Initial Investment",
+          "amount": 90000.0,
+          "notes": "",
+          "recorded_at": "2026-01-01T00:00:00"
+        },
+        {
+          "txn_id": "t08b",
+          "investment_id": "sc08aaaa",
+          "date": "2026-03-01",
+          "txn_type": "Profit Received",
+          "amount": 500.0,
+          "notes": "Partial Q1 profit",
+          "recorded_at": "2026-03-01T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 90000.0,
+      "total_profit_received": 500.0,
+      "total_returned": 0,
+      "current_value": 90000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 500.0,
+      "tenor_days": 364,
+      "elapsed_days": 154,
+      "end_date": "2026-06-04",
+      "projected": 4038.9,
+      "accrued": 1708.77,
+      "received": 500.0,
+      "outstanding": 3538.9,
+      "collection_rate": 29.3,
+      "delta_vs_accrued": -1208.77
+    },
+    "actual": {
+      "total_invested": 90000.0,
+      "total_profit_received": 500.0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 500.0,
+      "projected_total_profit": 4038.9,
+      "accrued_to_date": 1708.77,
+      "outstanding": 3538.9,
+      "collection_rate_pct": 29.3,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S09",
+    "label": "Active \u00b7 no maturity_date \u2192 yield schedule hidden",
+    "verdict": "PASS",
+    "input": {
+      "principal": 60000.0,
+      "rate_pct": 5.0,
+      "start_date": "2026-01-01",
+      "maturity_date": null,
+      "status": "Active",
+      "current_value": 60000.0,
+      "transactions": [
+        {
+          "txn_id": "t09a",
+          "investment_id": "sc09aaaa",
+          "date": "2026-01-01",
+          "txn_type": "Initial Investment",
+          "amount": 60000.0,
+          "notes": "",
+          "recorded_at": "2026-01-01T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 60000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "current_value": 60000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected": null,
+      "accrued": 0.0,
+      "outstanding": null,
+      "collection_rate": null
+    },
+    "actual": {
+      "total_invested": 60000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected_total_profit": null,
+      "accrued_to_date": 0.0,
+      "outstanding": null,
+      "collection_rate_pct": null,
+      "xirr": null
+    }
+  },
+  {
+    "scenario_id": "S10",
+    "label": "Active \u00b7 30-day short tenor \u00b7 high rate 12% \u00b7 mid-way through",
+    "verdict": "PASS",
+    "input": {
+      "principal": 500000.0,
+      "rate_pct": 12.0,
+      "start_date": "2026-05-20",
+      "maturity_date": "2026-06-19",
+      "status": "Active",
+      "current_value": 500000.0,
+      "transactions": [
+        {
+          "txn_id": "t10a",
+          "investment_id": "sc10aaaa",
+          "date": "2026-05-20",
+          "txn_type": "Initial Investment",
+          "amount": 500000.0,
+          "notes": "",
+          "recorded_at": "2026-05-20T00:00:00"
+        }
+      ]
+    },
+    "expected": {
+      "total_invested": 500000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "current_value": 500000.0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "tenor_days": 30,
+      "elapsed_days": 15,
+      "end_date": "2026-06-04",
+      "projected": 4931.51,
+      "accrued": 2465.75,
+      "received": 0,
+      "outstanding": 4931.51,
+      "collection_rate": 0.0,
+      "delta_vs_accrued": -2465.75
+    },
+    "actual": {
+      "total_invested": 500000.0,
+      "total_profit_received": 0,
+      "total_returned": 0,
+      "unrealized_profit": 0.0,
+      "total_return": 0.0,
+      "projected_total_profit": 4931.51,
+      "accrued_to_date": 2465.75,
+      "outstanding": 4931.51,
+      "collection_rate_pct": 0.0,
+      "xirr": null
+    }
+  }
+]

@@ -1,0 +1,414 @@
+[
+  {
+    "scenario_id": "S01",
+    "label": "Active \u00b7 mid-term \u00b7 no profit received (baseline)",
+    "investment": {
+      "investment_id": "sc01aaaa",
+      "investment_name": "S01 Murabaha \u2014 ABC Bank",
+      "institution": "ABC Bank",
+      "principal_amount": 100000.0,
+      "expected_yield_pct": 5.0,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "currency": "SAR",
+      "status": "Active",
+      "current_value": 100000.0,
+      "sharia_structure": "Murabaha",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Renew",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S01 baseline scenario"
+    },
+    "transactions": [
+      {
+        "txn_id": "t01a",
+        "investment_id": "sc01aaaa",
+        "date": "2026-01-01",
+        "txn_type": "Initial Investment",
+        "amount": 100000.0,
+        "notes": "Initial",
+        "recorded_at": "2026-01-01T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S02",
+    "label": "Active \u00b7 past maturity date \u2192 accrued = projected",
+    "investment": {
+      "investment_id": "sc02aaaa",
+      "investment_name": "S02 Deposit \u2014 DEF Bank",
+      "institution": "DEF Bank",
+      "principal_amount": 80000.0,
+      "expected_yield_pct": 4.0,
+      "start_date": "2025-06-01",
+      "maturity_date": "2025-12-31",
+      "currency": "SAR",
+      "status": "Active",
+      "current_value": 80000.0,
+      "sharia_structure": "Not Specified",
+      "sharia_status": "Conventional",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Return",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S02 \u2014 today past maturity"
+    },
+    "transactions": [
+      {
+        "txn_id": "t02a",
+        "investment_id": "sc02aaaa",
+        "date": "2025-06-01",
+        "txn_type": "Initial Investment",
+        "amount": 80000.0,
+        "notes": "",
+        "recorded_at": "2025-06-01T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S03",
+    "label": "Pending Funding \u2192 yield schedule hidden",
+    "investment": {
+      "investment_id": "sc03aaaa",
+      "investment_name": "S03 Upcoming Wakala \u2014 GHI Bank",
+      "institution": "GHI Bank",
+      "principal_amount": 50000.0,
+      "expected_yield_pct": 6.0,
+      "start_date": "2026-07-01",
+      "maturity_date": "2027-06-30",
+      "currency": "SAR",
+      "status": "Pending Funding",
+      "current_value": 0.0,
+      "sharia_structure": "Wakala",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Renew",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S03 \u2014 pending, no outflow yet"
+    },
+    "transactions": []
+  },
+  {
+    "scenario_id": "S04",
+    "label": "Maturity Action Required \u00b7 past maturity \u2192 accrued = projected",
+    "investment": {
+      "investment_id": "sc04aaaa",
+      "investment_name": "S04 Sukuk \u2014 JKL Bank",
+      "institution": "JKL Bank",
+      "principal_amount": 120000.0,
+      "expected_yield_pct": 5.5,
+      "start_date": "2025-09-01",
+      "maturity_date": "2026-03-01",
+      "currency": "SAR",
+      "status": "Maturity Action Required",
+      "current_value": 120000.0,
+      "sharia_structure": "Sukuk Ijara",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Renew",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S04 \u2014 MAR, waiting for maturity action"
+    },
+    "transactions": [
+      {
+        "txn_id": "t04a",
+        "investment_id": "sc04aaaa",
+        "date": "2025-09-01",
+        "txn_type": "Initial Investment",
+        "amount": 120000.0,
+        "notes": "",
+        "recorded_at": "2025-09-01T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S05",
+    "label": "Closed \u00b7 fully paid at maturity \u00b7 outstanding = 0",
+    "investment": {
+      "investment_id": "sc05aaaa",
+      "investment_name": "S05 Term Deposit \u2014 MNO Bank",
+      "institution": "MNO Bank",
+      "principal_amount": 200000.0,
+      "expected_yield_pct": 3.5,
+      "start_date": "2025-01-01",
+      "maturity_date": "2025-12-31",
+      "currency": "SAR",
+      "status": "Closed",
+      "current_value": 0.0,
+      "sharia_structure": "Not Specified",
+      "sharia_status": "Conventional",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Return",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S05 \u2014 fully matured and closed"
+    },
+    "transactions": [
+      {
+        "txn_id": "t05a",
+        "investment_id": "sc05aaaa",
+        "date": "2025-01-01",
+        "txn_type": "Initial Investment",
+        "amount": 200000.0,
+        "notes": "",
+        "recorded_at": "2025-01-01T00:00:00"
+      },
+      {
+        "txn_id": "t05b",
+        "investment_id": "sc05aaaa",
+        "date": "2025-12-31",
+        "txn_type": "Profit Received",
+        "amount": 6981.37,
+        "notes": "Full profit at maturity",
+        "recorded_at": "2025-12-31T00:00:00"
+      },
+      {
+        "txn_id": "t05c",
+        "investment_id": "sc05aaaa",
+        "date": "2025-12-31",
+        "txn_type": "Principal Returned",
+        "amount": 200000.0,
+        "notes": "Principal returned at maturity",
+        "recorded_at": "2025-12-31T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S06",
+    "label": "Closed \u00b7 early withdrawal mid-term \u2192 accrual capped at close date",
+    "investment": {
+      "investment_id": "sc06aaaa",
+      "investment_name": "S06 Murabaha \u2014 PQR Bank",
+      "institution": "PQR Bank",
+      "principal_amount": 150000.0,
+      "expected_yield_pct": 6.0,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "currency": "SAR",
+      "status": "Closed",
+      "current_value": 0.0,
+      "sharia_structure": "Murabaha",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Return",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S06 \u2014 withdrawn early on 2026-03-31"
+    },
+    "transactions": [
+      {
+        "txn_id": "t06a",
+        "investment_id": "sc06aaaa",
+        "date": "2026-01-01",
+        "txn_type": "Initial Investment",
+        "amount": 150000.0,
+        "notes": "",
+        "recorded_at": "2026-01-01T00:00:00"
+      },
+      {
+        "txn_id": "t06b",
+        "investment_id": "sc06aaaa",
+        "date": "2026-03-31",
+        "txn_type": "Profit Received",
+        "amount": 2000.0,
+        "notes": "Partial profit \u2014 early withdrawal penalty applied",
+        "recorded_at": "2026-03-31T00:00:00"
+      },
+      {
+        "txn_id": "t06c",
+        "investment_id": "sc06aaaa",
+        "date": "2026-03-31",
+        "txn_type": "Principal Returned",
+        "amount": 150000.0,
+        "notes": "Principal returned \u2014 early withdrawal",
+        "recorded_at": "2026-03-31T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S07",
+    "label": "Active \u00b7 received AHEAD of accrual \u2192 positive delta",
+    "investment": {
+      "investment_id": "sc07aaaa",
+      "investment_name": "S07 Periodic Wakala \u2014 STU Bank",
+      "institution": "STU Bank",
+      "principal_amount": 75000.0,
+      "expected_yield_pct": 7.0,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "currency": "SAR",
+      "status": "Active",
+      "current_value": 75000.0,
+      "sharia_structure": "Wakala",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "Periodic",
+      "liquidity_type": "Monthly",
+      "maturity_instruction": "Renew",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S07 \u2014 periodic payments, bank paid ahead"
+    },
+    "transactions": [
+      {
+        "txn_id": "t07a",
+        "investment_id": "sc07aaaa",
+        "date": "2026-01-01",
+        "txn_type": "Initial Investment",
+        "amount": 75000.0,
+        "notes": "",
+        "recorded_at": "2026-01-01T00:00:00"
+      },
+      {
+        "txn_id": "t07b",
+        "investment_id": "sc07aaaa",
+        "date": "2026-02-01",
+        "txn_type": "Profit Received",
+        "amount": 1000.0,
+        "notes": "Jan profit",
+        "recorded_at": "2026-02-01T00:00:00"
+      },
+      {
+        "txn_id": "t07c",
+        "investment_id": "sc07aaaa",
+        "date": "2026-03-01",
+        "txn_type": "Profit Received",
+        "amount": 1000.0,
+        "notes": "Feb profit",
+        "recorded_at": "2026-03-01T00:00:00"
+      },
+      {
+        "txn_id": "t07d",
+        "investment_id": "sc07aaaa",
+        "date": "2026-04-01",
+        "txn_type": "Profit Received",
+        "amount": 1000.0,
+        "notes": "Mar profit",
+        "recorded_at": "2026-04-01T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S08",
+    "label": "Active \u00b7 received BEHIND accrual \u2192 negative delta",
+    "investment": {
+      "investment_id": "sc08aaaa",
+      "investment_name": "S08 Mudaraba \u2014 VWX Bank",
+      "institution": "VWX Bank",
+      "principal_amount": 90000.0,
+      "expected_yield_pct": 4.5,
+      "start_date": "2026-01-01",
+      "maturity_date": "2026-12-31",
+      "currency": "SAR",
+      "status": "Active",
+      "current_value": 90000.0,
+      "sharia_structure": "Mudaraba",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "Periodic",
+      "liquidity_type": "Monthly",
+      "maturity_instruction": "Renew",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S08 \u2014 bank behind on payments"
+    },
+    "transactions": [
+      {
+        "txn_id": "t08a",
+        "investment_id": "sc08aaaa",
+        "date": "2026-01-01",
+        "txn_type": "Initial Investment",
+        "amount": 90000.0,
+        "notes": "",
+        "recorded_at": "2026-01-01T00:00:00"
+      },
+      {
+        "txn_id": "t08b",
+        "investment_id": "sc08aaaa",
+        "date": "2026-03-01",
+        "txn_type": "Profit Received",
+        "amount": 500.0,
+        "notes": "Partial Q1 profit",
+        "recorded_at": "2026-03-01T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S09",
+    "label": "Active \u00b7 no maturity_date \u2192 yield schedule hidden",
+    "investment": {
+      "investment_id": "sc09aaaa",
+      "investment_name": "S09 Open-ended Account \u2014 YZA Bank",
+      "institution": "YZA Bank",
+      "principal_amount": 60000.0,
+      "expected_yield_pct": 5.0,
+      "start_date": "2026-01-01",
+      "maturity_date": null,
+      "currency": "SAR",
+      "status": "Active",
+      "current_value": 60000.0,
+      "sharia_structure": "Not Specified",
+      "sharia_status": "Not Applicable",
+      "profit_payment_structure": "Periodic",
+      "liquidity_type": "Daily",
+      "maturity_instruction": "Renew",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S09 \u2014 rolling savings, no fixed maturity"
+    },
+    "transactions": [
+      {
+        "txn_id": "t09a",
+        "investment_id": "sc09aaaa",
+        "date": "2026-01-01",
+        "txn_type": "Initial Investment",
+        "amount": 60000.0,
+        "notes": "",
+        "recorded_at": "2026-01-01T00:00:00"
+      }
+    ]
+  },
+  {
+    "scenario_id": "S10",
+    "label": "Active \u00b7 30-day short tenor \u00b7 high rate 12% \u00b7 mid-way through",
+    "investment": {
+      "investment_id": "sc10aaaa",
+      "investment_name": "S10 Money Market \u2014 BCD Bank",
+      "institution": "BCD Bank",
+      "principal_amount": 500000.0,
+      "expected_yield_pct": 12.0,
+      "start_date": "2026-05-20",
+      "maturity_date": "2026-06-19",
+      "currency": "SAR",
+      "status": "Active",
+      "current_value": 500000.0,
+      "sharia_structure": "Commodity Murabaha / Tawarruq",
+      "sharia_status": "Shariah Compliant",
+      "profit_payment_structure": "At Maturity",
+      "liquidity_type": "Locked Until Maturity",
+      "maturity_instruction": "Return",
+      "parent_investment_id": null,
+      "child_investment_id": null,
+      "notes": "S10 \u2014 short 30-day placement, high rate"
+    },
+    "transactions": [
+      {
+        "txn_id": "t10a",
+        "investment_id": "sc10aaaa",
+        "date": "2026-05-20",
+        "txn_type": "Initial Investment",
+        "amount": 500000.0,
+        "notes": "",
+        "recorded_at": "2026-05-20T00:00:00"
+      }
+    ]
+  }
+]
