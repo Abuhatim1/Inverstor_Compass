@@ -7451,7 +7451,8 @@ def render_alt_investments_tab() -> None:
             for _li in _ladder_inv:
                 _yr, _mo = int(_li.maturity_date[:4]), int(_li.maturity_date[5:7])
                 _qkey = f"{_yr} Q{(_mo - 1) // 3 + 1}"
-                _qdata[_qkey][_li.status] += _li.principal_amount
+                # store in thousands for clean axis
+                _qdata[_qkey][_li.status] += _li.principal_amount / 1_000
 
             _quarters = sorted(
                 _qdata.keys(),
@@ -7464,29 +7465,45 @@ def render_alt_investments_tab() -> None:
             ]
             _ladder_fig = go.Figure()
             for _st_name, _st_color in _status_cfg:
-                _vals = [_qdata[q].get(_st_name, 0) for q in _quarters]
-                if any(v > 0 for v in _vals):
+                _vals_k = [_qdata[q].get(_st_name, 0) for q in _quarters]
+                if any(v > 0 for v in _vals_k):
                     _ladder_fig.add_trace(go.Bar(
                         name=_st_name,
                         x=_quarters,
-                        y=_vals,
+                        y=_vals_k,
                         marker_color=_st_color,
-                        text=[f"{v:,.0f}" if v > 0 else "" for v in _vals],
-                        textposition="inside",
+                        marker_line_width=0,
+                        hovertemplate=(
+                            "<b>%{x}</b><br>"
+                            + _st_name
+                            + ": %{y:,.1f}K<extra></extra>"
+                        ),
                     ))
             _ladder_fig.update_layout(
                 barmode="stack",
-                title="📅 Maturity Ladder — Principal by Quarter",
                 xaxis_title=None,
-                yaxis_title="Principal",
-                height=300,
-                margin=dict(l=0, r=0, t=40, b=0),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                            xanchor="right", x=1),
+                yaxis_title=None,
+                height=240,
+                bargap=0.3,
+                margin=dict(l=40, r=10, t=10, b=30),
+                legend=dict(
+                    orientation="h",
+                    yanchor="top", y=-0.08,
+                    xanchor="left", x=0,
+                    font=dict(size=11),
+                ),
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
             )
-            _ladder_fig.update_yaxes(showgrid=True, gridcolor="rgba(128,128,128,0.2)")
+            _ladder_fig.update_yaxes(
+                showgrid=True,
+                gridcolor="rgba(128,128,128,0.15)",
+                ticksuffix="K",
+                tickformat=",.0f",
+                tickfont=dict(size=11),
+            )
+            _ladder_fig.update_xaxes(tickfont=dict(size=11))
+            st.caption("📅 **Maturity Ladder** — principal maturing per quarter (thousands)")
             st.plotly_chart(_ladder_fig, use_container_width=True)
 
         # ── Add button + institution filter ───────────────────────────────
