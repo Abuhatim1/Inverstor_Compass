@@ -595,18 +595,23 @@ def compute_igi_metrics(
     investment_id: str,
     path:          str | None = None,
     txn_path:      str | None = None,
+    _investments:  "dict[str, IGIInvestment] | None" = None,
+    _all_txns:     "list[IGITransaction] | None"     = None,
 ) -> dict:
     """
     Compute performance metrics for a single IGI investment.
 
     Only actual cash flows are used — expected yield is NEVER used.
+
+    Pass ``_investments`` and ``_all_txns`` when the caller has already loaded
+    the data to avoid redundant file reads (e.g. inside a render loop).
     """
-    investments = load_igi_investments(path=path)
+    investments = _investments if _investments is not None else load_igi_investments(path=path)
     inv = investments.get(investment_id)
     if inv is None:
         return {}
 
-    all_txns = load_igi_transactions(path=txn_path)
+    all_txns = _all_txns if _all_txns is not None else load_igi_transactions(path=txn_path)
     txns     = [t for t in all_txns if t.investment_id == investment_id]
 
     total_invested       = sum(t.amount for t in txns if t.txn_type in _IGI_OUTFLOW_TYPES)

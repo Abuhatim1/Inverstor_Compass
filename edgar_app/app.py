@@ -7447,17 +7447,18 @@ def render_alt_investments_tab() -> None:
             import plotly.graph_objects as go
             from collections import defaultdict
 
-            _qdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+            # Monthly buckets (YYYY-MM) in thousands
+            _mdata: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
             for _li in _ladder_inv:
-                _yr, _mo = int(_li.maturity_date[:4]), int(_li.maturity_date[5:7])
-                _qkey = f"{_yr} Q{(_mo - 1) // 3 + 1}"
-                # store in thousands for clean axis
-                _qdata[_qkey][_li.status] += _li.principal_amount / 1_000
+                _mkey = _li.maturity_date[:7]          # "YYYY-MM"
+                _mdata[_mkey][_li.status] += _li.principal_amount / 1_000
 
-            _quarters = sorted(
-                _qdata.keys(),
-                key=lambda q: (int(q[:4]), int(q[-1])),
-            )
+            _months = sorted(_mdata.keys())
+
+            # Default visible window: first 6 months with data
+            _vis_start = _months[0]
+            _vis_end   = _months[min(5, len(_months) - 1)]
+
             _status_cfg = [
                 ("Active",                   "#2196F3"),
                 ("Pending Funding",          "#9E9E9E"),
@@ -7465,35 +7466,53 @@ def render_alt_investments_tab() -> None:
             ]
             _ladder_fig = go.Figure()
             for _st_name, _st_color in _status_cfg:
-                _vals_k = [_qdata[q].get(_st_name, 0) for q in _quarters]
+                _vals_k = [_mdata[m].get(_st_name, 0) for m in _months]
                 if any(v > 0 for v in _vals_k):
                     _ladder_fig.add_trace(go.Bar(
                         name=_st_name,
-                        x=_quarters,
+                        x=_months,
                         y=_vals_k,
                         marker_color=_st_color,
                         marker_line_width=0,
-                        hovertemplate=(
-                            "<b>%{x}</b><br>"
-                            + _st_name
-                            + ": %{y:,.1f}K<extra></extra>"
-                        ),
+                        hovertemplate="<b>%{x}</b><br>" + _st_name + ": %{y:,.1f}K<extra></extra>",
                     ))
+
+            # CF total exposure — flat reference line across all months
+            _cf_accts   = load_cf_accounts()
+            _cf_total_k = sum(
+                a.current_account_value for a in _cf_accts.values()
+                if a.status != "Closed"
+            ) / 1_000
+            if _cf_total_k > 0:
+                _ladder_fig.add_trace(go.Scatter(
+                    x=_months,
+                    y=[_cf_total_k] * len(_months),
+                    mode="lines",
+                    name="CF Exposure (total)",
+                    line=dict(color="#E91E63", width=2, dash="dot"),
+                    hovertemplate="CF total exposure: %{y:,.1f}K<extra></extra>",
+                ))
+
             _ladder_fig.update_layout(
                 barmode="stack",
                 xaxis_title=None,
                 yaxis_title=None,
-                height=240,
-                bargap=0.3,
-                margin=dict(l=40, r=10, t=10, b=30),
+                height=260,
+                bargap=0.25,
+                margin=dict(l=40, r=10, t=10, b=60),
                 legend=dict(
                     orientation="h",
-                    yanchor="top", y=-0.08,
+                    yanchor="top", y=-0.18,
                     xanchor="left", x=0,
                     font=dict(size=11),
                 ),
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(
+                    range=[_vis_start, _vis_end],
+                    rangeslider=dict(visible=True, thickness=0.08),
+                    tickfont=dict(size=11),
+                ),
             )
             _ladder_fig.update_yaxes(
                 showgrid=True,
@@ -7502,8 +7521,7 @@ def render_alt_investments_tab() -> None:
                 tickformat=",.0f",
                 tickfont=dict(size=11),
             )
-            _ladder_fig.update_xaxes(tickfont=dict(size=11))
-            st.caption("📅 **Maturity Ladder** — principal maturing per quarter (thousands)")
+            st.caption("📅 **Maturity Ladder** — IGI principal by month · dashed line = total CF exposure (thousands)")
             st.plotly_chart(_ladder_fig, use_container_width=True)
 
         # ── Add button + institution filter ───────────────────────────────
@@ -7577,7 +7595,11 @@ def render_alt_investments_tab() -> None:
                         st.caption(f"📝 {_inv.notes}")
 
                     # Performance metrics
-                    _m = compute_igi_metrics(_inv.investment_id)
+                    _m = compute_igi_metrics(
+                        _inv.investment_id,
+                        _investments=_igi_investments,
+                        _all_txns=_igi_txns,
+                    )
                     if _m:
                         _met1, _met2, _met3, _met4 = st.columns(4)
                         _met1.metric("Total Profit Received", f"{_m.get('total_profit_received', 0):,.2f}")
