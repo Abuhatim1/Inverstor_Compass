@@ -21,8 +21,6 @@ if _HERE not in sys.path:
 
 import streamlit as st
 
-from edgar import EdgarAPIError, get_filings, lookup_company
-from edgar.filings import Filing
 from ai.analyzer import AnalysisResult, analyze_filing, get_api_key
 from ai.cache import DAILY_LIMIT, cache_size, get_today_count
 from ai.evidence import CONFIDENCE_BADGE, FIELD_LABELS, evidence_by_field
@@ -1121,11 +1119,11 @@ def render_comparison_card(rec: ComparisonRecord) -> None:
 
 
 def render_filing_card(
-    filing: Filing,
+    filing: "Filing",
     company_name: str,
     ticker: str,
     index: int,
-    previous_filing: Filing | None = None,
+    previous_filing: "Filing | None" = None,
 ) -> None:
     with st.container(border=True):
         col_left, col_mid, col_right = st.columns([3, 1, 1])
@@ -1212,7 +1210,7 @@ def render_filing_card(
 
 def render_section(
     form_type: str,
-    filings: list[Filing],
+    filings: "list[Filing]",
     company_name: str,
     ticker: str,
     label: str,
@@ -8404,6 +8402,8 @@ else:
         render_upload_tab()
 
     with tab_search:
+        from edgar import EdgarAPIError, get_filings, lookup_company
+        from edgar.filings import Filing
         st.divider()
 
         col_input, col_btn = st.columns([3, 1])
