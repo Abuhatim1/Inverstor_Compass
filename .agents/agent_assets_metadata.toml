@@ -12,3 +12,9 @@ id = "vzqrvP3d9jwp--Fo0GPuf"
 uri = "file://bousala_project_summary.txt"
 type = "text"
 title = "Bousala Project Summary"
+
+[[outputs]]
+id = "xTK-QlQHMiK9RsrpgKaDt"
+uri = "file://.local/exports/Bousala_NetWorth_Framework.txt"
+type = "text"
+title = "Bousala Net Worth Framework v1.0"
