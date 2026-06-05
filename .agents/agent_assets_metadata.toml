@@ -18,3 +18,9 @@ id = "xTK-QlQHMiK9RsrpgKaDt"
 uri = "file://.local/exports/Bousala_NetWorth_Framework.txt"
 type = "text"
 title = "Bousala Net Worth Framework v1.0 (Complete)"
+
+[[outputs]]
+id = "VnxQwS1HPhVt1FgoZc9q0"
+uri = "file://Bousala_NetWorth_Framework.txt"
+type = "text"
+title = "Bousala Net Worth Framework v1.0 (Complete)"
