@@ -509,6 +509,19 @@ with st.sidebar:
     if mp_auto_on and not _mko():
         st.caption("🔴 Market closed — prices may be delayed")
 
+    _fw_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Bousala_NetWorth_Framework.txt")
+    if os.path.exists(_fw_path):
+        st.divider()
+        st.caption("📄 **Framework Document**")
+        with open(_fw_path, "rb") as _fw_f:
+            st.download_button(
+                "📥 Download Framework Doc",
+                data=_fw_f,
+                file_name="Bousala_NetWorth_Framework.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+
 _analyze_enabled = _ai_ready or demo_mode
 
 
