@@ -6769,8 +6769,7 @@ def render_closed_holdings_tab() -> None:
     st.header("📁 Closed Holdings")
     st.caption(
         "Positions you have fully or partially sold. "
-        "Realized P&L is calculated using **FIFO** cost basis. "
-        "Use **↩️ Reopen** to restore a position if you re-enter a ticker."
+        "Realized P&L is calculated using **FIFO** cost basis."
     )
 
     closed = load_closed_holdings()
@@ -6841,40 +6840,6 @@ def render_closed_holdings_tab() -> None:
             if lot_rows:
                 st.dataframe(pd.DataFrame(lot_rows), hide_index=True, use_container_width=True)
 
-            # ── Reopen button ──────────────────────────────────────────────────
-            st.write("")
-            _reopen_key = f"reopen_{ticker}"
-            _confirm_key = f"reopen_confirm_{ticker}"
-            if not st.session_state.get(_confirm_key):
-                if st.button(
-                    f"↩️ Reopen / Undo  {ticker}",
-                    key=_reopen_key,
-                    help="Void all closed lots for this ticker (soft-delete). "
-                         "The position will disappear from Closed Holdings. "
-                         "If you still hold shares, they remain in Active Holdings.",
-                ):
-                    st.session_state[_confirm_key] = True
-                    st.rerun()
-            else:
-                st.warning(
-                    f"This will **void** all {len(ch.lots)} closed lot(s) for **{ticker}**. "
-                    "The realized P&L records will be hidden (not permanently deleted). "
-                    "Confirm?",
-                    icon="⚠️",
-                )
-                _ok_c, _cancel_c = st.columns(2)
-                with _ok_c:
-                    if st.button(f"✅ Yes, reopen {ticker}", key=f"reopen_ok_{ticker}",
-                                 use_container_width=True, type="primary"):
-                        voided = void_lots_for_ticker(ticker, void_reason="Reopened via UI")
-                        st.toast(f"Voided {voided} lot(s) for {ticker}", icon="↩️")
-                        st.session_state.pop(_confirm_key, None)
-                        st.rerun()
-                with _cancel_c:
-                    if st.button("Cancel", key=f"reopen_cancel_{ticker}",
-                                 use_container_width=True):
-                        st.session_state.pop(_confirm_key, None)
-                        st.rerun()
 
 
 def render_upload_tab() -> None:

@@ -1422,5 +1422,21 @@
     "settlement_amount": 0.0,
     "settlement_category": "",
     "settlement_currency": ""
+  },
+  {
+    "ticker": "KULR",
+    "side": "SELL",
+    "quantity": 1.0,
+    "price": 3.8798999786376953,
+    "date": "2026-06-08",
+    "notes": "",
+    "recorded_at": "2026-06-08T16:57:46.103337",
+    "account_id": "3637b685",
+    "fees": 0.0,
+    "transaction_id": "TXN_4a5a39e2",
+    "asset_id": "AST_001648",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   }
 ]

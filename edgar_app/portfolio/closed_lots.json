@@ -21,5 +21,28 @@
     "voided": true,
     "voided_at": "2026-06-01T11:27:34.290054",
     "void_reason": "Reopened via UI"
+  },
+  {
+    "lot_id": "1ae43f4f-7e3",
+    "ticker": "KULR",
+    "company_name": "KULR Technology Group, Inc.",
+    "currency": "USD",
+    "quantity": 1.0,
+    "buy_price": 3.86999989,
+    "sell_price": 3.87989998,
+    "buy_value": 3.86999989,
+    "sell_value": 3.87989998,
+    "sell_fees": 0.0,
+    "realized_pnl": 0.00990009,
+    "realized_pnl_pct": 0.26,
+    "open_date": "2026-06-08",
+    "close_date": "2026-06-08",
+    "sell_txn_id": "2026-06-08T16:57:46.103337",
+    "account_id": "3637b685",
+    "notes": "",
+    "recorded_at": "2026-06-08T16:57:46.101533",
+    "voided": true,
+    "voided_at": "2026-06-08T16:58:56.522217",
+    "void_reason": "Reopened via UI"
   }
 ]
