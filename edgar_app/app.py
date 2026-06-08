@@ -5018,6 +5018,170 @@ def render_cash_ledger_tab() -> None:
             st.dataframe(pd.DataFrame(bal_rows), hide_index=True, use_container_width=True)
 
 
+def render_cashflow_tab() -> None:
+    """Investment Cashflow — actual cash generated/consumed by portfolio activity."""
+    from portfolio.cash_ledger import load_ledger
+    from fx_rates import get_rates_for_holdings
+    from collections import defaultdict
+    import plotly.graph_objects as go
+    import pandas as pd
+    from datetime import datetime as _cf_dt
+
+    base_ccy = st.session_state.get("global_base_ccy", "SAR")
+
+    st.header("💹 Investment Cashflow")
+    st.caption(
+        "Actual cash generated and consumed by portfolio activity — "
+        "SELL proceeds, dividends received, BUY settlements, and fees. "
+        "Personal deposits and withdrawals are excluded."
+    )
+
+    entries = load_ledger()
+    _INVEST_TYPES = {"BUY", "SELL", "DIVIDEND", "FEE"}
+    inv_entries = [e for e in entries if e.transaction_type in _INVEST_TYPES]
+
+    if not inv_entries:
+        st.info(
+            "No investment cashflow entries yet. "
+            "Record BUY / SELL / Dividend transactions to see cashflow trends here.",
+            icon="💡",
+        )
+        return
+
+    # ── FX conversion — convert each entry to base_ccy ──────────────────────
+    _ccys = list({e.currency for e in inv_entries})
+    _fx   = get_rates_for_holdings(_ccys, base_ccy) if _ccys else {}
+
+    def _to_base(amount: float, ccy: str) -> float:
+        if ccy == base_ccy:
+            return amount
+        return amount * _fx.get(ccy, 1.0)
+
+    # ── Aggregate by month ───────────────────────────────────────────────────
+    _m_in:      dict[str, float] = defaultdict(float)
+    _m_out:     dict[str, float] = defaultdict(float)
+    _m_by_type: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    for e in inv_entries:
+        ym  = e.date[:7]
+        amt = _to_base(e.amount, e.currency)
+        if amt >= 0:
+            _m_in[ym]  += amt
+        else:
+            _m_out[ym] += abs(amt)
+        _m_by_type[ym][e.transaction_type] += amt
+
+    _all_months = sorted(set(_m_in) | set(_m_out))
+    _last6      = _all_months[-6:] if len(_all_months) >= 6 else _all_months
+
+    def _mlabel(ym: str) -> str:
+        try:
+            return _cf_dt.strptime(ym, "%Y-%m").strftime("%b %Y")
+        except ValueError:
+            return ym
+
+    # ── Summary metrics (latest month) ──────────────────────────────────────
+    _latest = _last6[-1] if _last6 else None
+    if _latest:
+        _in  = _m_in.get(_latest, 0.0)
+        _out = _m_out.get(_latest, 0.0)
+        _net = _in - _out
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric(
+            f"Cash In · {_mlabel(_latest)}",
+            f"{_in:,.0f} {base_ccy}",
+            help="SELL proceeds + dividends received",
+        )
+        mc2.metric(
+            f"Cash Out · {_mlabel(_latest)}",
+            f"{_out:,.0f} {base_ccy}",
+            help="BUY settlements + fees paid",
+        )
+        mc3.metric(
+            f"Net · {_mlabel(_latest)}",
+            f"{_net:,.0f} {base_ccy}",
+            delta=f"{_net:+,.0f}" if _net != 0 else None,
+            help="Positive = portfolio generated more cash than it consumed",
+        )
+
+    st.divider()
+
+    # ── Grouped bar chart ────────────────────────────────────────────────────
+    _labels   = [_mlabel(m) for m in _last6]
+    _in_vals  = [_m_in.get(m,  0.0) for m in _last6]
+    _out_vals = [_m_out.get(m, 0.0) for m in _last6]
+
+    _cf_fig = go.Figure()
+    _cf_fig.add_trace(go.Bar(
+        name="Cash In",
+        x=_labels, y=_in_vals,
+        marker_color="#22c55e",
+        marker_line_width=0,
+        text=[f"{v:,.0f}" if v > 0 else "" for v in _in_vals],
+        textposition="outside",
+        textfont=dict(size=10),
+    ))
+    _cf_fig.add_trace(go.Bar(
+        name="Cash Out",
+        x=_labels, y=_out_vals,
+        marker_color="#ef4444",
+        marker_line_width=0,
+        text=[f"{v:,.0f}" if v > 0 else "" for v in _out_vals],
+        textposition="outside",
+        textfont=dict(size=10),
+    ))
+    _cf_fig.update_layout(
+        barmode="group",
+        height=280,
+        margin=dict(l=40, r=10, t=30, b=50),
+        bargap=0.25,
+        bargroupgap=0.05,
+        legend=dict(
+            orientation="h", yanchor="top", y=-0.12,
+            xanchor="left", x=0, font=dict(size=11),
+        ),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(128,128,128,0.15)",
+            tickformat=",.0f",
+            tickfont=dict(size=11),
+            ticksuffix=f" {base_ccy}",
+        ),
+        xaxis=dict(tickfont=dict(size=11)),
+    )
+    st.caption(f"📊 **Investment Cashflow — last {len(_last6)} months** · {base_ccy} · BUY/SELL/Dividend/Fee only")
+    st.plotly_chart(_cf_fig, use_container_width=True, config={"displayModeBar": False})
+
+    # ── Monthly summary table ────────────────────────────────────────────────
+    st.subheader("Monthly Breakdown")
+    _rows = []
+    for m in reversed(_all_months):
+        _i   = _m_in.get(m,  0.0)
+        _o   = _m_out.get(m, 0.0)
+        _n   = _i - _o
+        _t   = _m_by_type.get(m, {})
+        _rows.append({
+            "Month":               _mlabel(m),
+            f"In ({base_ccy})":    round(_i, 2),
+            f"Out ({base_ccy})":   round(_o, 2),
+            f"Net ({base_ccy})":   round(_n, 2),
+            "Flow":                "▲" if _n >= 0 else "▼",
+            "Dividends":           round(_t.get("DIVIDEND", 0.0), 2),
+            "Sell Proceeds":       round(_t.get("SELL",     0.0), 2),
+            "Buys":                round(abs(_t.get("BUY", 0.0)), 2),
+            "Fees":                round(abs(_t.get("FEE", 0.0)), 2),
+        })
+    if _rows:
+        st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True)
+        st.caption(
+            "Amounts in base currency. "
+            "Buys and Fees show the amount paid (positive for readability). "
+            "▲ = net cash positive month · ▼ = net cash consumed month."
+        )
+
+
 def render_thesis_memory_tab() -> None:
     """Dynamic Thesis State Engine — strategic state models for each holding."""
     from portfolio import (
@@ -8377,7 +8541,7 @@ if _main_nav == "🏦 Alt Investments":
 
 else:
     (tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions,
-     tab_decisions, tab_risk, tab_command,
+     tab_cashflow, tab_decisions, tab_risk, tab_command,
      tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
      tab_test, tab_discovery) = st.tabs([
         "💼 Holdings",
@@ -8385,6 +8549,7 @@ else:
         "📁 Closed Holdings",
         "💳 Accounts",
         "📜 Transaction History",
+        "💹 Cashflow",
         "🎯 Decision Queue",
         "🛡️ Portfolio Risk",
         "🧭 Command Center",
@@ -8417,6 +8582,9 @@ else:
 
     with tab_transactions:
         render_transactions_tab()
+
+    with tab_cashflow:
+        render_cashflow_tab()
 
     with tab_decisions:
         render_decision_queue_tab()
