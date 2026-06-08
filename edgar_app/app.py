@@ -7429,10 +7429,11 @@ def render_alt_investments_tab() -> None:
         "and Crowdfunding platform accounts — without modifying the Holdings engine."
     )
 
-    _alt_type = st.radio(
+    _alt_type = st.pills(
         "Investment Type",
         ["Investment Grade Income", "Crowdfunding"],
-        horizontal=True,
+        default="Investment Grade Income",
+        label_visibility="collapsed",
         key="alt_inv_type",
     )
     st.divider()
