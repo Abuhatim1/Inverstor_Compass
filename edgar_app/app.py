@@ -7097,7 +7097,7 @@ def render_global_header() -> str:
             return f"{v / 1_000_000:.1f}M"
         if av >= 10_000:
             return f"{v / 1_000:.0f}K"
-        return f"{v:,.0f}"
+        return f"{v:,.2f}"
 
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
