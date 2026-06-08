@@ -1338,7 +1338,7 @@ def _dlg_promote_holding() -> None:
     if _existing:
         st.info(
             f"**{_ptk}** is already in your Holdings "
-            f"({_existing.quantity:g} shares @ {_existing.avg_cost:.4f}). "
+            f"({_existing.quantity:g} shares @ {_existing.avg_cost:,.4f}). "
             "Use **Buy More** from the Holdings tab instead.",
             icon="✅",
         )
@@ -1405,9 +1405,9 @@ def _dlg_promote_holding() -> None:
             if not _cash_ok:
                 st.error("Insufficient cash balance.", icon="🚫")
         except Exception:
-            st.caption(f"Opening cost: **{_ptotal:,.4f} {_pccy}**")
+            st.caption(f"Opening cost: **{_ptotal:,.2f} {_pccy}**")
     else:
-        st.caption(f"Opening cost: **{_ptotal:,.4f} {_pccy}**")
+        st.caption(f"Opening cost: **{_ptotal:,.2f} {_pccy}**")
 
     # ── Submit / Cancel ───────────────────────────────────────────────────────
     _sb1, _sb2 = st.columns(2)
@@ -1448,7 +1448,7 @@ def _dlg_promote_holding() -> None:
                         st.session_state.pop(_dk, None)
                     st.toast(
                         f"**{_ptk_clean}** promoted to Holdings! "
-                        f"{float(_pqty):.4f} shares @ {_pccy} {float(_pcost):.4f}",
+                        f"{float(_pqty):,.4f} shares @ {_pccy} {float(_pcost):,.4f}",
                         icon="🚀",
                     )
                     st.rerun()
@@ -1528,7 +1528,7 @@ def render_portfolio_dashboard() -> None:
                     st.caption(entry.company_name)
                     if md and md.is_ok:
                         st.caption(
-                            f"{md.day_indicator} **{md.current_price:.2f} {md.currency}**"
+                            f"{md.day_indicator} **{md.current_price:,.2f} {md.currency}**"
                             f"  ·  {md.change_str}"
                         )
                     elif md and not md.is_ok:
@@ -1565,7 +1565,7 @@ def render_portfolio_dashboard() -> None:
                 if _wl_existing:
                     st.caption(
                         f"✅ Already held · {_wl_existing.quantity:g} shares @ "
-                        f"{_wl_existing.avg_cost:.4f} · "
+                        f"{_wl_existing.avg_cost:,.4f} · "
                         "Use **Buy More** in the Holdings tab to add more."
                     )
                 else:
@@ -3090,7 +3090,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 if _val.exists:
                     st.success(
                         f"✅ **{_val.resolved_ticker}** — {_val.company_name or '—'}  "
-                        f"| {_val.currency}  {_val.current_price:.4f}"
+                        f"| {_val.currency}  {_val.current_price:,.4f}"
                         f"  | {_val.exchange}  | {_val.asset_type}"
                     )
                 else:
@@ -3314,7 +3314,7 @@ def render_holdings_tab(bundle: dict) -> None:
                         _mode_label = "Buy recorded" if _is_buy_mode else "Holding recorded"
                         st.toast(
                             f"{_mode_label}: **{_ad_tk_clean}** · "
-                            f"{_ad_qty:.4f} shares @ {_ad_cost:.4f} {_ad_ccy}",
+                            f"{_ad_qty:,.4f} shares @ {_ad_cost:,.4f} {_ad_ccy}",
                             icon="✅",
                         )
                         st.rerun()
@@ -3384,7 +3384,7 @@ def render_holdings_tab(bundle: dict) -> None:
             # New avg cost preview
             if (dlg_h.quantity + _d_qty) > 0:
                 _new_avg = ((dlg_h.avg_cost * dlg_h.quantity) + (_d_price * _d_qty)) / (dlg_h.quantity + _d_qty)
-                st.caption(f"Est. new avg cost: **{_new_avg:.4f} {_d_ccy}**")
+                st.caption(f"Est. new avg cost: **{_new_avg:,.4f} {_d_ccy}**")
             _db1, _db2 = st.columns(2)
             with _db1:
                 # Block actual buy if cash is insufficient
@@ -3421,8 +3421,8 @@ def render_holdings_tab(bundle: dict) -> None:
                                 except Exception:
                                     pass
                             st.toast(
-                                f"Bought {_d_qty:.4f} × {dlg_h.ticker} @ {_d_price:.4f}  "
-                                f"· New avg cost: {_h2.avg_cost:.4f}",
+                                f"Bought {_d_qty:,.4f} × {dlg_h.ticker} @ {_d_price:,.4f}  "
+                                f"· New avg cost: {_h2.avg_cost:,.4f}",
                                 icon="✅",
                             )
                             st.rerun()
@@ -3446,7 +3446,7 @@ def render_holdings_tab(bundle: dict) -> None:
             _d_default_idx = _d_ids.index(_linked_aid) if _linked_aid in _d_ids else 0
             st.caption(
                 f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
-                f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
+                f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:,.4f} {_d_ccy}"
             )
             # Unique key per dialog open — forces fresh value= every time
             _sk = f"{dlg_ticker}_{st.session_state.get('_sell_oid', 0)}"
@@ -3522,7 +3522,7 @@ def render_holdings_tab(bundle: dict) -> None:
                             _fully = _h2.quantity <= 1e-9
                             st.toast(
                                 f"{'Closed' if _fully else 'Sold'} {_final_qty:,.4f} × {dlg_h.ticker} "
-                                f"@ {_d_price:.4f}  · P&L: {_rpnl:+,.2f} {_d_ccy}",
+                                f"@ {_d_price:,.4f}  · P&L: {_rpnl:+,.2f} {_d_ccy}",
                                 icon="✅",
                             )
                             st.rerun()
@@ -3556,7 +3556,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 st.divider()
                 st.caption(
                     f"**{_qb_h.ticker}** · {_qb_h.company_name}  "
-                    f"| {_qb_h.quantity:,.4f} shares @ avg {_qb_h.avg_cost:.4f} {_qb_ccy}"
+                    f"| {_qb_h.quantity:,.4f} shares @ avg {_qb_h.avg_cost:,.4f} {_qb_ccy}"
                 )
                 _qb_c1, _qb_c2 = st.columns(2)
                 with _qb_c1:
@@ -3600,7 +3600,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 # New avg cost preview
                 if (_qb_h.quantity + _qb_qty) > 0:
                     _qb_new_avg = ((_qb_h.avg_cost * _qb_h.quantity) + (_qb_price * _qb_qty)) / (_qb_h.quantity + _qb_qty)
-                    st.caption(f"Est. new avg cost: **{_qb_new_avg:.4f} {_qb_ccy}**")
+                    st.caption(f"Est. new avg cost: **{_qb_new_avg:,.4f} {_qb_ccy}**")
 
                 _qbb1, _qbb2 = st.columns(2)
                 with _qbb1:
@@ -3626,7 +3626,7 @@ def render_holdings_tab(bundle: dict) -> None:
                                         _upd_cash(_qb_aid, -_qb_total)
                                     except Exception:
                                         pass
-                                st.toast(f"Bought {_qb_qty:.4f} × {_qb_h.ticker} @ {_qb_price:.4f}", icon="✅")
+                                st.toast(f"Bought {_qb_qty:,.4f} × {_qb_h.ticker} @ {_qb_price:,.4f}", icon="✅")
                                 st.rerun()
                         except Exception as _ex:
                             st.error(f"Buy failed — {_ex}")
@@ -3674,7 +3674,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 st.divider()
                 st.caption(
                     f"**{_qs_h.ticker}** · {_qs_h.company_name}  "
-                    f"| **{_qs_avail:,.4f}** shares @ avg cost {_qs_h.avg_cost:.4f} {_qs_ccy}"
+                    f"| **{_qs_avail:,.4f}** shares @ avg cost {_qs_h.avg_cost:,.4f} {_qs_ccy}"
                 )
                 _qs_full = st.checkbox("Close full position", value=True,
                                        key=f"qs_full_{_qs_sel}")
@@ -3738,8 +3738,8 @@ def render_holdings_tab(bundle: dict) -> None:
                                     except Exception:
                                         pass
                                 st.toast(
-                                    f"Sold {_qs_qty:.4f} × {_qs_h.ticker} "
-                                    f"@ {_qs_price:.4f} · P&L: {_qs_rpnl:+,.2f} {_qs_ccy}",
+                                    f"Sold {_qs_qty:,.4f} × {_qs_h.ticker} "
+                                    f"@ {_qs_price:,.4f} · P&L: {_qs_rpnl:+,.2f} {_qs_ccy}",
                                     icon="✅",
                                 )
                                 st.rerun()
@@ -6802,16 +6802,16 @@ def render_closed_holdings_tab() -> None:
             f"{pnl_color}  **{ticker}**  ·  {ch.company_name}  ·  "
             f"P&L: **{_sign2}{ch.realized_pnl:,.2f} {ch.currency}** "
             f"({ch.realized_pnl_pct:+.2f}%)  ·  "
-            f"{ch.total_quantity:.4f} shares  ·  held {ch.holding_period_label}",
+            f"{ch.total_quantity:,.4f} shares  ·  held {ch.holding_period_label}",
             expanded=False,
         ):
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Avg Buy Price",  f"{ch.avg_buy_price:.4f}")
-            c2.metric("Avg Sell Price", f"{ch.avg_sell_price:.4f}")
+            c1.metric("Avg Buy Price",  f"{ch.avg_buy_price:,.4f}")
+            c2.metric("Avg Sell Price", f"{ch.avg_sell_price:,.4f}")
             c3.metric("Total Buy",      f"{ch.total_buy_value:,.2f}")
             c4.metric("Total Sell",     f"{ch.total_sell_value:,.2f}")
             c5, c6, c7, c8 = st.columns(4)
-            c5.metric("Fees",           f"{ch.total_fees:,.4f}")
+            c5.metric("Fees",           f"{ch.total_fees:,.2f}")
             c6.metric("Realized P&L",   f"{_sign2}{ch.realized_pnl:,.2f}")
             c7.metric("Return %",       f"{ch.realized_pnl_pct:+.2f}%")
             c8.metric("Holding Period", ch.holding_period_label)
