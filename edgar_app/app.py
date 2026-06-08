@@ -1338,7 +1338,7 @@ def _dlg_promote_holding() -> None:
     if _existing:
         st.info(
             f"**{_ptk}** is already in your Holdings "
-            f"({_existing.quantity:g} shares @ {_existing.avg_cost:,.4f}). "
+            f"({_existing.quantity:,.4f} shares @ {_existing.avg_cost:,.4f}). "
             "Use **Buy More** from the Holdings tab instead.",
             icon="✅",
         )
@@ -1528,7 +1528,7 @@ def render_portfolio_dashboard() -> None:
                     st.caption(entry.company_name)
                     if md and md.is_ok:
                         st.caption(
-                            f"{md.day_indicator} **{md.current_price:,.2f} {md.currency}**"
+                            f"{md.day_indicator} **{md.current_price:,.4f} {md.currency}**"
                             f"  ·  {md.change_str}"
                         )
                     elif md and not md.is_ok:
@@ -1564,7 +1564,7 @@ def render_portfolio_dashboard() -> None:
                 _wl_existing = next((h for h in holdings.values() if h.ticker == ticker), None)
                 if _wl_existing:
                     st.caption(
-                        f"✅ Already held · {_wl_existing.quantity:g} shares @ "
+                        f"✅ Already held · {_wl_existing.quantity:,.4f} shares @ "
                         f"{_wl_existing.avg_cost:,.4f} · "
                         "Use **Buy More** in the Holdings tab to add more."
                     )
@@ -3338,7 +3338,7 @@ def render_holdings_tab(bundle: dict) -> None:
             _d_ids    = [""] + [aid for aid, _ in _d_pairs]
             st.caption(
                 f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
-                f"| {dlg_h.quantity:,.4f} shares @ avg {dlg_h.avg_cost:.4f} {_d_ccy}"
+                f"| {dlg_h.quantity:,.4f} shares @ avg {dlg_h.avg_cost:,.4f} {_d_ccy}"
             )
             if not _d_pairs:
                 st.info("No active accounts — transaction recorded without account link.")
