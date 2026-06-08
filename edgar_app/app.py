@@ -8595,61 +8595,87 @@ if True:
     _shared_bundle = _load_valuation_bundle(st.session_state.get("global_base_ccy", "SAR"))
 
     with tab_portfolio:
-        _holdings_sub, _alloc_sub, _closed_sub = st.tabs([
-            "💼 Holdings", "📊 Allocation", "📁 Closed Holdings"
-        ])
-        with _holdings_sub:
-            render_holdings_tab(_shared_bundle)
-        with _alloc_sub:
+        _port_page = st.pills(
+            "portfolio_nav",
+            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings"],
+            default="💼 Holdings",
+            label_visibility="collapsed",
+            key="portfolio_subnav",
+        )
+        st.divider()
+        if _port_page == "📊 Allocation":
             render_allocation_tab(_shared_bundle)
-        with _closed_sub:
+        elif _port_page == "📁 Closed Holdings":
             render_closed_holdings_tab()
+        else:
+            render_holdings_tab(_shared_bundle)
 
     with tab_accounts:
-        _acct_sub, _ledger_sub = st.tabs(["💳 Accounts", "💵 Cash Ledger"])
-        with _acct_sub:
-            render_accounts_tab()
-        with _ledger_sub:
+        _acct_page = st.pills(
+            "accounts_nav",
+            ["💳 Accounts", "💵 Cash Ledger"],
+            default="💳 Accounts",
+            label_visibility="collapsed",
+            key="accounts_subnav",
+        )
+        st.divider()
+        if _acct_page == "💵 Cash Ledger":
             render_cash_ledger_tab()
+        else:
+            render_accounts_tab()
 
     with tab_activity:
-        _txn_sub, _cf_sub = st.tabs(["📜 Transaction History", "💹 Cashflow"])
-        with _txn_sub:
-            render_transactions_tab()
-        with _cf_sub:
+        _act_page = st.pills(
+            "activity_nav",
+            ["📜 Transaction History", "💹 Cashflow"],
+            default="📜 Transaction History",
+            label_visibility="collapsed",
+            key="activity_subnav",
+        )
+        st.divider()
+        if _act_page == "💹 Cashflow":
             render_cashflow_tab()
+        else:
+            render_transactions_tab()
 
     with tab_analysis:
-        _cmd_sub, _dec_sub, _risk_sub, _thesis_sub, _intel_sub = st.tabs([
-            "🧭 Command Center",
-            "🎯 Decision Queue",
-            "🛡️ Portfolio Risk",
-            "📝 Thesis Memory",
-            "🌍 Market Intel",
-        ])
-        with _cmd_sub:
-            render_command_center_tab()
-        with _dec_sub:
+        _analysis_page = st.pills(
+            "analysis_nav",
+            ["🧭 Command Center", "🎯 Decision Queue", "🛡️ Portfolio Risk", "📝 Thesis Memory", "🌍 Market Intel"],
+            default="🧭 Command Center",
+            label_visibility="collapsed",
+            key="analysis_subnav",
+        )
+        st.divider()
+        if _analysis_page == "🎯 Decision Queue":
             render_decision_queue_tab()
-        with _risk_sub:
+        elif _analysis_page == "🛡️ Portfolio Risk":
             render_portfolio_risk_tab()
-        with _thesis_sub:
+        elif _analysis_page == "📝 Thesis Memory":
             render_thesis_memory_tab()
-        with _intel_sub:
+        elif _analysis_page == "🌍 Market Intel":
             render_market_intel_tab()
+        else:
+            render_command_center_tab()
 
     with tab_research:
-        _filing_sub, _disc_sub, _watch_sub, _upload_sub = st.tabs([
-            "📄 Filing Search",
-            "🔍 SAHMK Discovery",
-            "🔬 Research Watchlist",
-            "📂 Upload Filing",
-        ])
-
-        with _filing_sub:
+        _res_page = st.pills(
+            "research_nav",
+            ["📄 Filing Search", "🔍 SAHMK Discovery", "🔬 Research Watchlist", "📂 Upload Filing"],
+            default="📄 Filing Search",
+            label_visibility="collapsed",
+            key="research_subnav",
+        )
+        st.divider()
+        if _res_page == "🔍 SAHMK Discovery":
+            render_sahmk_discovery_tab()
+        elif _res_page == "🔬 Research Watchlist":
+            render_portfolio_dashboard()
+        elif _res_page == "📂 Upload Filing":
+            render_upload_tab()
+        else:
             from edgar import EdgarAPIError, get_filings, lookup_company
             from edgar.filings import Filing
-            st.divider()
 
             col_input, col_btn = st.columns([3, 1])
             with col_input:
@@ -8704,7 +8730,6 @@ if True:
                             ticker=company.ticker,
                             label=cfg["label"],
                         )
-
             else:
                 st.info(
                     "Enter a US stock ticker above (e.g. **AAPL**, **MSFT**, **VCYT**) "
@@ -8718,15 +8743,6 @@ if True:
 | **10-Q** | Quarterly Report | Unaudited financial report filed each quarter |
 | **8-K** | Current Report | Material events (earnings, mergers, leadership changes) |
                     """)
-
-        with _disc_sub:
-            render_sahmk_discovery_tab()
-
-        with _watch_sub:
-            render_portfolio_dashboard()
-
-        with _upload_sub:
-            render_upload_tab()
 
     with tab_alt:
         render_alt_investments_tab()
