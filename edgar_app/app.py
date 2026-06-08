@@ -3435,11 +3435,15 @@ def render_holdings_tab(bundle: dict) -> None:
         # ── Dialog: Sell / Close ─────────────────────────────────────────────
         @st.dialog("📤 Sell / Close Position")
         def _dlg_sell(dlg_ticker: str, dlg_h):
+            from datetime import date as _sell_dt
             _d_ccy   = getattr(dlg_h, "currency", "USD")
             _d_avail = float(dlg_h.quantity)
             _d_pairs = _acct_pairs_for()
             _d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _d_pairs]
             _d_ids    = [""] + [aid for aid, _ in _d_pairs]
+            # Pre-select the account the holding was bought from
+            _linked_aid = getattr(dlg_h, "default_account_id", "") or ""
+            _d_default_idx = _d_ids.index(_linked_aid) if _linked_aid in _d_ids else 0
             st.caption(
                 f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
                 f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
@@ -3462,9 +3466,10 @@ def render_holdings_tab(bundle: dict) -> None:
             _d_acct  = st.selectbox(
                 "Account", options=range(len(_d_labels)),
                 format_func=lambda i: _d_labels[i],
+                index=_d_default_idx,
             )
             _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-            _d_date  = st.date_input("Trade date", value=None)
+            _d_date  = st.date_input("Trade date", value=_sell_dt.today())
             _d_notes = st.text_input("Notes", max_chars=200)
             _d_corr  = st.checkbox(
                 "Record correction only — skip cash credit",
