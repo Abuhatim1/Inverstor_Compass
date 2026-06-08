@@ -3650,33 +3650,57 @@ def render_holdings_tab(bundle: dict) -> None:
                 key="qs_holding_pick",
             )
             if _qs_sel:
+                from datetime import date as _qs_dt
                 _qs_h = _qs_active[_qs_sel]
                 _qs_ccy = getattr(_qs_h, "currency", "USD")
                 _qs_avail = float(_qs_h.quantity)
+
+                # When the selected holding changes, push correct defaults into
+                # the per-holding session_state keys so widgets pick them up
+                if st.session_state.get("_qs_last_sel") != _qs_sel:
+                    st.session_state["_qs_last_sel"] = _qs_sel
+                    _qs_p0 = _acct_pairs_for()
+                    _qs_i0 = [""] + [aid for aid, _ in _qs_p0]
+                    _qs_la = getattr(_qs_h, "default_account_id", "") or ""
+                    st.session_state[f"qs_price_{_qs_sel}"] = float(
+                        _qs_h.current_price or _qs_h.avg_cost or 0.0)
+                    st.session_state[f"qs_acct_{_qs_sel}"] = (
+                        _qs_i0.index(_qs_la) if _qs_la in _qs_i0 else 0)
+                    st.session_state[f"qs_date_{_qs_sel}"]  = _qs_dt.today()
+                    st.session_state[f"qs_full_{_qs_sel}"]  = True
+                    st.session_state[f"qs_fees_{_qs_sel}"]  = 0.0
+                    st.session_state[f"qs_notes_{_qs_sel}"] = ""
+
                 st.divider()
                 st.caption(
                     f"**{_qs_h.ticker}** · {_qs_h.company_name}  "
                     f"| **{_qs_avail:,.4f}** shares @ avg cost {_qs_h.avg_cost:.4f} {_qs_ccy}"
                 )
-                _qs_full = st.checkbox("Close full position", value=True, key="qs_full")
+                _qs_full = st.checkbox("Close full position", value=True,
+                                       key=f"qs_full_{_qs_sel}")
                 _qs_qty = _qs_avail if _qs_full else st.number_input(
                     "Qty to sell", min_value=0.0001, max_value=_qs_avail,
-                    step=1.0, format="%.4f", key="qs_qty",
+                    step=1.0, format="%.4f", key=f"qs_qty_{_qs_sel}",
                 )
                 _qs_price = st.number_input(
                     "Sell price / share",
                     value=float(_qs_h.current_price or _qs_h.avg_cost or 0.0),
-                    min_value=0.0, step=0.01, format="%.4f", key="qs_price",
+                    min_value=0.0, step=0.01, format="%.4f",
+                    key=f"qs_price_{_qs_sel}",
                 )
                 _qs_d_pairs = _acct_pairs_for()
                 _qs_d_labels = ["— no account —"] + [_acct_dn(a) for _, a in _qs_d_pairs]
                 _qs_d_ids = [""] + [aid for aid, _ in _qs_d_pairs]
                 _qs_acct = st.selectbox("Account", options=range(len(_qs_d_labels)),
-                                        format_func=lambda i: _qs_d_labels[i], key="qs_acct")
+                                        format_func=lambda i: _qs_d_labels[i],
+                                        key=f"qs_acct_{_qs_sel}")
                 _qs_fees = st.number_input("Fees", min_value=0.0, value=0.0,
-                                           step=0.01, format="%.2f", key="qs_fees")
-                _qs_date = st.date_input("Trade date", value=None, key="qs_date")
-                _qs_notes = st.text_input("Notes", max_chars=200, key="qs_notes")
+                                           step=0.01, format="%.2f",
+                                           key=f"qs_fees_{_qs_sel}")
+                _qs_date = st.date_input("Trade date", value=_qs_dt.today(),
+                                         key=f"qs_date_{_qs_sel}")
+                _qs_notes = st.text_input("Notes", max_chars=200,
+                                          key=f"qs_notes_{_qs_sel}")
 
                 # P&L preview
                 _qs_gross = float(_qs_qty) * float(_qs_price)
