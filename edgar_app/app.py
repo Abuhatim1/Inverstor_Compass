@@ -290,10 +290,22 @@ st.markdown(
         .gh-lbl     { font-size: 0.55rem !important; }
         .gh-pct     { font-size: 0.68rem !important; }
 
-        /* Compact tab bar buttons */
-        [data-testid="stTabs"] button[role="tab"] {
+        /* Compact parent tab bar buttons on mobile */
+        [data-testid="stTabs"] > div:first-child button[role="tab"] {
             padding: 0.3rem 0.55rem !important;
-            font-size: 0.72rem !important;
+            font-size: 0.70rem !important;
+            font-weight: 600 !important;
+        }
+        /* Sub-tabs even more compact on mobile */
+        [data-testid="stTabs"] > div ~ div [data-testid="stTabs"] > div:first-child button[role="tab"] {
+            font-size: 0.58rem !important;
+            font-weight: 400 !important;
+            padding: 3px 6px !important;
+            color: #9ca3af !important;
+        }
+        [data-testid="stTabs"] > div ~ div [data-testid="stTabs"] > div:first-child button[role="tab"][aria-selected="true"] {
+            color: #374151 !important;
+            font-weight: 600 !important;
         }
 
         /* Smaller page headings */
@@ -356,40 +368,44 @@ st.markdown(
     }
 
     /* ── Tab hierarchy: parent tabs bold, sub-tabs compact & secondary ─── */
+    /*
+     * Structural key:
+     *   [stTabs] > div:first-child  = the scrollable tab-list bar
+     *   [stTabs] > div ~ div        = the content area (comes after the bar)
+     * Sub-tabs are [stTabs] elements that live inside the content area
+     * of a parent [stTabs], so we target them with the nested selector below.
+     */
 
-    /* Parent tab bar — prominent */
-    div[data-testid="stTabs"] > div[data-testid="stTabsTabList"] button[data-testid="stTab"] {
-        font-size: 0.92rem !important;
+    /* Parent tabs — prominent (desktop / tablet) */
+    [data-testid="stTabs"] > div:first-child button[role="tab"] {
+        font-size: 0.9rem !important;
         font-weight: 600 !important;
         letter-spacing: 0.01em !important;
     }
 
-    /* Sub-tab bar (inside a tab panel) — clearly secondary */
-    [data-testid="stTabPanel"] [data-testid="stTabsTabList"] button[data-testid="stTab"] {
-        font-size: 0.72rem !important;
+    /* Sub-tabs — clearly secondary */
+    [data-testid="stTabs"] > div ~ div
+    [data-testid="stTabs"] > div:first-child button[role="tab"] {
+        font-size: 0.70rem !important;
         font-weight: 400 !important;
-        padding: 4px 10px !important;
-        color: #64748b !important;
+        color: #6b7280 !important;
+        padding: 4px 8px !important;
         letter-spacing: 0 !important;
-        min-height: unset !important;
     }
 
     /* Active sub-tab */
-    [data-testid="stTabPanel"] [data-testid="stTabsTabList"] button[data-testid="stTab"][aria-selected="true"] {
+    [data-testid="stTabs"] > div ~ div
+    [data-testid="stTabs"] > div:first-child button[role="tab"][aria-selected="true"] {
         font-weight: 600 !important;
         color: #1e293b !important;
     }
 
-    /* Sub-tab divider line — thinner, less prominent */
-    [data-testid="stTabPanel"] [data-testid="stTabsTabList"] {
+    /* Sub-tab bar — thinner divider, tighter spacing */
+    [data-testid="stTabs"] > div ~ div
+    [data-testid="stTabs"] > div:first-child {
         border-bottom: 1px solid #e2e8f0 !important;
-        margin-bottom: 0.4rem !important;
+        margin-bottom: 0.2rem !important;
         gap: 0 !important;
-    }
-
-    /* Tighten space between parent tab panel and sub-tab bar */
-    [data-testid="stTabPanel"] {
-        padding-top: 0.3rem !important;
     }
     </style>
     """,
