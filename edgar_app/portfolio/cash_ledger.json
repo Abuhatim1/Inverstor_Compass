@@ -58,5 +58,17 @@
     "linked_ticker": "",
     "notes": "Opening balance",
     "recorded_at": "2026-06-03T15:20:29.831773"
+  },
+  {
+    "entry_id": "24643e5b-97a",
+    "date": "2026-06-08",
+    "account_id": "d3ef7ad8",
+    "transaction_type": "DEPOSIT",
+    "currency": "SAR",
+    "amount": 264474.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Manual deposit",
+    "recorded_at": "2026-06-08T17:53:13.661308"
   }
 ]
