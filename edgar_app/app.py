@@ -2268,7 +2268,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     # ── Chart view ────────────────────────────────────────────────────────────
     _view = st.selectbox(
         "Chart view",
-        ["By Asset", "By Asset Type", "By Sector", "By Market", "By Currency"],
+        ["By Market", "By Asset", "By Asset Type", "By Sector", "By Currency"],
         key="alloc_chart_view",
     )
     _grp = {
@@ -7803,12 +7803,27 @@ def render_alt_investments_tab() -> None:
                     "Closed": "📁",
                 }.get(_inv.status, "•")
 
+                _days_left: int | None = None
+                if _inv.maturity_date and _inv.status != "Closed":
+                    try:
+                        _days_left = (date.fromisoformat(_inv.maturity_date) - date.today()).days
+                    except ValueError:
+                        pass
+                if _days_left is None:
+                    _days_str = ""
+                elif _days_left < 0:
+                    _days_str = f" · {abs(_days_left)}d overdue"
+                elif _days_left <= 60:
+                    _days_str = f" · ⚡ {_days_left}d left"
+                else:
+                    _days_str = f" · {_days_left}d left"
+
                 with st.expander(
                     f"{_status_icon} **{_inv.investment_name}** · "
                     f"{_inv.current_value * _igi_rate:,.2f} {_igi_disp_ccy} · "
                     f"Yield {_inv.expected_yield_pct:.2f}% · "
                     f"{_inv.status} · "
-                    f"Maturity {_inv.maturity_date or '—'}",
+                    f"Maturity {_inv.maturity_date or '—'}{_days_str}",
                     expanded=(_inv.status == "Maturity Action Required"),
                 ):
                     # Info row
@@ -8361,7 +8376,7 @@ if _main_nav == "🏦 Alt Investments":
     render_alt_investments_tab()
 
 else:
-    (tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions, tab_cash,
+    (tab_holdings, tab_allocation, tab_closed, tab_accounts, tab_transactions,
      tab_decisions, tab_risk, tab_command,
      tab_thesis, tab_market_intel, tab_search, tab_watchlist, tab_upload,
      tab_test, tab_discovery) = st.tabs([
@@ -8370,7 +8385,6 @@ else:
         "📁 Closed Holdings",
         "💳 Accounts",
         "📜 Transaction History",
-        "💵 Cash Ledger",
         "🎯 Decision Queue",
         "🛡️ Portfolio Risk",
         "🧭 Command Center",
@@ -8395,13 +8409,14 @@ else:
         render_closed_holdings_tab()
 
     with tab_accounts:
-        render_accounts_tab()
+        _acct_sub, _ledger_sub = st.tabs(["💳 Accounts", "💵 Cash Ledger"])
+        with _acct_sub:
+            render_accounts_tab()
+        with _ledger_sub:
+            render_cash_ledger_tab()
 
     with tab_transactions:
         render_transactions_tab()
-
-    with tab_cash:
-        render_cash_ledger_tab()
 
     with tab_decisions:
         render_decision_queue_tab()
