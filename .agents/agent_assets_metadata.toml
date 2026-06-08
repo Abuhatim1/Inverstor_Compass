@@ -24,3 +24,9 @@ id = "VnxQwS1HPhVt1FgoZc9q0"
 uri = "file://Bousala_NetWorth_Framework.txt"
 type = "text"
 title = "Bousala Net Worth Framework v1.0 (Complete)"
+
+[[outputs]]
+id = "92fThRdKH-y39qDAnDVQN"
+uri = "file://BousalaScreens.zip"
+type = "unspecified"
+title = "BousalaScreens.tsx — All App Screens"
