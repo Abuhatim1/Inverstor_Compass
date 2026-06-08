@@ -8580,15 +8580,15 @@ with st.sidebar:
 render_global_header()
 
 if True:
-    (tab_portfolio, tab_accounts, tab_activity,
+    (tab_portfolio, tab_alt, tab_accounts, tab_activity,
      tab_analysis, tab_research,
-     tab_alt, tab_test) = st.tabs([
+     tab_test) = st.tabs([
         "💼 Portfolio",
+        "🏦 Alt Investments",
         "💳 Accounts",
         "📜 Activity",
         "🧭 Analysis",
         "🔍 Research",
-        "🏦 Alt Investments",
         "🧪 Test Runner",
     ])
 
