@@ -3448,7 +3448,9 @@ def render_holdings_tab(bundle: dict) -> None:
                 f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
                 f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
             )
-            _d_full = st.checkbox("Close full position", value=True)
+            _sk = dlg_ticker  # widget-key namespace per holding
+            _d_full = st.checkbox("Close full position", value=True,
+                                  key=f"sell_full_{_sk}")
             if _d_full:
                 _d_qty = _d_avail
                 st.info(f"Will sell all {_d_avail:,.4f} shares.")
@@ -3457,23 +3459,31 @@ def render_holdings_tab(bundle: dict) -> None:
                     "Qty to sell",
                     min_value=0.0001, max_value=_d_avail + 0.0001,
                     value=min(1.0, _d_avail), step=1.0, format="%.4f",
+                    key=f"sell_qty_{_sk}",
                 )
             _d_price = st.number_input(
                 "Sale price / share",
                 value=float(dlg_h.current_price or dlg_h.avg_cost or 0.0),
                 min_value=0.0, step=0.01, format="%.4f",
+                key=f"sell_price_{_sk}",
             )
             _d_acct  = st.selectbox(
                 "Account", options=range(len(_d_labels)),
                 format_func=lambda i: _d_labels[i],
                 index=_d_default_idx,
+                key=f"sell_acct_{_sk}",
             )
-            _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-            _d_date  = st.date_input("Trade date", value=_sell_dt.today())
-            _d_notes = st.text_input("Notes", max_chars=200)
+            _d_fees  = st.number_input("Fees", min_value=0.0, value=0.0,
+                                       step=0.01, format="%.2f",
+                                       key=f"sell_fees_{_sk}")
+            _d_date  = st.date_input("Trade date", value=_sell_dt.today(),
+                                     key=f"sell_date_{_sk}")
+            _d_notes = st.text_input("Notes", max_chars=200,
+                                     key=f"sell_notes_{_sk}")
             _d_corr  = st.checkbox(
                 "Record correction only — skip cash credit",
                 help="Use this to reduce the holding without crediting any account cash.",
+                key=f"sell_corr_{_sk}",
             )
             # P&L preview
             _sell_qty_preview = _d_avail if _d_full else float(_d_qty)
@@ -4428,6 +4438,11 @@ def render_holdings_tab(bundle: dict) -> None:
                         if st.button("📤 Sell", key="tbl_sell_btn",
                                      use_container_width=True, type="primary",
                                      disabled=(_sh.quantity <= 1e-9)):
+                            for _clr_k in [f"sell_full_{_st}", f"sell_qty_{_st}",
+                                           f"sell_price_{_st}", f"sell_acct_{_st}",
+                                           f"sell_fees_{_st}", f"sell_date_{_st}",
+                                           f"sell_notes_{_st}", f"sell_corr_{_st}"]:
+                                st.session_state.pop(_clr_k, None)
                             _dlg_sell(_st, _sh)
                     with _ab3:
                         if st.button("📋 Settle", key="tbl_settle_btn",
