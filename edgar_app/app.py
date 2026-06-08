@@ -512,15 +512,25 @@ with st.sidebar:
     _fw_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Bousala_NetWorth_Framework.txt")
     if os.path.exists(_fw_path):
         st.divider()
-        st.caption("📄 **Framework Document**")
+        st.caption("📄 **Downloads**")
         with open(_fw_path, "rb") as _fw_f:
             st.download_button(
-                "📥 Download Framework Doc",
+                "📥 Framework Doc (.txt)",
                 data=_fw_f,
                 file_name="Bousala_NetWorth_Framework.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
+        _tsx_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "BousalaScreens.tsx")
+        if os.path.exists(_tsx_path):
+            with open(_tsx_path, "rb") as _tsx_f:
+                st.download_button(
+                    "📥 App Screens (.tsx)",
+                    data=_tsx_f,
+                    file_name="BousalaScreens.tsx",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
 
 _analyze_enabled = _ai_ready or demo_mode
 
