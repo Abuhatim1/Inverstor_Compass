@@ -4438,11 +4438,21 @@ def render_holdings_tab(bundle: dict) -> None:
                         if st.button("📤 Sell", key="tbl_sell_btn",
                                      use_container_width=True, type="primary",
                                      disabled=(_sh.quantity <= 1e-9)):
-                            for _clr_k in [f"sell_full_{_st}", f"sell_qty_{_st}",
-                                           f"sell_price_{_st}", f"sell_acct_{_st}",
-                                           f"sell_fees_{_st}", f"sell_date_{_st}",
-                                           f"sell_notes_{_st}", f"sell_corr_{_st}"]:
-                                st.session_state.pop(_clr_k, None)
+                            from datetime import date as _sd
+                            # Compute account default index for this holding
+                            _sp = _acct_pairs_for()
+                            _si = [""] + [aid for aid, _ in _sp]
+                            _la = getattr(_sh, "default_account_id", "") or ""
+                            _sai = _si.index(_la) if _la in _si else 0
+                            # Explicitly write defaults into session_state so
+                            # Streamlit uses them when the dialog widgets render
+                            st.session_state[f"sell_full_{_st}"]  = True
+                            st.session_state[f"sell_price_{_st}"] = float(_sh.current_price or _sh.avg_cost or 0.0)
+                            st.session_state[f"sell_acct_{_st}"]  = _sai
+                            st.session_state[f"sell_fees_{_st}"]  = 0.0
+                            st.session_state[f"sell_date_{_st}"]  = _sd.today()
+                            st.session_state[f"sell_notes_{_st}"] = ""
+                            st.session_state[f"sell_corr_{_st}"]  = False
                             _dlg_sell(_st, _sh)
                     with _ab3:
                         if st.button("📋 Settle", key="tbl_settle_btn",
