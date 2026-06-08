@@ -2393,7 +2393,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             return f"{v / 1_000_000:.1f}M"
         if av >= 10_000:
             return f"{v / 1_000:.0f}K"
-        return f"{v:,.0f}"
+        return f"{v:,.2f}"
 
     # ── KPI grid — pure HTML flex, portrait-safe ─────────────────────────────
     # _kpi_pc is defined locally (NOT _pc which belongs to render_global_header)
@@ -2442,7 +2442,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _colors = [_PAL[i % len(_PAL)] for i in range(len(_agg))]
 
     # ── Pie / donut ───────────────────────────────────────────────────────────
-    _hov = "<b>%{label}</b><br>MV: %{value:,.0f} " + base_ccy + "<br>Share: %{percent:.1f}<extra></extra>"
+    _hov = "<b>%{label}</b><br>MV: %{value:,.2f} " + base_ccy + "<br>Share: %{percent:.1f}<extra></extra>"
     _fig = go.Figure(go.Pie(
         labels=_agg[_grp],
         values=_agg["_mv"],
@@ -2558,7 +2558,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 
         # Table header
         _pdf.set_font("Helvetica", "B", 10)
-        _pdf.cell(0, 6, f"Allocation Detail — {len(_disp)} holding(s)  ·  {base_ccy} {_total_mv:,.0f} total", ln=True)
+        _pdf.cell(0, 6, f"Allocation Detail — {len(_disp)} holding(s)  ·  {base_ccy} {_total_mv:,.2f} total", ln=True)
         _pdf.ln(1)
         _cols_pdf   = ["Ticker","Company","Market","Sector","CCY", _mv_col_label, "Weight %"]
         _widths_pdf = [18, 54, 22, 32, 12, 28, 16]
@@ -2578,7 +2578,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 str(_row["Market"]),
                 str(_row["Sector"])[:16],
                 str(_row["CCY"]),
-                f"{_row[_mv_col_label]:,.0f}",
+                f"{_row[_mv_col_label]:,.2f}",
                 f"{_row['Weight %']:.1f}%",
             ]
             for _v, _w in zip(_vals_pdf, _widths_pdf):
@@ -2627,14 +2627,14 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     # ── Filtered asset table ──────────────────────────────────────────────────
     st.caption(
         f"**{_view}** · {len(_disp)} holding(s) · "
-        + (f"Filtered — {_filter_str}" if _active_filters else f"{base_ccy} {_total_mv:,.0f} total")
+        + (f"Filtered — {_filter_str}" if _active_filters else f"{base_ccy} {_total_mv:,.2f} total")
     )
     st.dataframe(
         _disp,
         hide_index=True,
         use_container_width=True,
         column_config={
-            _mv_col_label: st.column_config.NumberColumn(_mv_col_label, format="%,.0f"),
+            _mv_col_label: st.column_config.NumberColumn(_mv_col_label, format="%,.2f"),
             "Weight %":    st.column_config.NumberColumn("Weight %",    format="%.1f%%"),
         },
     )
@@ -2787,7 +2787,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 "Qty":      st.column_config.NumberColumn("Qty",      format="%.4f"),
                 "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%.4f"),
                 "Price":    st.column_config.NumberColumn("Price",    format="%.4f"),
-                _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.0f"),
+                _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.2f"),
                 "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
                 "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
                 "CCY":      st.column_config.TextColumn("CCY", width="small"),
@@ -4557,7 +4557,7 @@ def render_accounts_tab() -> None:
             f'  </div>'
             f'  <div class="acct-kpi">'
             f'    <div class="acct-kpi-lbl">Total Cash ({_ab_ccy})</div>'
-            f'    <div class="acct-kpi-val">{_total_cash:,.0f}</div>'
+            f'    <div class="acct-kpi-val">{_total_cash:,.2f}</div>'
             f'  </div>'
             f'  <div class="acct-kpi">'
             f'    <div class="acct-kpi-lbl">Currencies</div>'
@@ -5178,18 +5178,18 @@ def render_cashflow_tab() -> None:
         mc1, mc2, mc3 = st.columns(3)
         mc1.metric(
             f"Cash In · {_mlabel(_latest)}",
-            f"{_in:,.0f} {base_ccy}",
+            f"{_in:,.2f} {base_ccy}",
             help="SELL proceeds + dividends received",
         )
         mc2.metric(
             f"Cash Out · {_mlabel(_latest)}",
-            f"{_out:,.0f} {base_ccy}",
+            f"{_out:,.2f} {base_ccy}",
             help="BUY settlements + fees paid",
         )
         mc3.metric(
             f"Net · {_mlabel(_latest)}",
-            f"{_net:,.0f} {base_ccy}",
-            delta=f"{_net:+,.0f}" if _net != 0 else None,
+            f"{_net:,.2f} {base_ccy}",
+            delta=f"{_net:+,.2f}" if _net != 0 else None,
             help="Positive = portfolio generated more cash than it consumed",
         )
 
@@ -5206,7 +5206,7 @@ def render_cashflow_tab() -> None:
         x=_labels, y=_in_vals,
         marker_color="#22c55e",
         marker_line_width=0,
-        text=[f"{v:,.0f}" if v > 0 else "" for v in _in_vals],
+        text=[f"{v:,.2f}" if v > 0 else "" for v in _in_vals],
         textposition="outside",
         textfont=dict(size=10),
     ))
@@ -5215,7 +5215,7 @@ def render_cashflow_tab() -> None:
         x=_labels, y=_out_vals,
         marker_color="#ef4444",
         marker_line_width=0,
-        text=[f"{v:,.0f}" if v > 0 else "" for v in _out_vals],
+        text=[f"{v:,.2f}" if v > 0 else "" for v in _out_vals],
         textposition="outside",
         textfont=dict(size=10),
     ))
@@ -7764,9 +7764,9 @@ def render_alt_investments_tab() -> None:
         _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
         _sm1.metric("Total Investments",     len(_igi_all))
         _sm2.metric("Open",                  len(_igi_open))
-        _sm3.metric(f"Total Principal (open) · {_igi_disp_ccy}", f"{_total_pa * _igi_rate:,.0f}")
-        _sm4.metric(f"Total Current Value · {_igi_disp_ccy}",    f"{_total_cv * _igi_rate:,.0f}")
-        _sm5.metric(f"Total Profit Received · {_igi_disp_ccy}",  f"{_total_pr * _igi_rate:,.0f}")
+        _sm3.metric(f"Total Principal (open) · {_igi_disp_ccy}", f"{_total_pa * _igi_rate:,.2f}")
+        _sm4.metric(f"Total Current Value · {_igi_disp_ccy}",    f"{_total_cv * _igi_rate:,.2f}")
+        _sm5.metric(f"Total Profit Received · {_igi_disp_ccy}",  f"{_total_pr * _igi_rate:,.2f}")
 
         # ── Yield summary — Tier 2 (portfolio-level projection) ───────────
         from datetime import date as _dt_cls
@@ -7811,17 +7811,17 @@ def render_alt_investments_tab() -> None:
                 "projected from expected rates · *informational only*"
             )
             _ts1, _ts2, _ts3, _ts4, _ts5 = st.columns(5)
-            _ts1.metric(f"Projected Total · {_igi_disp_ccy}",  f"{_ys_proj * _igi_rate:,.0f}")
-            _ts2.metric(f"Accrued to Date · {_igi_disp_ccy}", f"{_ys_acc * _igi_rate:,.0f}")
+            _ts1.metric(f"Projected Total · {_igi_disp_ccy}",  f"{_ys_proj * _igi_rate:,.2f}")
+            _ts2.metric(f"Accrued to Date · {_igi_disp_ccy}", f"{_ys_acc * _igi_rate:,.2f}")
             _ts3.metric(
                 f"Received · {_igi_disp_ccy}",
-                f"{_ys_recv * _igi_rate:,.0f}",
+                f"{_ys_recv * _igi_rate:,.2f}",
                 delta=(
-                    f"{(_ys_recv - _ys_acc) * _igi_rate:+,.0f} vs accrued"
+                    f"{(_ys_recv - _ys_acc) * _igi_rate:+,.2f} vs accrued"
                     if _ys_acc > 0 else None
                 ),
             )
-            _ts4.metric(f"Outstanding · {_igi_disp_ccy}",     f"{_ys_out * _igi_rate:,.0f}")
+            _ts4.metric(f"Outstanding · {_igi_disp_ccy}",     f"{_ys_out * _igi_rate:,.2f}")
             _ts5.metric("Wtd Avg Yield",    f"{_ys_wavg:.2f}%")
 
         if _maturity_due:
@@ -7899,7 +7899,7 @@ def render_alt_investments_tab() -> None:
                 if v >= 1_000_000:
                     return f"{v / 1_000_000:,.2f}M"
                 rounded = round(v, -3)
-                return f"{rounded:,.0f}"
+                return f"{rounded:,.2f}"
 
             _ladder_fig = go.Figure()
             for _idx, _inst in enumerate(_inst_order):
@@ -7910,7 +7910,7 @@ def render_alt_investments_tab() -> None:
                 for _m, _v in zip(_months, _vals_k):
                     if _v > 0:
                         _labels.append(_fmt_amount(_v))
-                        _hovers.append(f"{_v * 1_000:,.0f}")
+                        _hovers.append(f"{_v * 1_000:,.2f}")
                     else:
                         _labels.append("")
                         _hovers.append("")
@@ -8371,9 +8371,9 @@ def render_alt_investments_tab() -> None:
         _csm1, _csm2, _csm3, _csm4, _csm5 = st.columns(5)
         _csm1.metric("Accounts",          len(_cf_all))
         _csm2.metric("Active",            len(_cf_active))
-        _csm3.metric("Total Value",       f"{_cf_total:,.0f}")
-        _csm4.metric("Total Deposits",    f"{_cf_dep:,.0f}")
-        _csm5.metric("Net Profit / Loss", f"{_cf_profit - _cf_losses:,.0f}")
+        _csm3.metric("Total Value",       f"{_cf_total:,.2f}")
+        _csm4.metric("Total Deposits",    f"{_cf_dep:,.2f}")
+        _csm5.metric("Net Profit / Loss", f"{_cf_profit - _cf_losses:,.2f}")
 
         # ── Add button + status filter ─────────────────────────────────────
         _cf_c1, _cf_c2 = st.columns([3, 1])

@@ -47,3 +47,9 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Bousala runtime portfolio state — user data, not source code
+edgar_app/portfolio/holdings.json
+edgar_app/portfolio/transactions.json
+edgar_app/portfolio/_asset_counter.json
+edgar_app/portfolio/deleted_holdings.json
