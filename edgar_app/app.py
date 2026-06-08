@@ -354,6 +354,43 @@ st.markdown(
         color: #475569 !important;
         min-height: unset !important;
     }
+
+    /* ── Tab hierarchy: parent tabs bold, sub-tabs compact & secondary ─── */
+
+    /* Parent tab bar — prominent */
+    div[data-testid="stTabs"] > div[data-testid="stTabsTabList"] button[data-testid="stTab"] {
+        font-size: 0.92rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.01em !important;
+    }
+
+    /* Sub-tab bar (inside a tab panel) — clearly secondary */
+    [data-testid="stTabPanel"] [data-testid="stTabsTabList"] button[data-testid="stTab"] {
+        font-size: 0.72rem !important;
+        font-weight: 400 !important;
+        padding: 4px 10px !important;
+        color: #64748b !important;
+        letter-spacing: 0 !important;
+        min-height: unset !important;
+    }
+
+    /* Active sub-tab */
+    [data-testid="stTabPanel"] [data-testid="stTabsTabList"] button[data-testid="stTab"][aria-selected="true"] {
+        font-weight: 600 !important;
+        color: #1e293b !important;
+    }
+
+    /* Sub-tab divider line — thinner, less prominent */
+    [data-testid="stTabPanel"] [data-testid="stTabsTabList"] {
+        border-bottom: 1px solid #e2e8f0 !important;
+        margin-bottom: 0.4rem !important;
+        gap: 0 !important;
+    }
+
+    /* Tighten space between parent tab panel and sub-tab bar */
+    [data-testid="stTabPanel"] {
+        padding-top: 0.3rem !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
