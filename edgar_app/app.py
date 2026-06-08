@@ -290,20 +290,20 @@ st.markdown(
         .gh-lbl     { font-size: 0.55rem !important; }
         .gh-pct     { font-size: 0.68rem !important; }
 
-        /* Compact parent tab bar buttons on mobile */
-        [data-testid="stTabs"] > div:first-child button[role="tab"] {
-            padding: 0.3rem 0.55rem !important;
-            font-size: 0.70rem !important;
+        /* Parent tabs compact on mobile */
+        [data-testid="stTabs"] [role="tablist"] [role="tab"] {
+            padding: 0.3rem 0.5rem !important;
+            font-size: 0.68rem !important;
             font-weight: 600 !important;
         }
         /* Sub-tabs even more compact on mobile */
-        [data-testid="stTabs"] > div ~ div [data-testid="stTabs"] > div:first-child button[role="tab"] {
-            font-size: 0.58rem !important;
+        [role="tabpanel"] [role="tablist"] [role="tab"] {
+            font-size: 0.56rem !important;
             font-weight: 400 !important;
-            padding: 3px 6px !important;
+            padding: 3px 5px !important;
             color: #9ca3af !important;
         }
-        [data-testid="stTabs"] > div ~ div [data-testid="stTabs"] > div:first-child button[role="tab"][aria-selected="true"] {
+        [role="tabpanel"] [role="tablist"] [role="tab"][aria-selected="true"] {
             color: #374151 !important;
             font-weight: 600 !important;
         }
@@ -369,24 +369,26 @@ st.markdown(
 
     /* ── Tab hierarchy: parent tabs bold, sub-tabs compact & secondary ─── */
     /*
-     * Structural key:
-     *   [stTabs] > div:first-child  = the scrollable tab-list bar
-     *   [stTabs] > div ~ div        = the content area (comes after the bar)
-     * Sub-tabs are [stTabs] elements that live inside the content area
-     * of a parent [stTabs], so we target them with the nested selector below.
+     * Streamlit 1.57 ARIA structure (confirmed from bundle):
+     *   [role="tablist"]   = the scrollable tab-list bar
+     *   [role="tab"]       = each tab button
+     *   [role="tabpanel"]  = the content area per active tab
+     *
+     * Parent tabs are [role="tab"] NOT inside a [role="tabpanel"].
+     * Sub-tabs are [role="tab"] INSIDE a [role="tabpanel"].
+     * The sub-tab selector is more specific so it always wins.
      */
 
     /* Parent tabs — prominent (desktop / tablet) */
-    [data-testid="stTabs"] > div:first-child button[role="tab"] {
+    [data-testid="stTabs"] [role="tablist"] [role="tab"] {
         font-size: 0.9rem !important;
         font-weight: 600 !important;
         letter-spacing: 0.01em !important;
     }
 
     /* Sub-tabs — clearly secondary */
-    [data-testid="stTabs"] > div ~ div
-    [data-testid="stTabs"] > div:first-child button[role="tab"] {
-        font-size: 0.70rem !important;
+    [role="tabpanel"] [role="tablist"] [role="tab"] {
+        font-size: 0.68rem !important;
         font-weight: 400 !important;
         color: #6b7280 !important;
         padding: 4px 8px !important;
@@ -394,18 +396,15 @@ st.markdown(
     }
 
     /* Active sub-tab */
-    [data-testid="stTabs"] > div ~ div
-    [data-testid="stTabs"] > div:first-child button[role="tab"][aria-selected="true"] {
+    [role="tabpanel"] [role="tablist"] [role="tab"][aria-selected="true"] {
         font-weight: 600 !important;
         color: #1e293b !important;
     }
 
     /* Sub-tab bar — thinner divider, tighter spacing */
-    [data-testid="stTabs"] > div ~ div
-    [data-testid="stTabs"] > div:first-child {
+    [role="tabpanel"] [role="tablist"] {
         border-bottom: 1px solid #e2e8f0 !important;
         margin-bottom: 0.2rem !important;
-        gap: 0 !important;
     }
     </style>
     """,
