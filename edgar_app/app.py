@@ -3448,7 +3448,8 @@ def render_holdings_tab(bundle: dict) -> None:
                 f"**{dlg_h.ticker}** · {dlg_h.company_name}  "
                 f"| **{_d_avail:,.4f}** shares available @ avg cost {dlg_h.avg_cost:.4f} {_d_ccy}"
             )
-            _sk = dlg_ticker  # widget-key namespace per holding
+            # Unique key per dialog open — forces fresh value= every time
+            _sk = f"{dlg_ticker}_{st.session_state.get('_sell_oid', 0)}"
             _d_full = st.checkbox("Close full position", value=True,
                                   key=f"sell_full_{_sk}")
             if _d_full:
@@ -4438,21 +4439,10 @@ def render_holdings_tab(bundle: dict) -> None:
                         if st.button("📤 Sell", key="tbl_sell_btn",
                                      use_container_width=True, type="primary",
                                      disabled=(_sh.quantity <= 1e-9)):
-                            from datetime import date as _sd
-                            # Compute account default index for this holding
-                            _sp = _acct_pairs_for()
-                            _si = [""] + [aid for aid, _ in _sp]
-                            _la = getattr(_sh, "default_account_id", "") or ""
-                            _sai = _si.index(_la) if _la in _si else 0
-                            # Explicitly write defaults into session_state so
-                            # Streamlit uses them when the dialog widgets render
-                            st.session_state[f"sell_full_{_st}"]  = True
-                            st.session_state[f"sell_price_{_st}"] = float(_sh.current_price or _sh.avg_cost or 0.0)
-                            st.session_state[f"sell_acct_{_st}"]  = _sai
-                            st.session_state[f"sell_fees_{_st}"]  = 0.0
-                            st.session_state[f"sell_date_{_st}"]  = _sd.today()
-                            st.session_state[f"sell_notes_{_st}"] = ""
-                            st.session_state[f"sell_corr_{_st}"]  = False
+                            import random as _rnd
+                            # New random open-ID → all widget keys are brand-new
+                            # → Streamlit has no cached state → value= always wins
+                            st.session_state["_sell_oid"] = _rnd.randint(0, 9_999_999)
                             _dlg_sell(_st, _sh)
                     with _ab3:
                         if st.button("📋 Settle", key="tbl_settle_btn",
