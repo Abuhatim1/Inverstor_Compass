@@ -7065,6 +7065,10 @@ def render_global_header() -> str:
     from portfolio.alt_investments import load_igi_investments as _gh_load_igi
     from portfolio.crowdfunding import load_cf_accounts as _gh_load_cf
     from portfolio.fixed_assets import load_fixed_assets as _gh_load_fa
+    from portfolio.liabilities import (
+        load_liabilities as _gh_load_libs,
+        compute_liabilities_base as _gh_clib,
+    )
     from portfolio.net_worth import (
         compute_extra_assets_base,
         record_nw_snapshot_if_needed,
@@ -7136,10 +7140,11 @@ def render_global_header() -> str:
             )
 
     # ── Load all asset classes ─────────────────────────────────────────────
-    _gh_hld = load_holdings()
-    _gh_igi = _gh_load_igi()
-    _gh_cf  = _gh_load_cf()
-    _gh_fa  = _gh_load_fa()
+    _gh_hld  = load_holdings()
+    _gh_igi  = _gh_load_igi()
+    _gh_cf   = _gh_load_cf()
+    _gh_fa   = _gh_load_fa()
+    _gh_libs = _gh_load_libs()
 
     # Collect currencies from ALL sources so one FX call covers everything
     _gh_ccys = list({
@@ -7147,17 +7152,19 @@ def render_global_header() -> str:
         *(inv.currency for inv in _gh_igi.values() if inv.status != "Closed"),
         *(acct.currency for acct in _gh_cf.values() if acct.status == "Active"),
         *(a.currency for a in _gh_fa.values() if a.status != "Sold"),
+        *(lib.currency for lib in _gh_libs.values() if lib.status == "Active"),
     })
     _gh_fx  = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
     _gh_val = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
     _gh_ref = st.session_state.get("mp_last_refresh") or "—"
 
-    # ── Net worth = portfolio + alt investments + CF + fixed assets ─────────
+    # ── Net worth = portfolio + alt investments + CF + fixed assets − liabilities
     _gh_extra = compute_extra_assets_base(
         _gh_igi, _gh_cf, _base_ccy, _gh_val.fx_rates_used,
         fixed_assets=_gh_fa,
     )
-    _gh_nw    = _gh_val.total_portfolio_value_base + _gh_extra
+    _gh_liab  = _gh_clib(_gh_libs, _base_ccy, _gh_val.fx_rates_used)
+    _gh_nw    = _gh_val.total_portfolio_value_base + _gh_extra - _gh_liab
 
     # ── Monthly trend ──────────────────────────────────────────────────────
     _gh_snaps          = record_nw_snapshot_if_needed(_gh_nw, _base_ccy)
@@ -7180,7 +7187,7 @@ def render_global_header() -> str:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.2f}"
 
-    _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or bool(_gh_fa) or _gh_val.cash_value_base > 0
+    _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or bool(_gh_fa) or bool(_gh_libs) or _gh_val.cash_value_base > 0
 
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
@@ -7207,12 +7214,18 @@ def render_global_header() -> str:
                 f'</span>'
             )
 
+            _gh_liab_html = (
+                f'<div style="color:#ef4444;font-size:0.65em;margin-top:1px">'
+                f'−{_gh_fmt(_gh_liab)} liabilities</div>'
+                if _gh_liab > 0 else ""
+            )
             st.markdown(
                 f'<div class="gh-kpi-row">'
-                # Net Worth — largest, all-inclusive
+                # Net Worth — largest, all-inclusive (net of liabilities)
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Net Worth ({_base_ccy})</div>'
                 f'    <div class="gh-val-big">{_gh_fmt(_gh_nw)}</div>'
+                f'    {_gh_liab_html}'
                 f'  </div>'
                 # This Month — trend vs month-start snapshot
                 f'  <div class="gh-kpi">'
@@ -8883,6 +8896,276 @@ def render_fixed_assets_tab() -> None:
             )
 
 
+# ── Liabilities Tab ───────────────────────────────────────────────────────────
+
+def render_liabilities_tab() -> None:
+    """Liabilities — loans, credit cards, and other debts deducted from Net Worth."""
+    from portfolio.liabilities import (
+        LIABILITY_TYPES,
+        load_liabilities, add_liability, edit_liability, mark_paid_off,
+        compute_liabilities_base,
+    )
+    from portfolio import CURRENCIES
+    from fx_rates import get_rates_for_holdings
+    import pandas as pd
+
+    st.header("📋 Liabilities")
+    st.caption(
+        "Track your financial obligations — loans, credit cards, mortgages, and other debts. "
+        "Active liabilities are deducted from your **Net Worth** total in the header."
+    )
+
+    _base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    _libs_all = load_liabilities()
+
+    # ── Dialogs ───────────────────────────────────────────────────────────────
+
+    @st.dialog("➕ Add Liability")
+    def _dlg_lib_add():
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            _nm  = st.text_input("Liability Name *", key="lib_add_name",
+                                  placeholder="e.g. Car Loan, Credit Card")
+            _lt  = st.selectbox("Type *", LIABILITY_TYPES, key="lib_add_type")
+            _cur = st.selectbox(
+                "Currency", CURRENCIES,
+                index=CURRENCIES.index("SAR") if "SAR" in CURRENCIES else 0,
+                key="lib_add_ccy",
+            )
+        with _c2:
+            _bal = st.number_input("Outstanding Balance *", min_value=0.0, step=1_000.0,
+                                   format="%.2f", key="lib_add_bal",
+                                   help="Remaining amount owed.")
+            _ir  = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=100.0,
+                                   step=0.1, format="%.2f", key="lib_add_ir",
+                                   help="Leave 0 if unknown.")
+            _dd  = st.date_input("Due / Payoff Date (optional)", value=None, key="lib_add_dd")
+        _lender = st.text_input("Lender / Institution", key="lib_add_lender",
+                                 placeholder="e.g. Al Rajhi Bank, Riyad Bank")
+        _notes  = st.text_area("Notes", key="lib_add_notes", max_chars=500)
+        _b1, _b2 = st.columns(2)
+        with _b1:
+            if st.button("💾 Save", type="primary", use_container_width=True, key="lib_add_save"):
+                _lib, _err = add_liability(
+                    name=_nm, liability_type=_lt, currency=_cur,
+                    outstanding_balance=_bal, lender=_lender,
+                    interest_rate=_ir,
+                    due_date=_dd.isoformat() if _dd else "",
+                    notes=_notes,
+                )
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast(f"Liability added: {_lib.name}", icon="✅")
+                    st.rerun()
+        with _b2:
+            if st.button("Cancel", use_container_width=True, key="lib_add_cancel"):
+                st.rerun()
+
+    @st.dialog("✏️ Edit Liability")
+    def _dlg_lib_edit(lib):
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            _nm  = st.text_input("Liability Name", value=lib.name,
+                                  key=f"lib_e_nm_{lib.liability_id}")
+            _lt  = st.selectbox("Type", LIABILITY_TYPES,
+                                 index=LIABILITY_TYPES.index(lib.liability_type)
+                                       if lib.liability_type in LIABILITY_TYPES else 0,
+                                 key=f"lib_e_lt_{lib.liability_id}")
+            _cur = st.selectbox(
+                "Currency", CURRENCIES,
+                index=CURRENCIES.index(lib.currency) if lib.currency in CURRENCIES else 0,
+                key=f"lib_e_cur_{lib.liability_id}",
+            )
+        with _c2:
+            _bal = st.number_input("Outstanding Balance", min_value=0.0, step=1_000.0,
+                                   format="%.2f", value=float(lib.outstanding_balance),
+                                   key=f"lib_e_bal_{lib.liability_id}")
+            _ir  = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=100.0,
+                                   step=0.1, format="%.2f", value=float(lib.interest_rate),
+                                   key=f"lib_e_ir_{lib.liability_id}")
+            try:
+                _dd_val = __import__("datetime").date.fromisoformat(lib.due_date) if lib.due_date else None
+            except ValueError:
+                _dd_val = None
+            _dd = st.date_input("Due / Payoff Date", value=_dd_val,
+                                 key=f"lib_e_dd_{lib.liability_id}")
+        _lender = st.text_input("Lender / Institution", value=lib.lender,
+                                 key=f"lib_e_lender_{lib.liability_id}")
+        _notes  = st.text_area("Notes", value=lib.notes,
+                                key=f"lib_e_notes_{lib.liability_id}", max_chars=500)
+        _b1, _b2 = st.columns(2)
+        with _b1:
+            if st.button("💾 Save", type="primary", use_container_width=True,
+                         key=f"lib_e_save_{lib.liability_id}"):
+                _, _err = edit_liability(
+                    lib.liability_id,
+                    name=_nm, liability_type=_lt, currency=_cur,
+                    outstanding_balance=_bal, lender=_lender,
+                    interest_rate=_ir,
+                    due_date=_dd.isoformat() if _dd else "",
+                    notes=_notes,
+                )
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast("Liability updated.", icon="✅")
+                    st.rerun()
+        with _b2:
+            if st.button("Cancel", use_container_width=True,
+                         key=f"lib_e_cancel_{lib.liability_id}"):
+                st.rerun()
+
+    @st.dialog("✅ Mark as Paid Off")
+    def _dlg_lib_paid(lib):
+        st.warning(
+            f"Mark **{lib.name}** as Paid Off?\n\n"
+            "It will be removed from your Net Worth deduction but kept in history."
+        )
+        _b1, _b2 = st.columns(2)
+        with _b1:
+            if st.button("✅ Confirm Paid Off", type="primary", use_container_width=True,
+                         key=f"lib_paid_ok_{lib.liability_id}"):
+                _ok, _err = mark_paid_off(lib.liability_id)
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast(f"{lib.name} marked as Paid Off.", icon="✅")
+                    st.rerun()
+        with _b2:
+            if st.button("Cancel", use_container_width=True,
+                         key=f"lib_paid_cancel_{lib.liability_id}"):
+                st.rerun()
+
+    # ── Summary KPI row ───────────────────────────────────────────────────────
+
+    _active = {k: v for k, v in _libs_all.items() if v.status == "Active"}
+    _paid   = {k: v for k, v in _libs_all.items() if v.status == "Paid Off"}
+
+    if _active:
+        _lib_ccys = list({v.currency for v in _active.values()})
+        _lib_fx   = get_rates_for_holdings(_lib_ccys, _base_ccy) if _lib_ccys else {}
+        _total_owed = compute_liabilities_base(_active, _base_ccy, _lib_fx)
+
+        def _lib_fmt(v: float) -> str:
+            av = abs(v)
+            if av >= 1_000_000:
+                return f"{v / 1_000_000:.2f}M"
+            if av >= 1_000:
+                return f"{v:,.0f}"
+            return f"{v:,.2f}"
+
+        st.markdown(
+            f'<div class="acct-summary-row">'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Total Owed ({_base_ccy})</div>'
+            f'    <div class="acct-kpi-val" style="color:#ef4444">{_lib_fmt(_total_owed)}</div>'
+            f'  </div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Active Liabilities</div>'
+            f'    <div class="acct-kpi-val">{len(_active)}</div>'
+            f'  </div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Paid Off</div>'
+            f'    <div class="acct-kpi-val" style="color:#22c55e">{len(_paid)}</div>'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Sub-navigation + add button ───────────────────────────────────────────
+
+    _lib_view = st.pills(
+        "lib_view",
+        ["📋 Active", "✅ Paid Off History"],
+        default="📋 Active",
+        label_visibility="collapsed",
+        key="lib_subnav",
+    )
+
+    _cadd, _ = st.columns([1, 5])
+    with _cadd:
+        if st.button("➕ Add Liability", type="primary", use_container_width=True, key="lib_add_btn"):
+            _dlg_lib_add()
+
+    st.divider()
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # ACTIVE LIABILITIES
+    # ═════════════════════════════════════════════════════════════════════════
+    if _lib_view == "📋 Active":
+        if not _active:
+            st.info(
+                "No active liabilities recorded.  Click **➕ Add Liability** above to track "
+                "a loan, mortgage, credit card balance, or other obligation.",
+                icon="📋",
+            )
+        else:
+            _TYPE_ICON = {
+                "Personal Loan":  "💳",
+                "Car Loan":       "🚗",
+                "Home Mortgage":  "🏠",
+                "Credit Card":    "💳",
+                "Business Loan":  "💼",
+                "Other":          "📌",
+            }
+            _lib_ccys2 = list({v.currency for v in _active.values()})
+            _lib_fx2   = get_rates_for_holdings(_lib_ccys2, _base_ccy) if _lib_ccys2 else {}
+            for _lib in sorted(_active.values(), key=lambda x: x.name):
+                _icon = _TYPE_ICON.get(_lib.liability_type, "📌")
+                _rate = (_lib_fx2.get(_lib.currency).rate
+                         if _lib_fx2.get(_lib.currency) else 1.0)
+                _bal_base = _lib.outstanding_balance * _rate
+                with st.expander(
+                    f"{_icon} **{_lib.name}** — {_lib.liability_type}  ·  "
+                    f"{_lib.currency} {_lib.outstanding_balance:,.0f}"
+                    + (f"  ·  {_lib.lender}" if _lib.lender else ""),
+                    expanded=False,
+                ):
+                    _dc1, _dc2, _dc3 = st.columns(3)
+                    _dc1.metric("Balance", f"{_lib.currency} {_lib.outstanding_balance:,.2f}")
+                    _dc2.metric(f"Balance ({_base_ccy})", f"{_bal_base:,.2f}")
+                    _dc3.metric("Interest Rate", f"{_lib.interest_rate:.2f}% p.a." if _lib.interest_rate else "—")
+                    if _lib.lender:
+                        st.caption(f"🏦 Lender: {_lib.lender}")
+                    if _lib.due_date:
+                        st.caption(f"📅 Due: {_lib.due_date}")
+                    if _lib.notes:
+                        st.caption(f"📝 {_lib.notes}")
+                    _ba1, _ba2 = st.columns(2)
+                    with _ba1:
+                        if st.button("✏️ Edit", key=f"lib_edit_{_lib.liability_id}",
+                                     use_container_width=True):
+                            _dlg_lib_edit(_lib)
+                    with _ba2:
+                        if st.button("✅ Mark Paid Off", key=f"lib_paid_{_lib.liability_id}",
+                                     use_container_width=True):
+                            _dlg_lib_paid(_lib)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PAID OFF HISTORY
+    # ═════════════════════════════════════════════════════════════════════════
+    else:
+        if not _paid:
+            st.info("No paid-off liabilities yet.", icon="✅")
+        else:
+            _rows = []
+            for _lib in sorted(_paid.values(), key=lambda x: x.updated_at or "", reverse=True):
+                _rows.append({
+                    "Name":     _lib.name,
+                    "Type":     _lib.liability_type,
+                    "Lender":   _lib.lender or "—",
+                    "Currency": _lib.currency,
+                    "Balance":  _lib.outstanding_balance,
+                    "Notes":    _lib.notes or "—",
+                })
+            st.dataframe(
+                pd.DataFrame(_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
 # ── Wealth Statement page ─────────────────────────────────────────────────────
 
 def render_wealth_statement_page() -> None:
@@ -9041,7 +9324,7 @@ if True:
     with tab_portfolio:
         _port_page = st.pills(
             "portfolio_nav",
-            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings", "📄 Wealth Statement"],
+            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings", "📄 Wealth Statement", "📋 Liabilities"],
             default="💼 Holdings",
             label_visibility="collapsed",
             key="portfolio_subnav",
@@ -9053,6 +9336,8 @@ if True:
             render_closed_holdings_tab()
         elif _port_page == "📄 Wealth Statement":
             render_wealth_statement_page()
+        elif _port_page == "📋 Liabilities":
+            render_liabilities_tab()
         else:
             render_holdings_tab(_shared_bundle)
 

@@ -7395,11 +7395,12 @@ def _cat_wealth_statement() -> list[TestResult]:
         _empty = lambda *a, **kw: {}  # noqa: E731
 
         patches = [
-            patch("portfolio.load_holdings",                  _empty),
-            patch("portfolio.accounts.load_accounts",         _empty),
+            patch("portfolio.load_holdings",                   _empty),
+            patch("portfolio.accounts.load_accounts",          _empty),
             patch("portfolio.alt_investments.load_igi_investments", _empty),
-            patch("portfolio.crowdfunding.load_cf_accounts",  _empty),
-            patch("portfolio.fixed_assets.load_fixed_assets", _empty),
+            patch("portfolio.crowdfunding.load_cf_accounts",   _empty),
+            patch("portfolio.fixed_assets.load_fixed_assets",  _empty),
+            patch("portfolio.liabilities.load_liabilities",    _empty),
         ]
         try:
             for p in patches: p.start()
@@ -7418,6 +7419,130 @@ def _cat_wealth_statement() -> list[TestResult]:
 
     results.append(_run("WS-02", "build_wealth_statement — empty portfolio produces valid PDF",
                         CAT, "portfolio.wealth_statement", "P0", True, ws02))
+
+    return results
+
+
+def _cat_liabilities() -> list[TestResult]:
+    """
+    LIB — Liabilities engine.
+    LIB-01  add_liability — name required.
+    LIB-02  add_liability — invalid type rejected.
+    LIB-03  add_liability — negative balance rejected.
+    LIB-04  mark_paid_off — paid-off excluded from compute_liabilities_base.
+    LIB-05  edit_liability — updates outstanding_balance.
+    LIB-06  edit_liability — rejects Paid Off liability.
+    LIB-07  compute_liabilities_base — FX conversion applied.
+    LIB-08  mark_paid_off — double mark rejected.
+    """
+    CAT = "Liabilities"
+    results: list[TestResult] = []
+
+    def lib01():
+        from portfolio.liabilities import add_liability
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, err = add_liability("", "Personal Loan", "SAR", 1000.0, path=p)
+        ok = lib is None and err is not None and "required" in err.lower()
+        return "name required → (None, error)", "PASS" if ok else f"lib={lib}, err={err!r}", ok
+    results.append(_run("LIB-01", "add_liability — empty name rejected",
+                        CAT, "portfolio.liabilities", "P0", True, lib01))
+
+    def lib02():
+        from portfolio.liabilities import add_liability
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, err = add_liability("Loan", "InvalidType", "SAR", 1000.0, path=p)
+        ok = lib is None and err is not None and "invalid" in err.lower()
+        return "invalid type → (None, error)", "PASS" if ok else f"lib={lib}, err={err!r}", ok
+    results.append(_run("LIB-02", "add_liability — invalid type rejected",
+                        CAT, "portfolio.liabilities", "P0", True, lib02))
+
+    def lib03():
+        from portfolio.liabilities import add_liability
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, err = add_liability("Loan", "Personal Loan", "SAR", -500.0, path=p)
+        ok = lib is None and err is not None and "negative" in err.lower()
+        return "negative balance → (None, error)", "PASS" if ok else f"lib={lib}, err={err!r}", ok
+    results.append(_run("LIB-03", "add_liability — negative balance rejected",
+                        CAT, "portfolio.liabilities", "P0", True, lib03))
+
+    def lib04():
+        import tempfile, os
+        from portfolio.liabilities import add_liability, mark_paid_off, load_liabilities, compute_liabilities_base
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, _ = add_liability("Car Loan", "Car Loan", "SAR", 50_000.0, path=p)
+            mark_paid_off(lib.liability_id, path=p)
+            libs = load_liabilities(path=p)
+        fx = {"SAR": _fx("SAR", "SAR", 1.0)}
+        total = compute_liabilities_base(libs, "SAR", fx)
+        ok = abs(total) < 0.001
+        return "paid-off excluded → total=0", f"total={total:.4f}", ok
+    results.append(_run("LIB-04", "Paid-off liability excluded from compute_liabilities_base",
+                        CAT, "portfolio.liabilities", "P0", True, lib04))
+
+    def lib05():
+        import tempfile, os
+        from portfolio.liabilities import add_liability, edit_liability, load_liabilities
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, _ = add_liability("Mortgage", "Home Mortgage", "SAR", 500_000.0, path=p)
+            updated, err = edit_liability(lib.liability_id, path=p, outstanding_balance=480_000.0)
+            loaded = load_liabilities(path=p)
+        a = loaded.get(lib.liability_id)
+        ok = err is None and updated is not None and abs(updated.outstanding_balance - 480_000.0) < 0.01
+        return "balance updated to 480000", "PASS" if ok else f"err={err!r}, bal={getattr(updated,'outstanding_balance',None)}", ok
+    results.append(_run("LIB-05", "edit_liability — updates outstanding_balance",
+                        CAT, "portfolio.liabilities", "P0", True, lib05))
+
+    def lib06():
+        import tempfile, os
+        from portfolio.liabilities import add_liability, mark_paid_off, edit_liability
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, _ = add_liability("CC", "Credit Card", "SAR", 10_000.0, path=p)
+            mark_paid_off(lib.liability_id, path=p)
+            updated, err = edit_liability(lib.liability_id, path=p, outstanding_balance=5_000.0)
+        ok = updated is None and err is not None and "paid" in err.lower()
+        return "edit of Paid Off rejected", "PASS" if ok else f"updated={updated}, err={err!r}", ok
+    results.append(_run("LIB-06", "edit_liability — rejects Paid Off liability",
+                        CAT, "portfolio.liabilities", "P0", True, lib06))
+
+    def lib07():
+        import tempfile, os
+        from portfolio.liabilities import add_liability, load_liabilities, compute_liabilities_base
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            add_liability("USD Loan", "Business Loan", "USD", 100_000.0, path=p)
+            libs = load_liabilities(path=p)
+        fx = {
+            "USD": _fx("USD", "SAR", 3.75),
+            "SAR": _fx("SAR", "SAR", 1.0),
+        }
+        total = compute_liabilities_base(libs, "SAR", fx)
+        exp = 100_000.0 * 3.75
+        ok = abs(total - exp) < 0.10
+        return f"total_SAR={exp:.2f}", f"total_SAR={total:.4f}", ok
+    results.append(_run("LIB-07", "compute_liabilities_base — FX conversion applied",
+                        CAT, "portfolio.liabilities", "P0", True, lib07))
+
+    def lib08():
+        import tempfile, os
+        from portfolio.liabilities import add_liability, mark_paid_off
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lib.json")
+            lib, _ = add_liability("Loan", "Personal Loan", "SAR", 10_000.0, path=p)
+            mark_paid_off(lib.liability_id, path=p)
+            ok2, err2 = mark_paid_off(lib.liability_id, path=p)
+        ok = not ok2 and err2 is not None and "already" in err2.lower()
+        return "double paid-off rejected", "PASS" if ok else f"ok2={ok2}, err2={err2!r}", ok
+    results.append(_run("LIB-08", "mark_paid_off — double mark rejected",
+                        CAT, "portfolio.liabilities", "P0", True, lib08))
 
     return results
 
@@ -7442,6 +7567,7 @@ def run_all_tests() -> TestReport:
         + _cat_cf()
         + _cat_fixed_assets()
         + _cat_wealth_statement()
+        + _cat_liabilities()
     )
 
     punch_list: list[PunchListItem] = []

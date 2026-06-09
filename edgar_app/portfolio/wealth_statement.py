@@ -124,7 +124,7 @@ _AR: dict[str, str] = {
     "col_eq_base":   "حقوق الملكية (قاعدة)",
     "total_assets":  "الإجمالي - {n} أصل",
     # Section 5
-    "sec5_title":    "القسم الخامس - ملخص صافي الثروة الموحَّد",
+    "sec5_title":    "القسم السادس - ملخص صافي الثروة الموحَّد",
     "sec5_sub":      "جميع الأرقام بالعملة الأساسية بعد تحويل العملات.",
     "col_asset_grp": "فئة الأصل",
     "col_total":     "الإجمالي",
@@ -155,6 +155,13 @@ _AR: dict[str, str] = {
     ),
     # Footer  ({date} and {page} are filled at render time; {{nb}} → {nb} for fpdf2)
     "footer_tpl": "بوصلة المستثمر  |  سري  |  {date}  |  صفحة {page} من {{nb}}",
+    # Section 5 — Liabilities
+    "sec5_liab_title": "القسم الخامس - الالتزامات والمديونيات",
+    "sec5_liab_sub":   "الأرصدة القائمة المُستحقة للسداد بعملاتها الأصلية وبالعملة الأساسية.",
+    "col_liab_name":   "الالتزام / الاسم",
+    "col_lender":      "الجهة المُقرِضة",
+    "total_liab":      "إجمالي الالتزامات - {n} التزام",
+    "cat_liab":        "إجمالي الالتزامات",
 }
 
 
@@ -421,15 +428,17 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     from portfolio.alt_investments import load_igi_investments
     from portfolio.crowdfunding import load_cf_accounts
     from portfolio.fixed_assets import load_fixed_assets
+    from portfolio.liabilities import load_liabilities, compute_liabilities_base
     from portfolio.valuation import calculate_portfolio_valuation
     from fx_rates import get_rates_for_holdings
 
     # Load & filter
     holdings = load_holdings()
     accounts = load_accounts()
-    igi = {k: v for k, v in load_igi_investments().items() if v.status != "Closed"}
-    cf  = {k: v for k, v in load_cf_accounts().items()    if v.status == "Active"}
-    fa  = {k: v for k, v in load_fixed_assets().items()   if v.status == "Active"}
+    igi  = {k: v for k, v in load_igi_investments().items() if v.status != "Closed"}
+    cf   = {k: v for k, v in load_cf_accounts().items()    if v.status == "Active"}
+    fa   = {k: v for k, v in load_fixed_assets().items()   if v.status == "Active"}
+    libs = {k: v for k, v in load_liabilities().items()    if v.status == "Active"}
 
     # Collect currencies for one FX request
     ccys: set[str] = set()
@@ -443,6 +452,8 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         ccys.add(a.currency)
     for a in accounts.values():
         ccys.add(a.base_currency)
+    for lib in libs.values():
+        ccys.add(lib.currency)
 
     fx: dict = get_rates_for_holdings(list(ccys), base_ccy) if ccys else {}
 
@@ -458,10 +469,12 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     # Section totals
     port_mv_base = val.holdings_value_base if val else 0.0
     cash_base    = val.cash_value_base      if val else 0.0
-    igi_base  = sum(inv.current_value        * _rate(fx, inv.currency) for inv in igi.values())
-    cf_base   = sum(a.current_account_value  * _rate(fx, a.currency)   for a   in cf.values())
-    fa_base   = sum(a.equity                 * _rate(fx, a.currency)   for a   in fa.values())
-    nw        = port_mv_base + cash_base + igi_base + cf_base + fa_base
+    igi_base   = sum(inv.current_value        * _rate(fx, inv.currency) for inv in igi.values())
+    cf_base    = sum(a.current_account_value  * _rate(fx, a.currency)   for a   in cf.values())
+    fa_base    = sum(a.equity                 * _rate(fx, a.currency)   for a   in fa.values())
+    liab_base  = compute_liabilities_base(libs, base_ccy, fx)
+    gross_nw   = port_mv_base + cash_base + igi_base + cf_base + fa_base
+    nw         = gross_nw - liab_base
 
     today_str = _date.today().strftime("%d %B %Y")
     pdf = _WealthPDF(base_ccy, today_str)
@@ -528,6 +541,8 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         (_AR["cat_cash"],      cash_base + cf_base),
         (_AR["cat_fa"],        fa_base),
     ]
+    if liab_base > 0:
+        _summary.append((_AR["cat_liab"], -liab_base))
     pdf.table_header(
         [f"{_AR['col_value']} ({base_ccy})", _AR["col_category"]],
         _sw_r,
@@ -756,7 +771,51 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         )
 
     # =========================================================================
-    # SECTION 5 -- CONSOLIDATED SUMMARY
+    # SECTION 5 -- LIABILITIES
+    # =========================================================================
+    if libs:
+        pdf.add_page()
+        pdf.section_header(_AR["sec5_liab_title"], _AR["sec5_liab_sub"])
+
+        # LTR: Name(48) | Type(28) | Lender(32) | Ccy(14) | Balance(30) | Base(30)
+        # RTL: Base(30) | Balance(30) | Ccy(14) | Lender(32) | Type(28) | Name(48)
+        _wids_ltr = [48, 28, 32, 14, 30, 30]
+        _wids_r   = list(reversed(_wids_ltr))
+        _cols_r   = [
+            f"{_AR['col_bal_base']} ({base_ccy})",
+            _AR["col_bal_ccy"],
+            _AR["col_currency"],
+            _AR["col_lender"],
+            _AR["col_type"],
+            _AR["col_liab_name"],
+        ]
+        pdf.table_header(_cols_r, _wids_r)
+
+        _sec_total = 0.0
+        for i, lib in enumerate(sorted(libs.values(), key=lambda x: x.name)):
+            rate   = _rate(fx, lib.currency)
+            bal_b  = lib.outstanding_balance * rate
+            _sec_total += bal_b
+            vals_r = [
+                _m(bal_b),
+                _m(lib.outstanding_balance),
+                lib.currency,
+                _clip(lib.lender or "-", 18),
+                _clip(lib.liability_type, 16),
+                _clip(lib.name, 28),
+            ]
+            pdf.table_row(vals_r, _wids_r, i % 2 == 0, ["R"] * 6)
+
+        pdf.total_row(
+            _AR["total_liab"].format(n=len(libs)),
+            sum(_wids_r[1:]),
+            f"{base_ccy} {_m(_sec_total)}",
+            _wids_r[0],
+            rtl=True,
+        )
+
+    # =========================================================================
+    # SECTION 6 -- CONSOLIDATED SUMMARY (was Section 5)
     # =========================================================================
     pdf.add_page()
     pdf.section_header(_AR["sec5_title"], _AR["sec5_sub"])
@@ -764,7 +823,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     # RTL: [total(52) | asset_group(_W-52)]
     _sw5_ltr = [_W - 52, 52]
     _sw5_r   = list(reversed(_sw5_ltr))   # [52, _W - 52]
-    _sec5 = [
+    _sec5_assets = [
         (_AR["cat_port_mv"],  port_mv_base),
         (_AR["cat_alt_inv"],  igi_base),
         (_AR["cat_cash_brk"], cash_base),
@@ -775,8 +834,11 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         [f"{_AR['col_total']} ({base_ccy})", _AR["col_asset_grp"]],
         _sw5_r,
     )
-    for i, (lbl, amt) in enumerate(_sec5):
+    for i, (lbl, amt) in enumerate(_sec5_assets):
         pdf.table_row([_m(amt), lbl], _sw5_r, i % 2 == 0, ["R", "R"])
+    if liab_base > 0:
+        row_idx = len(_sec5_assets)
+        pdf.table_row([_m(-liab_base), _AR["cat_liab"]], _sw5_r, row_idx % 2 == 0, ["R", "R"])
     pdf.total_row(
         _AR["total_nw"], _sw5_r[1],
         f"{base_ccy} {_m(nw)}", _sw5_r[0],
@@ -789,10 +851,10 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.cell(0, 5, _ar_text(_AR["alloc"]), ln=True, align="R")
     pdf.set_text_color(0, 0, 0)
 
-    if nw > 0:
+    if gross_nw > 0:
         pdf.table_header([_AR["col_alloc"], _AR["col_asset_grp"]], _sw5_r)
-        for i, (lbl, amt) in enumerate(_sec5):
-            pct = amt / nw * 100
+        for i, (lbl, amt) in enumerate(_sec5_assets):
+            pct = amt / gross_nw * 100
             pdf.table_row([f"{pct:.1f}%", lbl], _sw5_r, i % 2 == 0, ["R", "R"])
     else:
         pdf._am("", 9)
