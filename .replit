@@ -3,7 +3,7 @@ modules = ["nodejs-24", "python-3.11"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-
+run = ["sh", "-c", "python -m streamlit run edgar_app/app.py --server.address=0.0.0.0 --server.port=5000"]
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
