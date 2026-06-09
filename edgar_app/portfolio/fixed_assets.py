@@ -43,6 +43,8 @@ FIXED_ASSET_TYPES: list[str] = [
     "Vehicle",
     "Precious Metals (Physical)",
     "Business Stake",
+    "Pension / Retirement Fund",
+    "Provident Fund",
     "Other",
 ]
 

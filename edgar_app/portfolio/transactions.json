@@ -1534,5 +1534,37 @@
     "settlement_amount": 0.0,
     "settlement_category": "",
     "settlement_currency": ""
+  },
+  {
+    "ticker": "AAPL_AID06",
+    "side": "BUY",
+    "quantity": 5.0,
+    "price": 150.0,
+    "date": "2026-06-09",
+    "notes": "",
+    "recorded_at": "2026-06-09T13:58:35.572284",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_4bb6195e",
+    "asset_id": "AST_001799",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
+  },
+  {
+    "ticker": "TSLA_TEST_ASSETID07",
+    "side": "BUY",
+    "quantity": 1.0,
+    "price": 200.0,
+    "date": "2026-06-09",
+    "notes": "",
+    "recorded_at": "2026-06-09T13:58:35.583661",
+    "account_id": "acct1",
+    "fees": 0.0,
+    "transaction_id": "TXN_d08cb368",
+    "asset_id": "AST_001800",
+    "settlement_amount": 0.0,
+    "settlement_category": "",
+    "settlement_currency": ""
   }
 ]

@@ -8555,10 +8555,11 @@ def render_fixed_assets_tab() -> None:
     from datetime import date
     import pandas as pd
 
-    st.header("🏠 Fixed Assets")
+    st.header("🏛️ Assets & Retirement")
     st.caption(
-        "Track illiquid assets — real estate, vehicles, physical gold, business stakes — "
-        "with a simple current value and optional mortgage / loan liability.  "
+        "Track illiquid and long-term assets — real estate, vehicles, physical gold, "
+        "business stakes, pension funds, and provident fund balances — "
+        "with a simple current value and optional liability.  "
         "**Equity** (value − liability) feeds the Net Worth total in the header."
     )
 
@@ -8769,6 +8770,8 @@ def render_fixed_assets_tab() -> None:
                 "Vehicle":                    "🚗",
                 "Precious Metals (Physical)": "🪙",
                 "Business Stake":             "💼",
+                "Pension / Retirement Fund":  "🏦",
+                "Provident Fund":             "🏛️",
                 "Other":                      "📦",
             }
             for _asset in sorted(_active.values(), key=lambda a: a.name):
@@ -8945,7 +8948,7 @@ if True:
      tab_test) = st.tabs([
         "💼 Portfolio",
         "🏦 Alt Investments",
-        "🏠 Fixed Assets",
+        "🏛️ Assets & Retirement",
         "💳 Accounts",
         "📜 Activity",
         "🧭 Analysis",
