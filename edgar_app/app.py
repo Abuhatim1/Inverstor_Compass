@@ -624,6 +624,18 @@ with st.sidebar:
                         use_container_width=True,
                     )
 
+    # ── Help & User Guide ─────────────────────────────────────────────────────
+    st.divider()
+    if st.button(
+        "❓  Help & User Guide",
+        key="sidebar_help_btn",
+        use_container_width=True,
+        help="Open the full beginner-friendly user guide — no finance background needed.",
+    ):
+        st.session_state["show_help"] = not st.session_state.get("show_help", False)
+    if st.session_state.get("show_help", False):
+        st.caption("📖 Viewing user guide — tap above to close.")
+
 _analyze_enabled = _ai_ready or demo_mode
 
 
@@ -9567,6 +9579,14 @@ def render_sahmk_discovery_tab() -> None:
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 render_global_header()
+
+# ── Help page gate ─────────────────────────────────────────────────────────────
+# When the user opens the user guide from the sidebar button, render the help
+# page in place of the normal tabs and stop — no tab code runs.
+if st.session_state.get("show_help", False):
+    from help_guide import render_help_tab as _render_help
+    _render_help()
+    st.stop()
 
 if True:
     (tab_fixed, tab_portfolio, tab_alt, tab_accounts, tab_activity,
