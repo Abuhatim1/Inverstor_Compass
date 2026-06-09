@@ -9478,54 +9478,120 @@ if True:
         render_alt_investments_tab()
 
     with tab_fixed:
-        # ── Balance Sheet summary banner ──────────────────────────────────────
-        from portfolio.fixed_assets import load_fixed_assets as _bs_load_fa
-        from portfolio.liabilities import load_liabilities as _bs_load_lib, compute_liabilities_base as _bs_clib
-        from fx_rates import get_rates_for_holdings as _bs_fx
-        _bs_ccy   = st.session_state.get("global_base_ccy", "SAR")
-        _bs_fa    = {k: v for k, v in _bs_load_fa().items()  if v.status != "Sold"}
-        _bs_libs  = {k: v for k, v in _bs_load_lib().items() if v.status == "Active"}
-        _bs_ccys  = list({a.currency for a in _bs_fa.values()} | {l.currency for l in _bs_libs.values()})
-        _bs_rates = _bs_fx(_bs_ccys, _bs_ccy) if _bs_ccys else {}
-        _bs_equity = sum(
-            a.equity * (_bs_rates[a.currency].rate if _bs_rates.get(a.currency) else 1.0)
-            for a in _bs_fa.values()
+        # ── True Balance Sheet: all asset classes vs all liabilities ──────────
+        from portfolio.alt_investments import load_igi_investments as _bs_load_igi
+        from portfolio.crowdfunding    import load_cf_accounts     as _bs_load_cf
+        from portfolio.fixed_assets    import load_fixed_assets    as _bs_load_fa
+        from portfolio.liabilities     import (
+            load_liabilities       as _bs_load_lib,
+            compute_liabilities_base as _bs_clib,
         )
-        _bs_debt  = _bs_clib(_bs_libs, _bs_ccy, _bs_rates)
-        _bs_net   = _bs_equity - _bs_debt
+        from fx_rates import get_rates_for_holdings as _bs_getfx
 
+        _bs_ccy = st.session_state.get("global_base_ccy", "SAR")
+
+        # Portfolio value (holdings + cash accounts) — already computed above
+        _bs_port = _shared_bundle["val"].total_portfolio_value_base
+
+        # Load remaining asset classes
+        _bs_igi  = _bs_load_igi()
+        _bs_cf   = _bs_load_cf()
+        _bs_fa   = {k: v for k, v in _bs_load_fa().items()  if v.status != "Sold"}
+        _bs_libs = {k: v for k, v in _bs_load_lib().items() if v.status == "Active"}
+
+        # Extend FX rate map with any new currencies not in the portfolio bundle
+        _bs_rates = dict(_shared_bundle["fx"])
+        _bs_need  = list({
+            *(inv.currency  for inv  in _bs_igi.values()  if inv.status != "Closed"),
+            *(acct.currency for acct in _bs_cf.values()   if acct.status == "Active"),
+            *(a.currency    for a    in _bs_fa.values()),
+            *(l.currency    for l    in _bs_libs.values()),
+        } - set(_bs_rates))
+        if _bs_need:
+            _bs_rates.update(_bs_getfx(_bs_need, _bs_ccy))
+
+        def _bs_rate(ccy: str) -> float:
+            r = _bs_rates.get(ccy)
+            return r.rate if r else 1.0
+
+        # ── Compute each component ─────────────────────────────────────────
+        _bs_alts = round(sum(
+            inv.current_value * _bs_rate(inv.currency)
+            for inv in _bs_igi.values() if inv.status != "Closed"
+        ) + sum(
+            acct.current_account_value * _bs_rate(acct.currency)
+            for acct in _bs_cf.values() if acct.status == "Active"
+        ), 2)
+
+        _bs_fixed = round(sum(
+            a.equity * _bs_rate(a.currency) for a in _bs_fa.values()
+        ), 2)
+
+        _bs_total_assets = _bs_port + _bs_alts + _bs_fixed
+        _bs_debt         = _bs_clib(_bs_libs, _bs_ccy, _bs_rates)
+        _bs_net          = _bs_total_assets - _bs_debt
+
+        # ── Format helper ──────────────────────────────────────────────────
         def _bs_fmt(v: float) -> str:
             av = abs(v)
             if av >= 1_000_000: return f"{v / 1_000_000:.2f}M"
             if av >= 1_000:     return f"{v:,.0f}"
             return f"{v:,.2f}"
 
-        _net_col  = "#22c55e" if _bs_net >= 0 else "#ef4444"
+        _net_col = "#22c55e" if _bs_net >= 0 else "#ef4444"
+
+        # ── Balance Sheet banner ───────────────────────────────────────────
         st.markdown(
-            f'<div class="acct-summary-row" style="gap:2.5rem;padding:8px 0 14px 0;">'
+            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
+            f'padding:14px 20px 12px;margin-bottom:14px;">'
+
+            # Section label
+            f'<div style="font-size:0.7rem;font-weight:700;letter-spacing:0.09em;'
+            f'color:#94a3b8;text-transform:uppercase;margin-bottom:10px;">'
+            f'Balance Sheet · {_bs_ccy}</div>'
+
+            # Row 1 — Assets
+            f'<div style="display:flex;flex-wrap:wrap;gap:0.4rem 2rem;align-items:flex-end;'
+            f'padding-bottom:10px;border-bottom:1px solid #e2e8f0;margin-bottom:10px;">'
+
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">Assets Equity ({_bs_ccy})</div>'
-            f'    <div class="acct-kpi-val" style="color:#22c55e">{_bs_fmt(_bs_equity)}</div>'
+            f'    <div class="acct-kpi-lbl">📈 Investment Portfolio</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_port)}</div>'
             f'  </div>'
-            f'  <div style="font-size:1.6rem;color:#94a3b8;align-self:center">−</div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">+</div>'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">Liabilities ({_bs_ccy})</div>'
-            f'    <div class="acct-kpi-val" style="color:#ef4444">{_bs_fmt(_bs_debt)}</div>'
+            f'    <div class="acct-kpi-lbl">🏦 Alt Investments</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_alts)}</div>'
             f'  </div>'
-            f'  <div style="font-size:1.6rem;color:#94a3b8;align-self:center">=</div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">+</div>'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">Net ({_bs_ccy})</div>'
-            f'    <div class="acct-kpi-val" style="color:{_net_col};font-size:1.5rem">{_bs_fmt(_bs_net)}</div>'
+            f'    <div class="acct-kpi-lbl">🏛️ Fixed Assets (Equity)</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_fixed)}</div>'
             f'  </div>'
-            f'  <div style="border-left:1px solid #e2e8f0;margin:0 0.5rem"></div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">=</div>'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">Active Assets</div>'
-            f'    <div class="acct-kpi-val">{len(_bs_fa)}</div>'
+            f'    <div class="acct-kpi-lbl" style="color:#0ea5e9">Total Assets</div>'
+            f'    <div class="acct-kpi-val" style="color:#0ea5e9;font-size:1.5rem">'
+            f'      {_bs_fmt(_bs_total_assets)}'
+            f'    </div>'
             f'  </div>'
+            f'</div>'
+
+            # Row 2 — Liabilities + Net Worth
+            f'<div style="display:flex;flex-wrap:wrap;gap:0.4rem 2rem;align-items:flex-end;">'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">Active Liabilities</div>'
-            f'    <div class="acct-kpi-val">{len(_bs_libs)}</div>'
+            f'    <div class="acct-kpi-lbl">📋 Total Liabilities</div>'
+            f'    <div class="acct-kpi-val" style="color:#ef4444">({_bs_fmt(_bs_debt)})</div>'
             f'  </div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">=</div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl" style="color:{_net_col}">💎 Net Worth</div>'
+            f'    <div class="acct-kpi-val" style="color:{_net_col};font-size:1.65rem;font-weight:700">'
+            f'      {_bs_fmt(_bs_net)}'
+            f'    </div>'
+            f'  </div>'
+            f'</div>'
+
             f'</div>',
             unsafe_allow_html=True,
         )
