@@ -86,17 +86,16 @@ def record_nw_snapshot_if_needed(
     path:      str | None = None,
 ) -> list[dict]:
     """
-    Append a snapshot for the current calendar month + base_ccy if none
-    exists yet.  Returns the full snapshot list (used directly by
-    get_monthly_trend so caller doesn't need a second load).
+    Append one snapshot per calendar month.  Only the first render of a
+    new month writes a snapshot — subsequent renders (including base-currency
+    changes) do not overwrite or add a second snapshot for the same month.
+
+    Returns the full snapshot list for immediate use by get_monthly_trend.
     """
     snaps      = load_nw_snapshots(path=path)
     this_month = date.today().strftime("%Y-%m")
 
-    exists = any(
-        s.get("month") == this_month and s.get("ccy") == base_ccy
-        for s in snaps
-    )
+    exists = any(s.get("month") == this_month for s in snaps)
     if not exists:
         snaps.append({"month": this_month, "value": net_worth, "ccy": base_ccy})
         save_nw_snapshots(snaps, path=path)
@@ -110,19 +109,20 @@ def get_monthly_trend(
     snaps:     list[dict],
 ) -> tuple[float | None, float | None]:
     """
-    Compute (delta_abs, delta_pct) vs the first snapshot for this month
-    in the same currency.
+    Compute (delta_abs, delta_pct) vs the month-start snapshot.
 
-    Returns (None, None) when no comparable snapshot exists.
+    Returns (None, None) when:
+    - no snapshot exists for this calendar month, or
+    - the snapshot was recorded in a different base currency (can't compare).
     """
-    this_month   = date.today().strftime("%Y-%m")
-    month_snaps  = [
-        s for s in snaps
-        if s.get("month") == this_month and s.get("ccy") == base_ccy
-    ]
+    this_month  = date.today().strftime("%Y-%m")
+    month_snaps = [s for s in snaps if s.get("month") == this_month]
     if not month_snaps:
         return None, None
-    start_val = month_snaps[0]["value"]
+    snap = month_snaps[0]
+    if snap.get("ccy") != base_ccy:
+        return None, None
+    start_val = snap["value"]
     if start_val == 0:
         return None, None
     delta_abs = net_worth - start_val
