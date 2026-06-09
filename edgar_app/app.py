@@ -90,11 +90,31 @@ st.set_page_config(
 )
 
 # ── Apple touch icon (iPhone "Add to Home Screen") ────────────────────────────
+# st.markdown injects into <body>; Safari only reads apple-touch-icon from <head>.
+# Use a zero-height component iframe to run JS that appends the link to
+# window.parent.document.head (same-origin, so cross-frame access is allowed).
 try:
-    _icon_b64 = base64.b64encode(open(_ICON_PATH, "rb").read()).decode()
-    st.markdown(
-        f'<link rel="apple-touch-icon" href="data:image/png;base64,{_icon_b64}">',
-        unsafe_allow_html=True,
+    import io as _io
+    import streamlit.components.v1 as _components
+    _img = _PILImage.open(_ICON_PATH).convert("RGBA").resize((180, 180))
+    _buf = _io.BytesIO()
+    _img.save(_buf, format="PNG", optimize=True)
+    _icon_b64 = base64.b64encode(_buf.getvalue()).decode()
+    _components.html(
+        f"""<script>
+(function(){{
+  try{{
+    var _d=window.parent.document;
+    if(!_d.querySelector('link[rel="apple-touch-icon"]')){{
+      var _l=_d.createElement('link');
+      _l.rel='apple-touch-icon';
+      _l.href='data:image/png;base64,{_icon_b64}';
+      _d.head.appendChild(_l);
+    }}
+  }}catch(e){{}}
+}})();
+</script>""",
+        height=0,
     )
 except Exception:
     pass
