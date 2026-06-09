@@ -8883,6 +8883,49 @@ def render_fixed_assets_tab() -> None:
             )
 
 
+# ── Wealth Statement page ─────────────────────────────────────────────────────
+
+def render_wealth_statement_page() -> None:
+    """Wealth Statement — one-tap PDF download with Arabic RTL layout."""
+    import datetime as _wdt
+    from portfolio.wealth_statement import build_wealth_statement as _build_ws
+
+    st.header("📄 كشف الثروة العائلية")
+    st.caption(
+        "وثيقة PDF احترافية تجمع جميع أصولك وأرصدتك ومواقع حساباتك في مكان واحد — "
+        "بتنسيق عربي يمكن لأسرتك قراءته بسهولة."
+    )
+
+    _ws_base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    _ws_notes    = st.session_state.get("ws_notes", "")
+    _ws_fname    = f"bousala_wealth_{_wdt.date.today().strftime('%Y%m%d')}.pdf"
+
+    st.markdown("####")
+
+    try:
+        _ws_bytes = _build_ws(base_ccy=_ws_base_ccy, notes=_ws_notes or "")
+        st.download_button(
+            label="⬇️ تحميل كشف الثروة (PDF)",
+            data=_ws_bytes,
+            file_name=_ws_fname,
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+            key="ws_page_download_btn",
+            help="تنزيل ملخص الثروة بصيغة PDF بتنسيق عربي.",
+        )
+    except Exception as _ws_err:
+        st.error(f"تعذّر إنشاء ملف PDF: {_ws_err}", icon="⚠️")
+        return
+
+    st.divider()
+    st.info(
+        "💡 يمكنك إضافة ملاحظة شخصية (مثل معلومات التواصل أو موقع الحسابات) "
+        "من القائمة الجانبية ضمن قسم **Family Wealth Statement** قبل التنزيل.",
+        icon="ℹ️",
+    )
+
+
 # ── Developer Mode: SAHMK Discovery Console ──────────────────────────────────
 
 def render_sahmk_discovery_tab() -> None:
@@ -8998,7 +9041,7 @@ if True:
     with tab_portfolio:
         _port_page = st.pills(
             "portfolio_nav",
-            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings"],
+            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings", "📄 Wealth Statement"],
             default="💼 Holdings",
             label_visibility="collapsed",
             key="portfolio_subnav",
@@ -9008,6 +9051,8 @@ if True:
             render_allocation_tab(_shared_bundle)
         elif _port_page == "📁 Closed Holdings":
             render_closed_holdings_tab()
+        elif _port_page == "📄 Wealth Statement":
+            render_wealth_statement_page()
         else:
             render_holdings_tab(_shared_bundle)
 
