@@ -7,9 +7,13 @@ Produces a human-readable, professionally formatted multi-page PDF summarising
 all asset classes -- intended for family members, trustees, and legal
 representatives, not for trading.
 
+Arabic text in account names, institution names, and the personal note is
+rendered correctly using the Amiri Unicode font, arabic_reshaper (letter
+shaping), and python-bidi (right-to-left visual ordering).
+
 Usage
     from portfolio.wealth_statement import build_wealth_statement
-    pdf_bytes = build_wealth_statement(base_ccy="SAR", notes="Contact Ahmed...")
+    pdf_bytes = build_wealth_statement(base_ccy="SAR", notes="...")
 
 Output
     Raw bytes of a PDF document.  Pass directly to st.download_button(data=...).
@@ -22,7 +26,16 @@ from datetime import date as _date
 
 from fpdf import FPDF
 
-# ── Palette ──────────────────────────────────────────────────────────────────
+# ── Arabic shaping (graceful fallback if packages not installed) ──────────────
+try:
+    import arabic_reshaper as _reshaper          # type: ignore
+    from bidi.algorithm import get_display as _bidi  # type: ignore
+    _ARABIC_OK = True
+except ImportError:
+    _ARABIC_OK = False
+
+
+# ── Palette ───────────────────────────────────────────────────────────────────
 _DARK   = (15,  23,  42)
 _BLUE   = (30,  64, 175)
 _LIGHT  = (239, 246, 255)
@@ -33,15 +46,41 @@ _MUTED  = (100, 116, 139)
 _MARGIN = 14
 _W      = 182   # usable A4 width with 14 mm margins each side
 
+# ── Font paths ────────────────────────────────────────────────────────────────
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts")
+_AMIRI_R  = os.path.join(_FONT_DIR, "Amiri-Regular.ttf")
+_AMIRI_B  = os.path.join(_FONT_DIR, "Amiri-Bold.ttf")
+_HAVE_AMIRI = os.path.isfile(_AMIRI_R) and os.path.isfile(_AMIRI_B)
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _safe(s) -> str:
+# ── Text helpers ──────────────────────────────────────────────────────────────
+
+def _is_arabic(text: str) -> bool:
+    """Return True if the string contains any Arabic-script character."""
+    return any('\u0600' <= c <= '\u06FF' or '\uFE70' <= c <= '\uFEFF' for c in str(text))
+
+
+def _ar_text(text: str) -> str:
     """
-    Sanitise text for Helvetica (Latin-1) output.
-    1. Replace known typographic symbols with ASCII equivalents.
-    2. Drop any remaining character outside the Latin-1 range (ord > 255),
-       including Arabic, CJK, emoji, etc. that come from user data.
+    Reshape and apply the Unicode bidi algorithm to Arabic text so that
+    fpdf2 renders it in correct visual order (right-to-left).
+    Falls back to a transliteration-safe ASCII strip when packages are absent.
+    """
+    s = str(text)
+    if not _is_arabic(s):
+        return _safe_latin(s)
+    if _ARABIC_OK:
+        reshaped = _reshaper.reshape(s)
+        return _bidi(reshaped)
+    # Fallback: strip chars outside Latin-1 (better than crashing)
+    return ''.join(c if ord(c) <= 255 else '?' for c in s)
+
+
+def _safe_latin(s) -> str:
+    """
+    Replace typographic symbols with ASCII equivalents so Helvetica
+    (Latin-1) renders them without error.  Does NOT touch Arabic chars
+    (those go through _ar_text instead).
     """
     _MAP = {
         '\u2014': '--',   # em dash
@@ -51,27 +90,39 @@ def _safe(s) -> str:
         '\u2022': '-',    # bullet
         '\u2026': '...',  # ellipsis
         '\u00a0': ' ',    # non-breaking space
-        '\u2018': "'",    # left single quote
-        '\u2019': "'",    # right single quote
-        '\u201c': '"',    # left double quote
-        '\u201d': '"',    # right double quote
-        '\u2500': '-',    # box drawing light horizontal
-        '\u2550': '=',    # box drawing double horizontal
+        '\u2018': "'",    '\u2019': "'",
+        '\u201c': '"',    '\u201d': '"',
+        '\u2500': '-',    '\u2550': '=',
     }
     result = str(s)
     for src, dst in _MAP.items():
         result = result.replace(src, dst)
-    # Strip anything still outside Latin-1 (covers Arabic, CJK, emoji, etc.)
-    return ''.join(c if ord(c) <= 255 else '?' for c in result)
+    # Drop characters outside Latin-1 that are NOT Arabic
+    return ''.join(
+        c if ord(c) <= 255 or _is_arabic(c) else '?'
+        for c in result
+    )
+
+
+def _prep(text) -> tuple[str, bool]:
+    """
+    Return (display_text, is_arabic) ready for a PDF cell.
+    Arabic text is reshaped + bidi-processed.
+    Latin text is sanitised for Helvetica.
+    """
+    s = str(text)
+    if _is_arabic(s):
+        return _ar_text(s), True
+    return _safe_latin(s), False
 
 
 def _m(v: float) -> str:
-    """Format a monetary amount: 2 decimal places with thousands separator."""
+    """Monetary amount: 2 decimal places with thousands separator."""
     return f"{v:,.2f}"
 
 
 def _q(v: float) -> str:
-    """Format a share quantity: integer when whole, 4 dp otherwise."""
+    """Share quantity: integer when whole, 4 dp otherwise."""
     return f"{v:,.4f}" if v != int(v) else f"{int(v):,}"
 
 
@@ -87,20 +138,48 @@ def _clip(s, n: int) -> str:
 # ── PDF class ─────────────────────────────────────────────────────────────────
 
 class _WealthPDF(FPDF):
-    """fpdf2 subclass with header/footer and reusable drawing helpers.
-    All text is routed through _safe() to stay within Latin-1."""
+    """
+    fpdf2 subclass with header/footer and reusable drawing helpers.
+
+    Font strategy
+    -------------
+    Helvetica  — Latin headings, numbers, codes (always Latin-1 safe)
+    Amiri      — Any cell whose value contains Arabic script;
+                 the text is pre-processed with arabic_reshaper + python-bidi
+                 so fpdf2 renders it in correct visual (right-to-left) order.
+    """
 
     def __init__(self, base_ccy: str, date_str: str) -> None:
         super().__init__()
         self.base_ccy = base_ccy
         self.date_str = date_str
+
+        if _HAVE_AMIRI:
+            self.add_font("Amiri",  style="",  fname=_AMIRI_R)
+            self.add_font("Amiri",  style="B", fname=_AMIRI_B)
+
         self.alias_nb_pages()
         self.set_margins(_MARGIN, _MARGIN, _MARGIN)
         self.set_auto_page_break(auto=True, margin=18)
 
+    # ── Internal font switchers ───────────────────────────────────────────────
+
+    def _hv(self, style: str = "", size: float = 8) -> None:
+        """Set Helvetica (Latin)."""
+        self.set_font("Helvetica", style, size)
+
+    def _am(self, style: str = "", size: float = 9) -> None:
+        """Set Amiri (Arabic/Unicode) when available, else fall back to Helvetica."""
+        if _HAVE_AMIRI:
+            self.set_font("Amiri", style, size)
+        else:
+            self.set_font("Helvetica", style, size)
+
+    # ── fpdf overrides ────────────────────────────────────────────────────────
+
     def footer(self) -> None:
         self.set_y(-14)
-        self.set_font("Helvetica", "I", 7)
+        self._hv("I", 7)
         self.set_text_color(*_MUTED)
         txt = (
             f"Bousala Investor Compass"
@@ -108,29 +187,69 @@ class _WealthPDF(FPDF):
             f"  |  {self.date_str}"
             f"  |  Page {self.page_no()} of {{nb}}"
         )
-        self.cell(0, 8, _safe(txt), align="C")
+        self.cell(0, 8, txt, align="C")
         self.set_text_color(0, 0, 0)
 
-    # ── Drawing helpers ──────────────────────────────────────────────────────
+    # ── Smart cell: auto-detects Arabic, switches font & alignment ────────────
+
+    def _smart_cell(
+        self,
+        w: float,
+        h: float,
+        text,
+        fill: bool = False,
+        align: str = "L",
+        base_size: float = 8,
+    ) -> None:
+        """
+        Draw a single table cell.  If the text contains Arabic script, switch
+        to Amiri, reshape + bidi the text, and force right alignment.
+        """
+        s = str(text)
+        if _is_arabic(s):
+            self._am("", base_size + 1)   # Amiri looks best 1pt larger
+            display = _ar_text(s)
+            self.cell(w, h, display, fill=fill, align="R")
+            self._hv("", base_size)
+        else:
+            self._hv("", base_size)
+            self.cell(w, h, _safe_latin(s), fill=fill, align=align)
+
+    def _smart_multicell(self, w: float, h: float, text, base_size: float = 9) -> None:
+        """
+        Draw a multi-line block.  Detects Arabic and uses Amiri + bidi;
+        otherwise Helvetica.
+        """
+        s = str(text)
+        if _is_arabic(s):
+            self._am("", base_size + 1)
+            display = _ar_text(s)
+            self.multi_cell(w, h, display, align="R", ln=True)
+            self._hv("", base_size)
+        else:
+            self._hv("", base_size)
+            self.multi_cell(w, h, _safe_latin(s), ln=True)
+
+    # ── Drawing helpers ───────────────────────────────────────────────────────
 
     def section_header(self, title: str, subtitle: str = "") -> None:
         self.set_fill_color(*_BLUE)
         self.set_text_color(*_WHITE)
-        self.set_font("Helvetica", "B", 11)
-        self.cell(0, 8, _safe(f"  {title}"), fill=True, ln=True)
+        self._hv("B", 11)
+        self.cell(0, 8, _safe_latin(f"  {title}"), fill=True, ln=True)
         if subtitle:
-            self.set_font("Helvetica", "", 8)
+            self._hv("", 8)
             self.set_text_color(*_MUTED)
-            self.cell(0, 5, _safe(f"  {subtitle}"), ln=True)
+            self.cell(0, 5, _safe_latin(f"  {subtitle}"), ln=True)
         self.set_text_color(0, 0, 0)
         self.ln(1)
 
     def table_header(self, cols: list[str], widths: list[int]) -> None:
         self.set_fill_color(*_DARK)
         self.set_text_color(*_WHITE)
-        self.set_font("Helvetica", "B", 8)
+        self._hv("B", 8)
         for col, w in zip(cols, widths):
-            self.cell(w, 6, _safe(col), fill=True)
+            self.cell(w, 6, _safe_latin(col), fill=True)
         self.ln()
         self.set_text_color(0, 0, 0)
 
@@ -142,10 +261,9 @@ class _WealthPDF(FPDF):
         aligns: list[str] | None = None,
     ) -> None:
         self.set_fill_color(*(_LIGHT if even else _WHITE))
-        self.set_font("Helvetica", "", 8)
         aligns = aligns or (["L"] * len(vals))
         for v, w, a in zip(vals, widths, aligns):
-            self.cell(w, 5, _safe(v), fill=True, align=a)
+            self._smart_cell(w, 5, v, fill=True, align=a, base_size=8)
         self.ln()
 
     def total_row(
@@ -153,23 +271,22 @@ class _WealthPDF(FPDF):
     ) -> None:
         self.set_fill_color(*_DARK)
         self.set_text_color(*_WHITE)
-        self.set_font("Helvetica", "B", 8)
-        self.cell(label_w, 6, _safe(f"  {label}"), fill=True)
-        self.cell(value_w, 6, _safe(value), fill=True, align="R")
+        self._hv("B", 8)
+        self.cell(label_w, 6, _safe_latin(f"  {label}"), fill=True)
+        self.cell(value_w, 6, _safe_latin(value), fill=True, align="R")
         self.ln()
         self.set_text_color(0, 0, 0)
         self.ln(3)
 
     def kv_row(self, label: str, value: str, even: bool) -> None:
         self.set_fill_color(*(_LIGHT if even else _WHITE))
-        self.set_font("Helvetica", "B", 8)
-        self.cell(60, 5, _safe(label), fill=True)
-        self.set_font("Helvetica", "", 8)
-        self.cell(_W - 60, 5, _safe(value), fill=True)
+        self._hv("B", 8)
+        self.cell(60, 5, _safe_latin(label), fill=True)
+        self._smart_cell(_W - 60, 5, value, fill=True, base_size=8)
         self.ln()
 
 
-# ── Main builder ──────────────────────────────────────────────────────────────
+# ── Main builder ───────────────────────────────────────────────────────────────
 
 def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     """
@@ -181,6 +298,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         Base currency for converted totals (e.g. "SAR").
     notes : str
         Optional personal message printed on the final page.
+        Arabic text is rendered correctly (right-to-left, Amiri font).
 
     Returns
     -------
@@ -250,13 +368,13 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.rect(0, 0, 210, 52, "F")
     pdf.set_xy(_MARGIN, 8)
     pdf.set_text_color(*_WHITE)
-    pdf.set_font("Helvetica", "B", 9)
+    pdf._hv("B", 9)
     pdf.cell(0, 7, "Bousala - Investor Compass", ln=True)
     pdf.set_x(_MARGIN)
-    pdf.set_font("Helvetica", "B", 20)
+    pdf._hv("B", 20)
     pdf.cell(0, 10, "Family Wealth Statement", ln=True)
     pdf.set_x(_MARGIN)
-    pdf.set_font("Helvetica", "", 10)
+    pdf._hv("", 10)
     pdf.cell(
         0, 7,
         f"Prepared on {today_str}  |  Base Currency: {base_ccy}  |  Confidential",
@@ -266,7 +384,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.ln(20)
 
     # Introduction
-    pdf.set_font("Helvetica", "", 10)
+    pdf._hv("", 10)
     pdf.set_text_color(*_TEXT)
     pdf.multi_cell(
         0, 6,
@@ -284,7 +402,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     # Net worth highlight
     pdf.set_fill_color(*_DARK)
     pdf.set_text_color(*_WHITE)
-    pdf.set_font("Helvetica", "B", 13)
+    pdf._hv("B", 13)
     pdf.cell(
         0, 12,
         f"  Total Net Worth  --  {base_ccy} {_m(nw)}",
@@ -295,7 +413,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.ln(5)
 
     # Cover summary table
-    pdf.set_font("Helvetica", "B", 9)
+    pdf._hv("B", 9)
     pdf.set_text_color(*_MUTED)
     pdf.cell(0, 5, "SNAPSHOT BY CATEGORY", ln=True)
     pdf.set_text_color(0, 0, 0)
@@ -313,7 +431,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.total_row("Total Net Worth", _sw[0], f"{base_ccy} {_m(nw)}", _sw[1])
 
     pdf.ln(2)
-    pdf.set_font("Helvetica", "I", 7.5)
+    pdf._hv("I", 7.5)
     pdf.set_text_color(*_MUTED)
     pdf.multi_cell(
         0, 5,
@@ -325,7 +443,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.set_text_color(0, 0, 0)
 
     # =========================================================================
-    # SECTION 1 -- INVESTMENT PORTFOLIO (Stocks & ETFs)
+    # SECTION 1 -- INVESTMENT PORTFOLIO
     # =========================================================================
     if holdings:
         pdf.add_page()
@@ -544,7 +662,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.total_row("Total Net Worth", _sw5[0], f"{base_ccy} {_m(nw)}", _sw5[1])
 
     pdf.ln(3)
-    pdf.set_font("Helvetica", "B", 9)
+    pdf._hv("B", 9)
     pdf.set_text_color(*_MUTED)
     pdf.cell(0, 5, "ALLOCATION BREAKDOWN", ln=True)
     pdf.set_text_color(0, 0, 0)
@@ -552,10 +670,10 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     if nw > 0:
         pdf.table_header(["Category", "Allocation (%)"], _sw5)
         for i, (lbl, amt) in enumerate(_sec5):
-            pct = (amt / nw * 100) if nw else 0.0
+            pct = (amt / nw * 100)
             pdf.table_row([lbl, f"{pct:.1f}%"], _sw5, i % 2 == 0, ["L", "R"])
     else:
-        pdf.set_font("Helvetica", "I", 9)
+        pdf._hv("I", 9)
         pdf.set_text_color(*_MUTED)
         pdf.cell(0, 6, "No assets recorded yet.", ln=True)
         pdf.set_text_color(0, 0, 0)
@@ -583,7 +701,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
             _dir_rows.append((f"{a.account_name} (Crowdfunding)", inst))
 
     if _dir_rows:
-        pdf.set_font("Helvetica", "B", 9)
+        pdf._hv("B", 9)
         pdf.set_text_color(*_TEXT)
         pdf.cell(0, 6, "Where are the accounts held?", ln=True)
         pdf.ln(1)
@@ -597,14 +715,14 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
 
     # Personal note box
     pdf.set_fill_color(*_LIGHT)
-    pdf.set_font("Helvetica", "B", 9)
+    pdf._hv("B", 9)
     pdf.set_text_color(*_TEXT)
     pdf.cell(0, 7, "  Personal Note from Account Holder", fill=True, ln=True)
-    pdf.set_font("Helvetica", "", 9)
     pdf.ln(2)
     if notes and notes.strip():
-        pdf.multi_cell(0, 6, _safe(notes.strip()), ln=True)
+        pdf._smart_multicell(0, 6, notes.strip(), base_size=9)
     else:
+        pdf._hv("I", 9)
         pdf.set_text_color(*_MUTED)
         pdf.multi_cell(
             0, 6,
@@ -619,7 +737,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.set_draw_color(*_MUTED)
     pdf.line(_MARGIN, pdf.get_y(), _MARGIN + _W, pdf.get_y())
     pdf.ln(3)
-    pdf.set_font("Helvetica", "I", 7.5)
+    pdf._hv("I", 7.5)
     pdf.set_text_color(*_MUTED)
     pdf.multi_cell(
         0, 5,
