@@ -473,49 +473,45 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.divider()
-    st.header("⚙️ Settings")
 
-    demo_mode = st.toggle(
-        "Demo Analysis Mode",
-        value=not _ai_ready,
-        help="Returns sample data instantly without calling OpenAI.",
+    # ── 1. Family Wealth Statement ────────────────────────────────────────────
+    st.caption("📄 **Family Wealth Statement**")
+    st.caption(
+        "A professional PDF your family can open and understand — "
+        "all assets, values, and account locations in one document."
     )
-
-    if demo_mode:
-        st.info("Demo mode **on** — sample data returned.", icon="🧪")
-    elif _ai_ready:
-        st.success("Live AI analysis active.", icon="✅")
-    else:
-        st.warning("API key missing.", icon="🔑")
+    _ws_notes = st.text_area(
+        "Personal note (optional)",
+        key="ws_notes",
+        placeholder=(
+            "E.g. Accounts are at Al Rajhi Bank. "
+            "Contact Ahmed on +966 5X XXX XXXX for access."
+        ),
+        max_chars=800,
+        height=90,
+    )
+    _ws_base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    try:
+        from portfolio.wealth_statement import build_wealth_statement as _build_ws
+        import datetime as _wdt
+        _ws_fname = f"bousala_wealth_{_wdt.date.today().strftime('%Y%m%d')}.pdf"
+        _ws_bytes = _build_ws(base_ccy=_ws_base_ccy, notes=_ws_notes or "")
+        st.download_button(
+            "📥 Download Wealth Statement PDF",
+            data=_ws_bytes,
+            file_name=_ws_fname,
+            mime="application/pdf",
+            use_container_width=True,
+            key="ws_download_btn",
+            help="Downloads a family-friendly Arabic wealth summary PDF.",
+        )
+    except Exception as _ws_err:
+        st.error(f"Could not generate PDF: {_ws_err}", icon="⚠️")
 
     st.divider()
-    st.caption("🔑 **API Key Status**")
-    if _ai_ready:
-        st.success("OPENAI_API_KEY found", icon="✅")
-    else:
-        st.error("OPENAI_API_KEY missing", icon="❌")
-        st.markdown("Add it in **Replit Secrets** with key `OPENAI_API_KEY`, then:")
-        if st.button("🔄 Reload secrets", use_container_width=True):
-            st.rerun()
 
-    st.divider()
-    st.caption("📊 **Usage Today**")
-    _today_count = get_today_count()
-    _pct = int(_today_count / DAILY_LIMIT * 100)
-    st.progress(_pct / 100, text=f"{_today_count} / {DAILY_LIMIT} live analyses")
-    if _today_count >= DAILY_LIMIT:
-        st.error("Daily limit reached — enable Demo Mode or wait until midnight.", icon="🚫")
-    elif _today_count >= DAILY_LIMIT * 0.8:
-        st.warning(f"Approaching daily limit ({DAILY_LIMIT - _today_count} remaining).", icon="⚠️")
-
-    st.divider()
-    st.caption("📦 **Analysis Cache**")
-    _n_cached = cache_size()
-    st.caption(f"{_n_cached} filing(s) cached — repeat analyses are instant and free.")
-
-    # ── Market Price Auto-Refresh ─────────────────────────────────────────────
-    st.divider()
-    st.caption("📡 **Market Price Auto-Refresh**")
+    # ── 2. Market Price Refresh ───────────────────────────────────────────────
+    st.caption("📡 **Market Price Refresh**")
     from market_prices import market_session_label as _msl, is_us_market_open as _mko
     _si, _sl = _msl()
     st.caption(f"{_si} {_sl}")
@@ -554,28 +550,78 @@ with st.sidebar:
     if mp_auto_on and not _mko():
         st.caption("🔴 Market closed — prices may be delayed")
 
-    _fw_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Bousala_NetWorth_Framework.txt")
-    if os.path.exists(_fw_path):
+    st.divider()
+
+    # ── 3. Settings (collapsed by default) ───────────────────────────────────
+    with st.expander("⚙️ Settings", expanded=False):
+        demo_mode = st.toggle(
+            "Demo Analysis Mode",
+            value=not _ai_ready,
+            help="Returns sample data instantly without calling OpenAI.",
+        )
+
+        if demo_mode:
+            st.info("Demo mode **on** — sample data returned.", icon="🧪")
+        elif _ai_ready:
+            st.success("Live AI analysis active.", icon="✅")
+        else:
+            st.warning("API key missing.", icon="🔑")
+
         st.divider()
-        st.caption("📄 **Downloads**")
-        with open(_fw_path, "rb") as _fw_f:
-            st.download_button(
-                "📥 Framework Doc (.txt)",
-                data=_fw_f,
-                file_name="Bousala_NetWorth_Framework.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
-        _tsx_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "BousalaScreens.tsx")
-        if os.path.exists(_tsx_path):
-            with open(_tsx_path, "rb") as _tsx_f:
+        st.caption("🔑 **API Key Status**")
+        if _ai_ready:
+            st.success("OPENAI_API_KEY found", icon="✅")
+        else:
+            st.error("OPENAI_API_KEY missing", icon="❌")
+            st.markdown("Add it in **Replit Secrets** with key `OPENAI_API_KEY`, then:")
+            if st.button("🔄 Reload secrets", use_container_width=True):
+                st.rerun()
+
+        st.divider()
+        st.caption("📊 **Usage Today**")
+        _today_count = get_today_count()
+        _pct = int(_today_count / DAILY_LIMIT * 100)
+        st.progress(_pct / 100, text=f"{_today_count} / {DAILY_LIMIT} live analyses")
+        if _today_count >= DAILY_LIMIT:
+            st.error("Daily limit reached — enable Demo Mode or wait until midnight.", icon="🚫")
+        elif _today_count >= DAILY_LIMIT * 0.8:
+            st.warning(f"Approaching daily limit ({DAILY_LIMIT - _today_count} remaining).", icon="⚠️")
+
+        st.divider()
+        st.caption("📦 **Analysis Cache**")
+        _n_cached = cache_size()
+        st.caption(f"{_n_cached} filing(s) cached — repeat analyses are instant and free.")
+
+        st.divider()
+        st.checkbox(
+            "🔧 Developer Mode",
+            key="dev_mode",
+            value=False,
+            help="Show technical diagnostics and FX reconciliation tables.",
+        )
+
+        _fw_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Bousala_NetWorth_Framework.txt")
+        if os.path.exists(_fw_path):
+            st.divider()
+            st.caption("📄 **Dev Downloads**")
+            with open(_fw_path, "rb") as _fw_f:
                 st.download_button(
-                    "📥 App Screens (.tsx)",
-                    data=_tsx_f,
-                    file_name="BousalaScreens.tsx",
+                    "📥 Framework Doc (.txt)",
+                    data=_fw_f,
+                    file_name="Bousala_NetWorth_Framework.txt",
                     mime="text/plain",
                     use_container_width=True,
                 )
+            _tsx_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "BousalaScreens.tsx")
+            if os.path.exists(_tsx_path):
+                with open(_tsx_path, "rb") as _tsx_f:
+                    st.download_button(
+                        "📥 App Screens (.tsx)",
+                        data=_tsx_f,
+                        file_name="BousalaScreens.tsx",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
 
 _analyze_enabled = _ai_ready or demo_mode
 
@@ -8931,49 +8977,6 @@ def render_sahmk_discovery_tab() -> None:
 
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ App Settings")
-    st.checkbox(
-        "🔧 Developer Mode",
-        key="dev_mode",
-        value=False,
-        help="Show technical diagnostics and FX reconciliation tables.",
-    )
-
-    st.divider()
-    with st.expander("📄 Family Wealth Statement"):
-        st.caption(
-            "A professional PDF your family can open and understand — "
-            "all assets, values, and account locations in one document."
-        )
-        _ws_notes = st.text_area(
-            "Personal note (optional)",
-            key="ws_notes",
-            placeholder=(
-                "E.g. Accounts are at Al Rajhi Bank. "
-                "Contact Ahmed on +966 5X XXX XXXX for access."
-            ),
-            max_chars=800,
-            height=100,
-        )
-        _ws_base_ccy = st.session_state.get("global_base_ccy", "SAR")
-        try:
-            from portfolio.wealth_statement import build_wealth_statement as _build_ws
-            import datetime as _wdt
-            _ws_fname = f"bousala_wealth_{_wdt.date.today().strftime('%Y%m%d')}.pdf"
-            _ws_bytes = _build_ws(base_ccy=_ws_base_ccy, notes=_ws_notes or "")
-            st.download_button(
-                "📄 Download PDF",
-                data=_ws_bytes,
-                file_name=_ws_fname,
-                mime="application/pdf",
-                use_container_width=True,
-                key="ws_download_btn",
-                help="Downloads a family-friendly wealth summary PDF.",
-            )
-        except Exception as _ws_err:
-            st.error(f"Could not generate PDF: {_ws_err}", icon="⚠️")
-
 render_global_header()
 
 if True:
