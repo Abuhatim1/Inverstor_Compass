@@ -9312,7 +9312,7 @@ if True:
      tab_test) = st.tabs([
         "💼 Portfolio",
         "🏦 Alt Investments",
-        "🏛️ Assets & Retirement",
+        "🏦 Balance Sheet",
         "💳 Accounts",
         "📜 Activity",
         "🧭 Analysis",
@@ -9325,7 +9325,7 @@ if True:
     with tab_portfolio:
         _port_page = st.pills(
             "portfolio_nav",
-            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings", "📄 Wealth Statement", "📋 Liabilities"],
+            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings", "📄 Wealth Statement"],
             default="💼 Holdings",
             label_visibility="collapsed",
             key="portfolio_subnav",
@@ -9337,8 +9337,6 @@ if True:
             render_closed_holdings_tab()
         elif _port_page == "📄 Wealth Statement":
             render_wealth_statement_page()
-        elif _port_page == "📋 Liabilities":
-            render_liabilities_tab()
         else:
             render_holdings_tab(_shared_bundle)
 
@@ -9480,7 +9478,70 @@ if True:
         render_alt_investments_tab()
 
     with tab_fixed:
-        render_fixed_assets_tab()
+        # ── Balance Sheet summary banner ──────────────────────────────────────
+        from portfolio.fixed_assets import load_fixed_assets as _bs_load_fa
+        from portfolio.liabilities import load_liabilities as _bs_load_lib, compute_liabilities_base as _bs_clib
+        from fx_rates import get_rates_for_holdings as _bs_fx
+        _bs_ccy   = st.session_state.get("global_base_ccy", "SAR")
+        _bs_fa    = {k: v for k, v in _bs_load_fa().items()  if v.status != "Sold"}
+        _bs_libs  = {k: v for k, v in _bs_load_lib().items() if v.status == "Active"}
+        _bs_ccys  = list({a.currency for a in _bs_fa.values()} | {l.currency for l in _bs_libs.values()})
+        _bs_rates = _bs_fx(_bs_ccys, _bs_ccy) if _bs_ccys else {}
+        _bs_equity = sum(
+            a.equity * (_bs_rates[a.currency].rate if _bs_rates.get(a.currency) else 1.0)
+            for a in _bs_fa.values()
+        )
+        _bs_debt  = _bs_clib(_bs_libs, _bs_ccy, _bs_rates)
+        _bs_net   = _bs_equity - _bs_debt
+
+        def _bs_fmt(v: float) -> str:
+            av = abs(v)
+            if av >= 1_000_000: return f"{v / 1_000_000:.2f}M"
+            if av >= 1_000:     return f"{v:,.0f}"
+            return f"{v:,.2f}"
+
+        _net_col  = "#22c55e" if _bs_net >= 0 else "#ef4444"
+        st.markdown(
+            f'<div class="acct-summary-row" style="gap:2.5rem;padding:8px 0 14px 0;">'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Assets Equity ({_bs_ccy})</div>'
+            f'    <div class="acct-kpi-val" style="color:#22c55e">{_bs_fmt(_bs_equity)}</div>'
+            f'  </div>'
+            f'  <div style="font-size:1.6rem;color:#94a3b8;align-self:center">−</div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Liabilities ({_bs_ccy})</div>'
+            f'    <div class="acct-kpi-val" style="color:#ef4444">{_bs_fmt(_bs_debt)}</div>'
+            f'  </div>'
+            f'  <div style="font-size:1.6rem;color:#94a3b8;align-self:center">=</div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Net ({_bs_ccy})</div>'
+            f'    <div class="acct-kpi-val" style="color:{_net_col};font-size:1.5rem">{_bs_fmt(_bs_net)}</div>'
+            f'  </div>'
+            f'  <div style="border-left:1px solid #e2e8f0;margin:0 0.5rem"></div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Active Assets</div>'
+            f'    <div class="acct-kpi-val">{len(_bs_fa)}</div>'
+            f'  </div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Active Liabilities</div>'
+            f'    <div class="acct-kpi-val">{len(_bs_libs)}</div>'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        _bs_page = st.pills(
+            "bs_nav",
+            ["🏛️ Assets", "📋 Liabilities"],
+            default="🏛️ Assets",
+            label_visibility="collapsed",
+            key="bs_subnav",
+        )
+        st.divider()
+        if _bs_page == "📋 Liabilities":
+            render_liabilities_tab()
+        else:
+            render_fixed_assets_tab()
 
     with tab_test:
         render_test_runner_tab()
