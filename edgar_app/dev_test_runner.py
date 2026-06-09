@@ -7388,18 +7388,35 @@ def _cat_wealth_statement() -> list[TestResult]:
                         CAT, "portfolio.wealth_statement", "P0", True, ws01))
 
     def ws02():
+        """Empty portfolio (no data) must not raise; must return valid PDF."""
+        from unittest.mock import patch
         from portfolio.wealth_statement import build_wealth_statement
-        note = "Contact Ahmed on +966 5X XXX XXXX. Accounts at Al Rajhi Bank."
-        pdf = build_wealth_statement(base_ccy="SAR", notes=note)
-        ok_magic = pdf[:4] == b"%PDF"
-        ok_note  = note[:20].encode() in pdf or True  # PDF may encode text differently
-        ok = ok_magic and isinstance(pdf, bytes) and len(pdf) > 1024
-        return (
-            "notes string accepted; valid PDF produced",
-            "PASS" if ok else f"magic={pdf[:4]!r}, size={len(pdf)}",
-            ok,
-        )
-    results.append(_run("WS-02", "build_wealth_statement — notes string produces valid PDF",
+
+        _empty = lambda *a, **kw: {}  # noqa: E731
+
+        patches = [
+            patch("portfolio.load_holdings",                  _empty),
+            patch("portfolio.accounts.load_accounts",         _empty),
+            patch("portfolio.alt_investments.load_igi_investments", _empty),
+            patch("portfolio.crowdfunding.load_cf_accounts",  _empty),
+            patch("portfolio.fixed_assets.load_fixed_assets", _empty),
+        ]
+        try:
+            for p in patches: p.start()
+            pdf = build_wealth_statement(base_ccy="SAR", notes="")
+            ok  = isinstance(pdf, bytes) and pdf[:4] == b"%PDF" and len(pdf) > 500
+            return (
+                "empty portfolio returns valid PDF without crash",
+                "PASS" if ok else f"magic={pdf[:4]!r}, size={len(pdf)}",
+                ok,
+            )
+        except Exception as exc:
+            return ("empty portfolio returns valid PDF without crash",
+                    f"FAIL: raised {type(exc).__name__}: {exc}", False)
+        finally:
+            for p in patches: p.stop()
+
+    results.append(_run("WS-02", "build_wealth_statement — empty portfolio produces valid PDF",
                         CAT, "portfolio.wealth_statement", "P0", True, ws02))
 
     return results

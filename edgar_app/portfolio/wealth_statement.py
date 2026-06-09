@@ -22,7 +22,7 @@ from datetime import date as _date
 
 from fpdf import FPDF
 
-# ── Palette ─────────────────────────────────────────────────────────────────
+# ── Palette ──────────────────────────────────────────────────────────────────
 _DARK   = (15,  23,  42)
 _BLUE   = (30,  64, 175)
 _LIGHT  = (239, 246, 255)
@@ -34,7 +34,7 @@ _MARGIN = 14
 _W      = 182   # usable A4 width with 14 mm margins each side
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _safe(s) -> str:
     """
@@ -61,12 +61,18 @@ def _safe(s) -> str:
     result = str(s)
     for src, dst in _MAP.items():
         result = result.replace(src, dst)
-    # Strip anything still outside Latin-1 (covers Arabic, CJK, emoji…)
+    # Strip anything still outside Latin-1 (covers Arabic, CJK, emoji, etc.)
     return ''.join(c if ord(c) <= 255 else '?' for c in result)
 
 
-def _fmt(v: float, dec: int = 0) -> str:
-    return f"{v:,.{dec}f}"
+def _m(v: float) -> str:
+    """Format a monetary amount: 2 decimal places with thousands separator."""
+    return f"{v:,.2f}"
+
+
+def _q(v: float) -> str:
+    """Format a share quantity: integer when whole, 4 dp otherwise."""
+    return f"{v:,.4f}" if v != int(v) else f"{int(v):,}"
 
 
 def _rate(fx: dict, ccy: str) -> float:
@@ -97,14 +103,15 @@ class _WealthPDF(FPDF):
         self.set_font("Helvetica", "I", 7)
         self.set_text_color(*_MUTED)
         txt = (
-            f"Confidential  |  Prepared by Bousala"
+            f"Bousala Investor Compass"
+            f"  |  Confidential"
             f"  |  {self.date_str}"
             f"  |  Page {self.page_no()} of {{nb}}"
         )
         self.cell(0, 8, _safe(txt), align="C")
         self.set_text_color(0, 0, 0)
 
-    # ── Drawing helpers (all text sanitised) ─────────────────────────────
+    # ── Drawing helpers ──────────────────────────────────────────────────────
 
     def section_header(self, title: str, subtitle: str = "") -> None:
         self.set_fill_color(*_BLUE)
@@ -240,20 +247,23 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
 
     # Dark header band
     pdf.set_fill_color(*_DARK)
-    pdf.rect(0, 0, 210, 48, "F")
-    pdf.set_xy(_MARGIN, 10)
+    pdf.rect(0, 0, 210, 52, "F")
+    pdf.set_xy(_MARGIN, 8)
     pdf.set_text_color(*_WHITE)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 7, "Bousala - Investor Compass", ln=True)
+    pdf.set_x(_MARGIN)
     pdf.set_font("Helvetica", "B", 20)
-    pdf.cell(0, 10, "Wealth Summary Statement", ln=True)
+    pdf.cell(0, 10, "Family Wealth Statement", ln=True)
     pdf.set_x(_MARGIN)
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(
         0, 7,
-        f"Bousala  |  Prepared on {today_str}  |  Base Currency: {base_ccy}",
+        f"Prepared on {today_str}  |  Base Currency: {base_ccy}  |  Confidential",
         ln=True,
     )
     pdf.set_text_color(0, 0, 0)
-    pdf.ln(18)
+    pdf.ln(20)
 
     # Introduction
     pdf.set_font("Helvetica", "", 10)
@@ -277,20 +287,20 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(
         0, 12,
-        f"  Total Net Worth  --  {base_ccy} {_fmt(nw)}",
+        f"  Total Net Worth  --  {base_ccy} {_m(nw)}",
         fill=True,
         ln=True,
     )
     pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
 
-    # Summary table
+    # Cover summary table
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*_MUTED)
     pdf.cell(0, 5, "SNAPSHOT BY CATEGORY", ln=True)
     pdf.set_text_color(0, 0, 0)
 
-    _sw = [_W - 42, 42]
+    _sw = [_W - 52, 52]
     _summary = [
         ("Investment Portfolio (Stocks & ETFs)", port_mv_base),
         ("Alternative Investments",              igi_base),
@@ -299,8 +309,8 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     ]
     pdf.table_header(["Category", f"Value ({base_ccy})"], _sw)
     for i, (lbl, amt) in enumerate(_summary):
-        pdf.table_row([lbl, _fmt(amt)], _sw, i % 2 == 0, ["L", "R"])
-    pdf.total_row("Total Net Worth", _sw[0], f"{base_ccy} {_fmt(nw)}", _sw[1])
+        pdf.table_row([lbl, _m(amt)], _sw, i % 2 == 0, ["L", "R"])
+    pdf.total_row("Total Net Worth", _sw[0], f"{base_ccy} {_m(nw)}", _sw[1])
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7.5)
@@ -308,13 +318,14 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     pdf.multi_cell(
         0, 5,
         "Exchange rates and market prices are as of the last recorded update. "
-        "For legal or estate planning matters, please consult a qualified financial or legal professional.",
+        "For legal or estate planning matters, please consult a qualified financial "
+        "or legal professional.",
         ln=True,
     )
     pdf.set_text_color(0, 0, 0)
 
     # =========================================================================
-    # SECTION 1 -- INVESTMENT PORTFOLIO
+    # SECTION 1 -- INVESTMENT PORTFOLIO (Stocks & ETFs)
     # =========================================================================
     if holdings:
         pdf.add_page()
@@ -336,19 +347,14 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
             mv   = h.market_value
             mv_b = mv * _rate(fx, h.currency)
             _sec_total += mv_b
-            _qty = (
-                _fmt(h.quantity, 4)
-                if h.quantity != int(h.quantity)
-                else _fmt(h.quantity)
-            )
             pdf.table_row(
                 [
                     _clip(h.company_name or h.ticker, 32),
                     _clip(h.ticker, 10),
-                    _qty,
-                    f"{h.currency} {_fmt(h.current_price, 2)}",
-                    f"{h.currency} {_fmt(mv)}",
-                    _fmt(mv_b),
+                    _q(h.quantity),
+                    f"{h.currency} {_m(h.current_price)}",
+                    f"{h.currency} {_m(mv)}",
+                    _m(mv_b),
                 ],
                 _wids, i % 2 == 0,
                 ["L", "L", "R", "R", "R", "R"],
@@ -357,7 +363,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         pdf.total_row(
             f"Total - {len(holdings)} holding(s)",
             sum(_wids[:-1]),
-            f"{base_ccy} {_fmt(_sec_total)}",
+            f"{base_ccy} {_m(_sec_total)}",
             _wids[-1],
         )
 
@@ -371,10 +377,10 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
             "Includes murabaha, sukuk, fixed income, and other non-listed instruments.",
         )
         _cols = [
-            "Investment Name", "Structure", "Institution",
-            "CCY", "Principal", f"Current Value ({base_ccy})",
+            "Investment Name", "Type", "Status",
+            "Currency", "Value (CCY)", f"Value ({base_ccy})",
         ]
-        _wids = [52, 26, 34, 14, 24, 32]
+        _wids = [56, 30, 26, 16, 26, 28]
         pdf.table_header(_cols, _wids)
 
         _sec_total = 0.0
@@ -384,12 +390,12 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
             _sec_total += val_b
             pdf.table_row(
                 [
-                    _clip(inv.investment_name, 30),
-                    _clip(inv.sharia_structure or inv.investment_name, 14),
-                    _clip(inv.institution, 20),
+                    _clip(inv.investment_name, 34),
+                    _clip(inv.sharia_structure or "N/A", 18),
+                    _clip(inv.status, 14),
                     inv.currency,
-                    f"{inv.currency} {_fmt(inv.principal_amount)}",
-                    f"{base_ccy} {_fmt(val_b)}",
+                    f"{inv.currency} {_m(inv.current_value)}",
+                    _m(val_b),
                 ],
                 _wids, i % 2 == 0,
                 ["L", "L", "L", "L", "R", "R"],
@@ -398,7 +404,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         pdf.total_row(
             f"Total - {len(igi)} investment(s)",
             sum(_wids[:-1]),
-            f"{base_ccy} {_fmt(_sec_total)}",
+            f"{base_ccy} {_m(_sec_total)}",
             _wids[-1],
         )
 
@@ -440,9 +446,9 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         )
         _cols = [
             "Account Name", "Institution", "Type",
-            "CCY", "Balance (CCY)", f"Balance ({base_ccy})",
+            "Currency", "Balance (CCY)", f"Balance ({base_ccy})",
         ]
-        _wids = [50, 38, 26, 14, 26, 28]
+        _wids = [50, 38, 26, 16, 24, 28]
         pdf.table_header(_cols, _wids)
 
         _sec_total = 0.0
@@ -458,8 +464,8 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
                     _clip(inst, 22),
                     typ,
                     ccy,
-                    f"{ccy} {_fmt(bal)}",
-                    f"{base_ccy} {_fmt(bal_b)}",
+                    f"{ccy} {_m(bal)}",
+                    _m(bal_b),
                 ],
                 _wids, i % 2 == 0,
                 ["L", "L", "L", "L", "R", "R"],
@@ -468,7 +474,7 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         pdf.total_row(
             f"Total - {len(all_rows)} account(s)",
             sum(_wids[:-1]),
-            f"{base_ccy} {_fmt(_sec_total)}",
+            f"{base_ccy} {_m(_sec_total)}",
             _wids[-1],
         )
 
@@ -483,10 +489,10 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         )
         _cols = [
             "Asset Name", "Category",
-            "CCY", "Current Value", "Loan / Mortgage",
+            "Currency", "Current Value", "Loan / Mortgage",
             "Net Equity", f"Equity ({base_ccy})",
         ]
-        _wids = [44, 32, 14, 24, 24, 22, 22]
+        _wids = [44, 30, 16, 24, 24, 20, 24]
         pdf.table_header(_cols, _wids)
 
         _sec_total = 0.0
@@ -499,10 +505,10 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
                     _clip(asset.name, 26),
                     _clip(asset.asset_type, 18),
                     asset.currency,
-                    _fmt(asset.current_value),
-                    _fmt(asset.outstanding_liability),
-                    _fmt(asset.equity),
-                    _fmt(eq_b),
+                    _m(asset.current_value),
+                    _m(asset.outstanding_liability),
+                    _m(asset.equity),
+                    _m(eq_b),
                 ],
                 _wids, i % 2 == 0,
                 ["L", "L", "L", "R", "R", "R", "R"],
@@ -511,12 +517,51 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
         pdf.total_row(
             f"Total - {len(fa)} asset(s)",
             sum(_wids[:-1]),
-            f"{base_ccy} {_fmt(_sec_total)}",
+            f"{base_ccy} {_m(_sec_total)}",
             _wids[-1],
         )
 
     # =========================================================================
-    # NOTES PAGE
+    # SECTION 5 -- CONSOLIDATED SUMMARY
+    # =========================================================================
+    pdf.add_page()
+    pdf.section_header(
+        "Section 5 - Consolidated Net Worth Summary",
+        "All figures in base currency after FX conversion.",
+    )
+
+    _sw5 = [_W - 52, 52]
+    pdf.table_header(["Asset Category", f"Total ({base_ccy})"], _sw5)
+    _sec5 = [
+        ("Investment Portfolio (Stocks & ETFs)", port_mv_base),
+        ("Alternative Investments",              igi_base),
+        ("Cash in Brokerage & Bank Accounts",    cash_base),
+        ("Crowdfunding Accounts",                cf_base),
+        ("Properties, Vehicles & Retirement",    fa_base),
+    ]
+    for i, (lbl, amt) in enumerate(_sec5):
+        pdf.table_row([lbl, _m(amt)], _sw5, i % 2 == 0, ["L", "R"])
+    pdf.total_row("Total Net Worth", _sw5[0], f"{base_ccy} {_m(nw)}", _sw5[1])
+
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*_MUTED)
+    pdf.cell(0, 5, "ALLOCATION BREAKDOWN", ln=True)
+    pdf.set_text_color(0, 0, 0)
+
+    if nw > 0:
+        pdf.table_header(["Category", "Allocation (%)"], _sw5)
+        for i, (lbl, amt) in enumerate(_sec5):
+            pct = (amt / nw * 100) if nw else 0.0
+            pdf.table_row([lbl, f"{pct:.1f}%"], _sw5, i % 2 == 0, ["L", "R"])
+    else:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(*_MUTED)
+        pdf.cell(0, 6, "No assets recorded yet.", ln=True)
+        pdf.set_text_color(0, 0, 0)
+
+    # =========================================================================
+    # NOTES PAGE -- Account Directory & Personal Message
     # =========================================================================
     pdf.add_page()
     pdf.section_header("Important Information & Contacts")
