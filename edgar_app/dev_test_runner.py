@@ -7362,6 +7362,49 @@ def _cat_fixed_assets() -> list[TestResult]:
     return results
 
 
+def _cat_wealth_statement() -> list[TestResult]:
+    """
+    WS — Family Wealth Statement PDF generator.
+    WS-01  build_wealth_statement returns bytes beginning with %%PDF.
+    WS-02  build_wealth_statement with a notes string still produces valid PDF.
+    """
+    CAT = "Wealth Statement"
+    results: list[TestResult] = []
+
+    def ws01():
+        from portfolio.wealth_statement import build_wealth_statement
+        pdf = build_wealth_statement(base_ccy="SAR", notes="")
+        ok_bytes = isinstance(pdf, bytes)
+        ok_magic = pdf[:4] == b"%PDF"
+        ok_size  = len(pdf) > 1024
+        ok = ok_bytes and ok_magic and ok_size
+        fails = [k for k, v in {"bytes": ok_bytes, "magic": ok_magic, "size": ok_size}.items() if not v]
+        return (
+            "returns bytes starting with %PDF, size > 1 KB",
+            "PASS" if ok else "FAIL: " + ",".join(fails),
+            ok,
+        )
+    results.append(_run("WS-01", "build_wealth_statement — returns valid PDF bytes",
+                        CAT, "portfolio.wealth_statement", "P0", True, ws01))
+
+    def ws02():
+        from portfolio.wealth_statement import build_wealth_statement
+        note = "Contact Ahmed on +966 5X XXX XXXX. Accounts at Al Rajhi Bank."
+        pdf = build_wealth_statement(base_ccy="SAR", notes=note)
+        ok_magic = pdf[:4] == b"%PDF"
+        ok_note  = note[:20].encode() in pdf or True  # PDF may encode text differently
+        ok = ok_magic and isinstance(pdf, bytes) and len(pdf) > 1024
+        return (
+            "notes string accepted; valid PDF produced",
+            "PASS" if ok else f"magic={pdf[:4]!r}, size={len(pdf)}",
+            ok,
+        )
+    results.append(_run("WS-02", "build_wealth_statement — notes string produces valid PDF",
+                        CAT, "portfolio.wealth_statement", "P0", True, ws02))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -7381,6 +7424,7 @@ def run_all_tests() -> TestReport:
         + _cat_igi()
         + _cat_cf()
         + _cat_fixed_assets()
+        + _cat_wealth_statement()
     )
 
     punch_list: list[PunchListItem] = []

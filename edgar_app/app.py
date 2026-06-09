@@ -8940,6 +8940,40 @@ with st.sidebar:
         help="Show technical diagnostics and FX reconciliation tables.",
     )
 
+    st.divider()
+    with st.expander("📄 Family Wealth Statement"):
+        st.caption(
+            "A professional PDF your family can open and understand — "
+            "all assets, values, and account locations in one document."
+        )
+        _ws_notes = st.text_area(
+            "Personal note (optional)",
+            key="ws_notes",
+            placeholder=(
+                "E.g. Accounts are at Al Rajhi Bank. "
+                "Contact Ahmed on +966 5X XXX XXXX for access."
+            ),
+            max_chars=800,
+            height=100,
+        )
+        _ws_base_ccy = st.session_state.get("global_base_ccy", "SAR")
+        try:
+            from portfolio.wealth_statement import build_wealth_statement as _build_ws
+            import datetime as _wdt
+            _ws_fname = f"bousala_wealth_{_wdt.date.today().strftime('%Y%m%d')}.pdf"
+            _ws_bytes = _build_ws(base_ccy=_ws_base_ccy, notes=_ws_notes or "")
+            st.download_button(
+                "📄 Download PDF",
+                data=_ws_bytes,
+                file_name=_ws_fname,
+                mime="application/pdf",
+                use_container_width=True,
+                key="ws_download_btn",
+                help="Downloads a family-friendly wealth summary PDF.",
+            )
+        except Exception as _ws_err:
+            st.error(f"Could not generate PDF: {_ws_err}", icon="⚠️")
+
 render_global_header()
 
 if True:
