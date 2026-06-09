@@ -9307,12 +9307,12 @@ def render_sahmk_discovery_tab() -> None:
 render_global_header()
 
 if True:
-    (tab_portfolio, tab_alt, tab_fixed, tab_accounts, tab_activity,
+    (tab_fixed, tab_portfolio, tab_alt, tab_accounts, tab_activity,
      tab_analysis, tab_research,
      tab_test) = st.tabs([
+        "🏦 Balance Sheet",
         "💼 Portfolio",
         "🏦 Alt Investments",
-        "🏦 Balance Sheet",
         "💳 Accounts",
         "📜 Activity",
         "🧭 Analysis",
@@ -9596,6 +9596,118 @@ if True:
             unsafe_allow_html=True,
         )
 
+        # ── Two-panel charts ───────────────────────────────────────────────
+        import plotly.graph_objects as go
+        from portfolio.net_worth import load_nw_snapshots as _bs_load_snaps
+
+        _bs_col_chart, _bs_col_trend = st.columns([1, 1], gap="medium")
+
+        # Left — Asset Distribution Donut
+        with _bs_col_chart:
+            st.markdown(
+                '<p style="font-size:0.78rem;font-weight:600;color:#64748b;'
+                'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">'
+                'Asset Distribution</p>',
+                unsafe_allow_html=True,
+            )
+            _bs_donut_labels = ["📈 Portfolio", "🏦 Alt Investments", "🏛️ Fixed Assets"]
+            _bs_donut_values = [_bs_port, _bs_alts, _bs_fixed]
+            _bs_donut_colors = ["#0ea5e9", "#8b5cf6", "#f59e0b"]
+            # Only show slices with value > 0
+            _bs_dv = [(l, v, c) for l, v, c in
+                      zip(_bs_donut_labels, _bs_donut_values, _bs_donut_colors) if v > 0]
+            if _bs_dv and _bs_total_assets > 0:
+                _dl, _dv, _dc = zip(*_bs_dv)
+                _bs_donut_fig = go.Figure(go.Pie(
+                    labels=list(_dl),
+                    values=list(_dv),
+                    textinfo="percent",
+                    textposition="inside",
+                    insidetextorientation="radial",
+                    hovertemplate="<b>%{label}</b><br>%{value:,.0f} "
+                                  + _bs_ccy + "<br>%{percent:.1f}<extra></extra>",
+                    marker=dict(colors=list(_dc), line=dict(color="#ffffff", width=2)),
+                    hole=0.42,
+                ))
+                _bs_donut_fig.update_layout(
+                    margin=dict(l=4, r=4, t=8, b=8),
+                    height=240,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="v", x=1.01, y=0.5,
+                        font=dict(size=11), bgcolor="rgba(0,0,0,0)",
+                    ),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    annotations=[dict(
+                        text=f"<b>{_bs_ccy}</b>",
+                        x=0.5, y=0.5, font_size=12, showarrow=False,
+                    )],
+                )
+                st.plotly_chart(_bs_donut_fig, use_container_width=True,
+                                config={"displayModeBar": False})
+            else:
+                st.info("No asset data to display.", icon="📊")
+
+        # Right — Net Worth Monthly Trend
+        with _bs_col_trend:
+            st.markdown(
+                '<p style="font-size:0.78rem;font-weight:600;color:#64748b;'
+                'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">'
+                'Net Worth Trend</p>',
+                unsafe_allow_html=True,
+            )
+            _bs_snaps = sorted(
+                [s for s in _bs_load_snaps() if s.get("ccy") == _bs_ccy],
+                key=lambda x: x["month"],
+            )
+            # Always include today's computed net worth as the live point
+            _today_month = __import__("datetime").date.today().strftime("%Y-%m")
+            _bs_trend_pts = [s for s in _bs_snaps if s["month"] != _today_month]
+            _bs_trend_pts.append({"month": _today_month, "value": _bs_net, "ccy": _bs_ccy})
+            _bs_trend_pts.sort(key=lambda x: x["month"])
+
+            if len(_bs_trend_pts) >= 1:
+                _bs_months = [p["month"] for p in _bs_trend_pts]
+                _bs_values = [p["value"] for p in _bs_trend_pts]
+                _line_col  = "#22c55e" if (_bs_values[-1] >= _bs_values[0]) else "#ef4444"
+                _bs_trend_fig = go.Figure()
+                _bs_trend_fig.add_trace(go.Scatter(
+                    x=_bs_months,
+                    y=_bs_values,
+                    mode="lines+markers",
+                    line=dict(color=_line_col, width=2.5, shape="spline"),
+                    marker=dict(size=6, color=_line_col,
+                                line=dict(color="#ffffff", width=1.5)),
+                    fill="tozeroy",
+                    fillcolor=_line_col.replace(")", ",0.08)").replace("rgb", "rgba")
+                               if _line_col.startswith("rgb")
+                               else _line_col + "14",
+                    hovertemplate="<b>%{x}</b><br>%{y:,.0f} "
+                                  + _bs_ccy + "<extra></extra>",
+                ))
+                _bs_trend_fig.update_layout(
+                    margin=dict(l=4, r=4, t=8, b=8),
+                    height=240,
+                    xaxis=dict(
+                        showgrid=False, zeroline=False,
+                        tickfont=dict(size=10), tickangle=-30,
+                    ),
+                    yaxis=dict(
+                        showgrid=True, zeroline=False,
+                        gridcolor="#f1f5f9", tickfont=dict(size=10),
+                        tickformat=",.0f",
+                    ),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False,
+                )
+                st.plotly_chart(_bs_trend_fig, use_container_width=True,
+                                config={"displayModeBar": False})
+            else:
+                st.info("Net worth trend will appear after the first month of data.", icon="📈")
+
+        # ── Sub-page pills ─────────────────────────────────────────────────
         _bs_page = st.pills(
             "bs_nav",
             ["🏛️ Assets", "📋 Liabilities"],
