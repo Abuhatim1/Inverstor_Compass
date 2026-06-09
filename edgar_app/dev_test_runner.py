@@ -7205,16 +7205,22 @@ def _cat_fixed_assets() -> list[TestResult]:
 
     def fa03():
         import tempfile, os
-        from portfolio.fixed_assets import add_fixed_asset
+        from portfolio.fixed_assets import add_fixed_asset, FIXED_ASSET_TYPES
         with tempfile.TemporaryDirectory() as tmp:
             p = os.path.join(tmp, "fa.json")
             asset, err = add_fixed_asset(
                 name="Test", asset_type="INVALID_TYPE",
                 currency="SAR", current_value=100_000.0, path=p,
             )
-        ok = asset is None and err is not None and "invalid asset type" in err.lower()
-        return ("invalid type rejected", "PASS" if ok else f"asset={asset}, err={err!r}", ok)
-    results.append(_run("FA-03", "add_fixed_asset — rejects invalid asset_type",
+        ok_reject  = asset is None and err is not None and "invalid asset type" in err.lower()
+        ok_pension  = "Pension / Retirement Fund" in FIXED_ASSET_TYPES
+        ok_provident = "Provident Fund" in FIXED_ASSET_TYPES
+        ok = ok_reject and ok_pension and ok_provident
+        fails = [k for k, v in {"reject": ok_reject, "pension_type": ok_pension,
+                                 "provident_type": ok_provident}.items() if not v]
+        return ("invalid type rejected; Pension & Provident types present",
+                "PASS" if ok else "FAIL: " + ",".join(fails), ok)
+    results.append(_run("FA-03", "add_fixed_asset — rejects invalid type; new types registered",
                         CAT, "portfolio.fixed_assets", "P0", True, fa03))
 
     def fa04():
