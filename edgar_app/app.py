@@ -176,18 +176,18 @@ st.markdown(
     }
     .gh-kpi { min-width: 0; }
     .gh-lbl {
-        font-size: 0.68rem;
+        font-size: 0.88rem;
         color: #9ca3af;
         text-transform: uppercase;
-        letter-spacing: 0.07em;
-        line-height: 1.6;
+        letter-spacing: 0.05em;
+        line-height: 1.5;
         white-space: nowrap;
     }
     .gh-val-big { font-size: 2rem;    font-weight: 700; line-height: 1.1; white-space: nowrap; }
     .gh-val-med { font-size: 1.5rem;  font-weight: 600; line-height: 1.1; white-space: nowrap; }
-    .gh-val-sm  { font-size: 1.25rem; font-weight: 600; line-height: 1.1; }
-    .gh-val-xs  { font-size: 1rem;    color: #6b7280;   line-height: 1.4; }
-    .gh-pct     { font-size: 0.82rem; font-weight: 500; }
+    .gh-val-sm  { font-size: 1.4rem;  font-weight: 600; line-height: 1.1; }
+    .gh-val-xs  { font-size: 1.15rem; color: #6b7280;   line-height: 1.4; }
+    .gh-pct     { font-size: 0.88rem; font-weight: 500; }
 
     /* ── Filtered Allocation Summary KPI cards ───────────────────────────
        Pure-HTML flex grid — bypasses Streamlit column system entirely.
@@ -210,11 +210,12 @@ st.markdown(
         .bousala-appbar .ba-name { display: none !important; }
         /* Tighten KPI strip gap and scale down the large numbers */
         .gh-kpi-row  { gap: 0.9rem !important; }
+        .gh-lbl      { font-size: 0.78rem !important; }
         .gh-val-big  { font-size: 1.35rem !important; }
         .gh-val-med  { font-size: 1.05rem !important; }
-        .gh-val-sm   { font-size: 0.9rem  !important; }
-        .gh-val-xs   { font-size: 0.8rem  !important; }
-        .gh-pct      { font-size: 0.7rem  !important; }
+        .gh-val-sm   { font-size: 0.95rem !important; }
+        .gh-val-xs   { font-size: 0.88rem !important; }
+        .gh-pct      { font-size: 0.75rem !important; }
         /* Prevent Streamlit from stacking narrow columns — lets 2- and 3-col
            rows stay horizontal on portrait phones (min-width default ~200 px
            causes wrapping at small viewport widths). */
@@ -240,14 +241,14 @@ st.markdown(
         padding: 6px 0 10px 0;
     }
     .acct-kpi-lbl {
-        font-size: 0.65rem;
+        font-size: 0.85rem;
         color: #9ca3af;
         text-transform: uppercase;
-        letter-spacing: 0.07em;
-        line-height: 1.6;
+        letter-spacing: 0.05em;
+        line-height: 1.5;
     }
     .acct-kpi-val {
-        font-size: 1.15rem;
+        font-size: 1.25rem;
         font-weight: 700;
         line-height: 1.1;
         color: #0f172a;
@@ -283,12 +284,12 @@ st.markdown(
             flex: 1 1 calc(50% - 0.4rem) !important;
             min-width: calc(50% - 0.4rem) !important;
         }
-        .gh-val-big { font-size: 1.1rem  !important; }
-        .gh-val-med { font-size: 0.92rem !important; }
-        .gh-val-sm  { font-size: 0.8rem  !important; }
-        .gh-val-xs  { font-size: 0.72rem !important; }
-        .gh-lbl     { font-size: 0.55rem !important; }
-        .gh-pct     { font-size: 0.68rem !important; }
+        .gh-val-big { font-size: 1.15rem !important; }
+        .gh-val-med { font-size: 0.98rem !important; }
+        .gh-val-sm  { font-size: 0.88rem !important; }
+        .gh-val-xs  { font-size: 0.78rem !important; }
+        .gh-lbl     { font-size: 0.72rem !important; }
+        .gh-pct     { font-size: 0.70rem !important; }
 
         /* Parent tabs compact on mobile */
         [data-testid="stTabs"] [role="tablist"] [role="tab"] {
