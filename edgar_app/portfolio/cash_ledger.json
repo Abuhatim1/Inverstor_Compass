@@ -70,5 +70,53 @@
     "linked_ticker": "",
     "notes": "Manual deposit",
     "recorded_at": "2026-06-08T17:53:13.661308"
+  },
+  {
+    "entry_id": "45923c1d-ee6",
+    "date": "2026-06-08",
+    "account_id": "2e387866",
+    "transaction_type": "INITIAL_BALANCE",
+    "currency": "SAR",
+    "amount": 45610.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Opening balance",
+    "recorded_at": "2026-06-08T18:45:37.232684"
+  },
+  {
+    "entry_id": "4d7b4768-9df",
+    "date": "2026-06-08",
+    "account_id": "8e292f0e",
+    "transaction_type": "INITIAL_BALANCE",
+    "currency": "SAR",
+    "amount": 17610.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Opening balance",
+    "recorded_at": "2026-06-08T18:50:32.173080"
+  },
+  {
+    "entry_id": "08f47174-f21",
+    "date": "2026-06-08",
+    "account_id": "8e292f0e",
+    "transaction_type": "WITHDRAWAL",
+    "currency": "SAR",
+    "amount": -594.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Reconsilation",
+    "recorded_at": "2026-06-08T18:52:54.267789"
+  },
+  {
+    "entry_id": "65b01f4c-975",
+    "date": "2026-06-08",
+    "account_id": "8e292f0e",
+    "transaction_type": "DEPOSIT",
+    "currency": "SAR",
+    "amount": 90.0,
+    "fx_rate": 1.0,
+    "linked_ticker": "",
+    "notes": "Manual deposit",
+    "recorded_at": "2026-06-08T18:53:44.704215"
   }
 ]
