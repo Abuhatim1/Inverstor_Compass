@@ -7547,6 +7547,368 @@ def _cat_liabilities() -> list[TestResult]:
     return results
 
 
+# ════════════════════════════════════════════════════════════════════════════════
+# Category PERF — Performance Analytics (XIRR / total return / attribution)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_perf() -> list[TestResult]:
+    from datetime import date
+    from portfolio import performance as perf
+    from portfolio.holdings import Holding
+    from portfolio.cash_ledger import CashEntry
+
+    CAT = "Performance Analytics"
+    MOD = "portfolio.performance"
+    results = []
+
+    def p01():
+        r = perf.xirr([("2025-01-01", -1000.0), ("2026-01-01", 1100.0)])
+        return "XIRR≈0.10", f"XIRR={r}", r is not None and _near(r, 0.10, 1e-3)
+    results.append(_run("PERF-01", "XIRR — classic -1000→+1100 over 1yr = 10%",
+                        CAT, MOD, "P1", True, p01))
+
+    def p02():
+        r = perf.xirr([("2025-01-01", -1000.0), ("2026-01-01", -50.0)])
+        return "None (no sign change)", f"{r}", r is None
+    results.append(_run("PERF-02", "XIRR — all-same-sign flows return None",
+                        CAT, MOD, "P2", False, p02))
+
+    def p03():
+        r = perf.xirr([("2026-01-01", -1000.0), ("2026-01-10", 1100.0)])
+        return "None (span<30d)", f"{r}", r is None
+    results.append(_run("PERF-03", "XIRR — sub-30-day span returns None",
+                        CAT, MOD, "P2", False, p03))
+
+    def p04():
+        h = Holding(ticker="AAA", company_name="A", asset_id="AST_A",
+                    quantity=10.0, avg_cost=100.0, currency="USD",
+                    purchase_date="2025-01-01")
+        res = perf.compute_performance({"a": h}, [], [], current_value_base=1100.0,
+                                       base_ccy="USD", fx_rates={}, as_of=date(2026, 1, 1))
+        ok = (_near(res.net_contributions_base, 1000.0)
+              and _near(res.growth_base, 100.0)
+              and _near(res.growth_pct, 10.0))
+        return "contrib=1000, growth=100, +10%", \
+               f"contrib={res.net_contributions_base}, growth={res.growth_base}, {res.growth_pct}%", ok
+    results.append(_run("PERF-04", "Mode A holding — synthetic opening drives attribution",
+                        CAT, MOD, "P1", True, p04))
+
+    def p05():
+        h = Holding(ticker="AAA", company_name="A", asset_id="AST_A",
+                    quantity=10.0, avg_cost=100.0, currency="USD",
+                    purchase_date="2025-01-01")
+        res = perf.compute_performance({"a": h}, [], [], current_value_base=1100.0,
+                                       base_ccy="USD", fx_rates={}, as_of=date(2026, 1, 1))
+        ok = res.xirr_pct is not None and _near(res.xirr_pct, 10.0, 0.2)
+        return "XIRR≈10%", f"XIRR={res.xirr_pct}%", ok
+    results.append(_run("PERF-05", "Mode A holding — XIRR not overstated (synthetic opening counted)",
+                        CAT, MOD, "P0", True, p05))
+
+    def p06():
+        # Mode B: deposit funds a BUY (internal) — must NOT double-count capital.
+        h = Holding(ticker="BBB", company_name="B", asset_id="AST_B",
+                    quantity=10.0, avg_cost=100.0, currency="USD",
+                    purchase_date="2025-01-01")
+        tx = [_txn_buy("AST_B", 10.0)]
+        ce = [CashEntry(transaction_type="DEPOSIT", currency="USD", amount=1000.0,
+                        date="2025-01-01")]
+        res = perf.compute_performance({"b": h}, tx, ce, current_value_base=1100.0,
+                                       base_ccy="USD", fx_rates={}, as_of=date(2026, 1, 1))
+        ok = _near(res.net_contributions_base, 1000.0) and \
+             res.xirr_pct is not None and _near(res.xirr_pct, 10.0, 0.2)
+        return "contrib=1000 (no double-count), XIRR≈10%", \
+               f"contrib={res.net_contributions_base}, XIRR={res.xirr_pct}%", ok
+    results.append(_run("PERF-06", "Mode B — deposit-funded BUY not double-counted",
+                        CAT, MOD, "P0", True, p06))
+
+    def p07():
+        res = perf.compute_performance({}, [], [], current_value_base=0.0,
+                                       base_ccy="USD", fx_rates={})
+        ok = res.growth_pct is None and res.xirr_pct is None
+        return "growth_pct=None, XIRR=None (no flows)", \
+               f"growth_pct={res.growth_pct}, XIRR={res.xirr_pct}", ok
+    results.append(_run("PERF-07", "Empty portfolio — no return computed (no false numbers)",
+                        CAT, MOD, "P1", False, p07))
+
+    return results
+
+
+def _txn_buy(asset_id: str, qty: float):
+    from portfolio.holdings import Transaction
+    return Transaction(ticker="X", side="BUY", quantity=qty, price=100.0,
+                       date="2025-01-01", asset_id=asset_id)
+
+
+def _settle(category: str, amount: float, ccy: str, dt: str, ticker: str = ""):
+    from portfolio.holdings import Transaction
+    return Transaction(ticker=ticker, side="SETTLEMENT", quantity=0.0, price=0.0,
+                       date=dt, settlement_amount=amount,
+                       settlement_category=category, settlement_currency=ccy)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category INC — Dividend Income & Yield
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_inc() -> list[TestResult]:
+    from datetime import date
+    from portfolio import income
+
+    CAT = "Dividend Income"
+    MOD = "portfolio.income"
+    results = []
+
+    def _txns():
+        return [
+            _settle("Dividend", 100.0, "USD", "2026-03-01", "AAA"),
+            _settle("Dividend", 50.0,  "USD", "2025-02-01", "AAA"),  # outside TTM of 2026-06-09
+            _settle("Zakat",   -20.0,  "USD", "2026-01-01", ""),      # must be ignored
+        ]
+
+    def i01():
+        s = income.dividend_summary(_txns(), "USD", {}, as_of=date(2026, 6, 9))
+        ok = _near(s.total_base, 150.0) and _near(s.ytd_base, 100.0) \
+             and _near(s.ttm_base, 100.0) and s.n_payments == 2
+        return "total=150, ytd=100, ttm=100, n=2", \
+               f"total={s.total_base}, ytd={s.ytd_base}, ttm={s.ttm_base}, n={s.n_payments}", ok
+    results.append(_run("INC-01", "Dividend totals — lifetime / YTD / trailing-12m",
+                        CAT, MOD, "P1", True, i01))
+
+    def i02():
+        s = income.dividend_summary(_txns(), "USD", {}, as_of=date(2026, 6, 9))
+        ok = _near(s.by_ticker.get("AAA", 0.0), 150.0) and _near(s.by_currency.get("USD", 0.0), 150.0)
+        return "AAA=150, USD native=150", \
+               f"AAA={s.by_ticker.get('AAA')}, USD={s.by_currency.get('USD')}", ok
+    results.append(_run("INC-02", "Dividend breakdowns — by ticker & native currency",
+                        CAT, MOD, "P2", False, i02))
+
+    def i03():
+        s = income.dividend_summary(_txns(), "USD", {}, cost_basis_base=2000.0,
+                                    market_value_base=2500.0, as_of=date(2026, 6, 9))
+        ok = _near(s.yield_on_cost_pct, 5.0) and _near(s.current_yield_pct, 4.0)
+        return "yoc=5.0%, current=4.0%", \
+               f"yoc={s.yield_on_cost_pct}, cy={s.current_yield_pct}", ok
+    results.append(_run("INC-03", "Yield-on-cost & current yield from TTM income",
+                        CAT, MOD, "P2", False, i03))
+
+    def i04():
+        only_fee = [_settle("Fee", -10.0, "USD", "2026-03-01", "AAA")]
+        s = income.dividend_summary(only_fee, "USD", {}, as_of=date(2026, 6, 9))
+        ok = _near(s.total_base, 0.0) and s.n_payments == 0
+        return "total=0, n=0 (fees excluded)", f"total={s.total_base}, n={s.n_payments}", ok
+    results.append(_run("INC-04", "Non-dividend settlements excluded from income",
+                        CAT, MOD, "P1", True, i04))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category ZAK — Zakat Estimate
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_zak() -> list[TestResult]:
+    from portfolio import zakat
+
+    CAT = "Zakat Estimate"
+    MOD = "portfolio.zakat"
+    results = []
+
+    def z01():
+        z = zakat.compute_zakat(10000.0, 5000.0, 1000.0)
+        ok = _near(z.zakatable_base, 15000.0) and _near(z.net_base, 14000.0) \
+             and _near(z.zakat_due, 350.0)
+        return "zakatable=15000, net=14000, due=350", \
+               f"zakatable={z.zakatable_base}, net={z.net_base}, due={z.zakat_due}", ok
+    results.append(_run("ZAK-01", "Zakat base & due — lunar 2.5%",
+                        CAT, MOD, "P1", True, z01))
+
+    def z02():
+        z = zakat.compute_zakat(10000.0, 5000.0, 1000.0, rate=zakat.RATE_GREGORIAN)
+        ok = _near(z.zakat_due, 360.85) and "Gregorian" in z.rate_label
+        return "due=360.85 (Gregorian)", f"due={z.zakat_due}, {z.rate_label}", ok
+    results.append(_run("ZAK-02", "Zakat — Gregorian 2.5775% rate option",
+                        CAT, MOD, "P2", False, z02))
+
+    def z03():
+        z = zakat.compute_zakat(1000.0, 0.0, 5000.0)  # deductible > assets
+        ok = _near(z.net_base, 0.0) and _near(z.zakat_due, 0.0)
+        return "net=0, due=0 (clamped)", f"net={z.net_base}, due={z.zakat_due}", ok
+    results.append(_run("ZAK-03", "Zakat — net base clamped at zero when liabilities exceed assets",
+                        CAT, MOD, "P1", False, z03))
+
+    def z04():
+        tx = [_settle("Zakat", -20.0, "USD", "2026-01-01", ""),
+              _settle("Dividend", 100.0, "USD", "2026-03-01", "AAA")]
+        paid = zakat.zakat_paid_to_date(tx, "USD", {})
+        z = zakat.compute_zakat(10000.0, 5000.0, 0.0)
+        # paid is informational and must NOT change the base
+        ok = _near(paid, 20.0) and _near(z.zakatable_base, 15000.0)
+        return "paid=20 (informational), base unchanged=15000", \
+               f"paid={paid}, base={z.zakatable_base}", ok
+    results.append(_run("ZAK-04", "Paid Zakat is informational — never double-counted in base",
+                        CAT, MOD, "P0", True, z04))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category TAX — Realized Gains by Period
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_tax() -> list[TestResult]:
+    from portfolio import tax_report
+    from portfolio.closed_holdings import ClosedLot
+
+    CAT = "Realized Gains"
+    MOD = "portfolio.tax_report"
+    results = []
+
+    def _lots():
+        return [
+            ClosedLot(currency="USD", close_date="2026-02-01", realized_pnl=200.0,
+                      sell_value=1200.0, buy_value=1000.0, sell_fees=5.0),
+            ClosedLot(currency="USD", close_date="2026-05-01", realized_pnl=-50.0,
+                      sell_value=450.0, buy_value=500.0, sell_fees=2.0),
+            ClosedLot(currency="SAR", close_date="2025-07-01", realized_pnl=375.0,
+                      sell_value=3750.0, buy_value=3375.0, sell_fees=10.0),
+            ClosedLot(currency="USD", close_date="2026-02-01", realized_pnl=9999.0,
+                      sell_value=0.0, buy_value=0.0, sell_fees=0.0, voided=True),
+        ]
+
+    def t01():
+        rep = tax_report.realized_report(_lots(), "USD", {"SAR": _fx("SAR", "USD", 0.2667)}, "year")
+        usd = rep.by_currency_total.get("USD", 0.0)
+        sar = rep.by_currency_total.get("SAR", 0.0)
+        ok = _near(usd, 150.0) and _near(sar, 375.0)
+        return "USD native=150, SAR native=375", f"USD={usd}, SAR={sar}", ok
+    results.append(_run("TAX-01", "Realized P&L grouped by currency — native totals exact",
+                        CAT, MOD, "P1", True, t01))
+
+    def t02():
+        rep = tax_report.realized_report(_lots(), "USD", {}, "year")
+        ok = _near(rep.by_currency_total.get("USD", 0.0), 150.0)  # voided 9999 excluded
+        return "voided lot excluded (USD=150)", f"USD={rep.by_currency_total.get('USD')}", ok
+    results.append(_run("TAX-02", "Voided lots excluded from realized report",
+                        CAT, MOD, "P0", True, t02))
+
+    def t03():
+        rep = tax_report.realized_report(_lots(), "USD", {"SAR": _fx("SAR", "USD", 0.2667)}, "year")
+        # 150 USD + 375 SAR * 0.2667 = 250.0125
+        ok = _near(rep.base_total_approx, 250.0125, 0.01) and rep.approximate
+        return "base≈250.01 (approx flag set)", \
+               f"base={rep.base_total_approx}, approx={rep.approximate}", ok
+    results.append(_run("TAX-03", "Base-converted total uses current FX and is flagged approximate",
+                        CAT, MOD, "P2", False, t03))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Category RECON — Holdings ↔ Transactions Reconciliation (C3-lite)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_recon() -> list[TestResult]:
+    from portfolio import reconciliation as recon
+    from portfolio.holdings import Holding
+
+    CAT = "Reconciliation"
+    MOD = "portfolio.reconciliation"
+    results = []
+
+    def _h(aid, tkr, qty):
+        return Holding(ticker=tkr, company_name=tkr, asset_id=aid, quantity=qty)
+
+    def r01():
+        H = {"b": _h("AST_B", "BBB", 8.0)}     # txns imply 10 → drift -2
+        TX = [_txn_buy("AST_B", 10.0)]
+        rr = recon.reconcile_holdings(H, TX)
+        ok = rr.n_error == 1 and not rr.clean and rr.issues[0].severity == "error"
+        return "1 error (stored < implied)", f"n_error={rr.n_error}, clean={rr.clean}", ok
+    results.append(_run("RECON-01", "Negative drift (lost trade) flagged as ERROR",
+                        CAT, MOD, "P0", True, r01))
+
+    def r02():
+        H = {"c": _h("AST_C", "CCC", 15.0)}    # txns imply 10 → drift +5
+        TX = [_txn_buy("AST_C", 10.0)]
+        rr = recon.reconcile_holdings(H, TX)
+        ok = rr.n_error == 0 and rr.n_info == 1 and rr.records[0].severity == "implied_opening"
+        return "0 errors, 1 info (implied opening)", \
+               f"n_error={rr.n_error}, n_info={rr.n_info}", ok
+    results.append(_run("RECON-02", "Positive drift treated as informational implied-opening",
+                        CAT, MOD, "P1", True, r02))
+
+    def r03():
+        H = {"a": _h("AST_A", "AAA", 10.0)}    # no transactions
+        rr = recon.reconcile_holdings(H, [])
+        ok = rr.n_error == 0 and rr.n_info == 1 and rr.records[0].severity == "untracked" and rr.clean
+        return "untracked (info, not error)", \
+               f"n_error={rr.n_error}, sev={rr.records[0].severity}", ok
+    results.append(_run("RECON-03", "Mode A holding with no trades is untracked, not drift",
+                        CAT, MOD, "P0", True, r03))
+
+    def r04():
+        H = {"d": _h("AST_D", "DDD", 10.0)}    # txns imply 10 → ok
+        TX = [_txn_buy("AST_D", 10.0)]
+        rr = recon.reconcile_holdings(H, TX)
+        ok = rr.n_ok == 1 and rr.n_error == 0 and rr.clean and not rr.records
+        return "1 ok, clean, no records", \
+               f"n_ok={rr.n_ok}, clean={rr.clean}, records={len(rr.records)}", ok
+    results.append(_run("RECON-04", "Consistent holding reconciles cleanly",
+                        CAT, MOD, "P1", False, r04))
+
+    return results
+
+
+def _cat_acct_inline() -> list[TestResult]:
+    """
+    ACCT-INLINE: inline account creation inside the Add-Position dialog
+    (_dlg_add_new) must write an INITIAL_BALANCE cash-ledger entry when opening
+    cash > 0, mirroring the canonical Accounts-tab flow.
+
+    Background: the cash ledger is the single source of truth for cash, and
+    performance.py builds external-contribution flows from INITIAL_BALANCE /
+    DEPOSIT ledger entries. If inline-create set Account.cash_balance via a bare
+    opening_cash with no matching ledger entry, that opening cash would appear in
+    the terminal portfolio value with no offsetting contribution — overstating
+    XIRR/growth and creating ledger-vs-balance drift.
+    """
+    import re as _re
+    import pathlib as _pl
+
+    CAT = "Account Inline Create"
+    MOD = "app.py"
+    results: list[TestResult] = []
+    _src = _pl.Path(__file__).parent / "app.py"
+    _text = _src.read_text(encoding="utf-8")
+
+    def ai01():
+        # Isolate the inline-create button handler: from its button key to the
+        # st.rerun() that closes the rerun cycle.
+        m = _re.search(
+            r'key=["\']ahn_new_acct_btn["\'].*?st\.rerun\(\)',
+            _text, _re.DOTALL,
+        )
+        if not m:
+            return ("inline-create block found", "block NOT found in app.py", False)
+        block = m.group(0)
+        has_initbal = "INITIAL_BALANCE" in block
+        has_append  = ("append_cash_entry" in block) or ("_ins_cash(" in block)
+        gated       = "_na_cash" in block       # entry gated on opening cash > 0
+        ok = has_initbal and has_append and gated
+        return (
+            "Inline create writes INITIAL_BALANCE ledger entry when cash > 0",
+            f"INITIAL_BALANCE={has_initbal}, append_cash={has_append}, "
+            f"gated_on_cash={gated}",
+            ok,
+        )
+    results.append(_run(
+        "ACCT-INLINE-01",
+        "Inline account creation records INITIAL_BALANCE in cash ledger",
+        CAT, MOD, "P0", True, ai01))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -7568,6 +7930,8 @@ def run_all_tests() -> TestReport:
         + _cat_fixed_assets()
         + _cat_wealth_statement()
         + _cat_liabilities()
+        + _cat_perf() + _cat_inc() + _cat_zak() + _cat_tax() + _cat_recon()
+        + _cat_acct_inline()
     )
 
     punch_list: list[PunchListItem] = []

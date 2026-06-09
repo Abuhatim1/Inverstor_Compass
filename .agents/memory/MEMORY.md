@@ -3,3 +3,4 @@
 - [Bousala eligible account types](bousala-eligible-accounts.md) — _ELIGIBLE_ACCT_TYPES = frozenset({"Brokerage","Crypto","Other"}); Bank and Cash excluded from holding position selector.
 - [Asset-ID primary key](asset-id-pk.md) — holdings.json keyed by AST_NNNNNN sequential ID; counter in _asset_counter.json; migration re-IDs any non-AST_ entry on load; upsert_holding/load_holdings/save_holdings/update_current_price all accept path= for test isolation.
 - [Transaction identity](transaction-identity.md) — Transaction has transaction_id (TXN_xxxxxxxx) and asset_id fields; auto-generated in record_transaction(); back-filled for old records in load_transactions().
+- [Opening cash ↔ ledger](cash-ledger-opening-balance.md) — any path setting opening cash must also append an INITIAL_BALANCE ledger entry; performance/XIRR reads contributions from the ledger.

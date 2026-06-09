@@ -2821,28 +2821,58 @@ def render_holdings_tab(bundle: dict) -> None:
                 "_asset_id": asset_id,       # hidden; used by CSV export & action bar
             })
 
-        _tbl_sel = st.dataframe(
-            pd.DataFrame(rows),
-            hide_index=True,
-            use_container_width=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            column_config={
-                " ":        st.column_config.TextColumn(" ", width="small"),
-                "Company":  st.column_config.TextColumn("Company"),
-                "Ticker":   st.column_config.TextColumn("Ticker", width="small"),
-                "Qty":      st.column_config.NumberColumn("Qty",      format="%,.4f"),
-                "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%,.4f"),
-                "Price":    st.column_config.NumberColumn("Price",    format="%,.4f"),
-                _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.2f"),
-                "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
-                "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
-                "CCY":      st.column_config.TextColumn("CCY", width="small"),
-                "Src":      st.column_config.TextColumn("Src", width="small"),
-                "Account":  st.column_config.TextColumn("Account"),
-            },
+        # ── View toggle: Table (desktop) vs Cards (mobile-friendly) ──────────
+        _hv_mode = st.radio(
+            "Holdings view",
+            ["📋 Table", "🃏 Cards"],
+            horizontal=True,
+            key="holdings_view_mode",
+            label_visibility="collapsed",
         )
-        st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
+        _tbl_sel = None    # only the Table view exposes row selection
+
+        if _hv_mode == "🃏 Cards":
+            for _r in rows:
+                with st.container(border=True):
+                    _c_pnl   = _r["P&L %"]
+                    _pnl_sym = "+" if _c_pnl >= 0 else ""
+                    st.markdown(f"**{_r[' ']} {_r['Company']}**  ·  `{_r['Ticker']}`")
+                    _cc1, _cc2, _cc3 = st.columns(3)
+                    _cc1.metric(_mv_col, f"{_r[_mv_col]:,.2f}")
+                    _cc2.metric("P&L %", f"{_pnl_sym}{_c_pnl:.2f}%")
+                    _cc3.metric("Wt %", f"{_r['Wt %']:.1f}%")
+                    st.caption(
+                        f"Qty {_r['Qty']:,.4f} @ {_r['Avg Cost']:,.4f}  ·  "
+                        f"Price {_r['Price']:,.4f} {_r['CCY']}  ·  "
+                        f"Src {_r['Src']}  ·  {_r['Account']}"
+                    )
+            st.caption(
+                "🃏 Card view  ·  🟢 profit  🔴 loss  ⚪ flat  ·  "
+                "use the action bar below for Buy / Sell / Settlement."
+            )
+        else:
+            _tbl_sel = st.dataframe(
+                pd.DataFrame(rows),
+                hide_index=True,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={
+                    " ":        st.column_config.TextColumn(" ", width="small"),
+                    "Company":  st.column_config.TextColumn("Company"),
+                    "Ticker":   st.column_config.TextColumn("Ticker", width="small"),
+                    "Qty":      st.column_config.NumberColumn("Qty",      format="%,.4f"),
+                    "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%,.4f"),
+                    "Price":    st.column_config.NumberColumn("Price",    format="%,.4f"),
+                    _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.2f"),
+                    "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
+                    "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
+                    "CCY":      st.column_config.TextColumn("CCY", width="small"),
+                    "Src":      st.column_config.TextColumn("Src", width="small"),
+                    "Account":  st.column_config.TextColumn("Account"),
+                },
+            )
+            st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
 
         # ── Primary action bar — Buy / Sell / Add / Settlement always visible ───
         _pa1, _pa2, _pa3, _pa4 = st.columns(4)
@@ -3177,6 +3207,12 @@ def render_holdings_tab(bundle: dict) -> None:
                                         help="Live price from Yahoo Finance — auto-filled after Validate.")
 
         # ── Account (filtered by currency, eligible types only) ──────────────
+        # Apply an account created inline on the previous rerun. Must run
+        # before the selectbox renders to avoid the "set after render" crash.
+        _pending_acct = st.session_state.pop("_ahn_pending_acct", None)
+        if _pending_acct:
+            st.session_state["ahn_acct_id"] = _pending_acct
+
         _pairs_ccy = _acct_pairs_for(currency=_ad_ccy, eligible_only=True)
         _pairs_all = _acct_pairs_for(eligible_only=True)
         _use_pairs = _pairs_ccy if _pairs_ccy else _pairs_all
@@ -3191,11 +3227,70 @@ def render_holdings_tab(bundle: dict) -> None:
             format_func=lambda k: _acct_opts[k],
             key="ahn_acct_id",
         )
+
+        # ── Inline account creation — no dead-end when none exist ────────────
+        with st.expander("➕ Create a new account", expanded=not _pairs_all):
+            _na1, _na2 = st.columns(2)
+            with _na1:
+                _na_name = st.text_input(
+                    "Account name", key="ahn_new_acct_name",
+                    placeholder="e.g. Al Rajhi Brokerage",
+                )
+                _na_type = st.selectbox(
+                    "Account type", ["Brokerage", "Crypto", "Other"],
+                    key="ahn_new_acct_type",
+                )
+            with _na2:
+                _na_inst = st.text_input(
+                    "Institution (optional)", key="ahn_new_acct_inst",
+                )
+                _na_cash = st.number_input(
+                    "Opening cash", min_value=0.0, value=0.0, step=100.0,
+                    format="%.2f", key="ahn_new_acct_cash",
+                    help=f"Initial {_ad_ccy} cash balance for this account.",
+                )
+            st.caption(f"New account currency: **{_ad_ccy}** (matches this position).")
+            if st.button(
+                "Create account", key="ahn_new_acct_btn",
+                use_container_width=True,
+                disabled=not _na_name.strip(),
+            ):
+                try:
+                    from portfolio.accounts import upsert_account as _ins_acct
+                    from portfolio.cash_ledger import append_cash_entry as _ins_cash
+                    _new_a = _ins_acct(
+                        account_name=_na_name.strip(),
+                        institution=_na_inst.strip(),
+                        account_type=_na_type,
+                        base_currency=_ad_ccy,
+                        opening_cash=float(_na_cash),
+                    )
+                    # Mirror the Accounts-tab flow: opening cash MUST create an
+                    # INITIAL_BALANCE ledger entry so the cash ledger stays the
+                    # single source of truth (performance/XIRR reads contributions
+                    # from the ledger — a bare opening_cash would overstate growth).
+                    if float(_na_cash) > 0:
+                        _ins_cash(
+                            account_id=_new_a.account_id,
+                            transaction_type="INITIAL_BALANCE",
+                            currency=_ad_ccy, amount=float(_na_cash),
+                            notes="Opening balance",
+                        )
+                    for _k in ("ahn_new_acct_name", "ahn_new_acct_inst",
+                               "ahn_new_acct_cash", "ahn_new_acct_type"):
+                        st.session_state.pop(_k, None)
+                    # Pre-select the new account on the next rerun
+                    st.session_state["_ahn_pending_acct"] = _new_a.account_id
+                    st.toast(f"Account created: {_na_name.strip()}", icon="✅")
+                    st.rerun()
+                except Exception as _ex:
+                    st.error(f"Could not create account — {_ex}")
+
         if not _ad_aid:
             if not _pairs_all:
                 st.warning(
-                    "No investment accounts found. Go to the **Accounts** tab "
-                    "and create a Brokerage account first.",
+                    "No eligible investment account yet — use **➕ Create a new "
+                    "account** above to add one.",
                     icon="⚠️",
                 )
             else:
@@ -7049,6 +7144,193 @@ def render_upload_tab() -> None:
 """)
 
 
+# ── Wealth & Performance — read-only money-weighted analytics ────────────────
+def render_performance_tab() -> None:
+    """Read-only Wealth & Performance dashboard.
+
+    Surfaces money-weighted return (XIRR), net contributions vs. growth,
+    dividend income, a Zakat estimate, realized gains by period, and a
+    data-integrity reconciliation check. Everything is derived from the
+    existing holdings / transactions / cash ledger — nothing is mutated.
+    """
+    from portfolio import load_holdings, load_transactions
+    from portfolio.accounts import load_accounts as _perf_load_accts
+    from portfolio.cash_ledger import load_ledger
+    from portfolio.closed_holdings import load_closed_lots
+    from portfolio.valuation import calculate_portfolio_valuation
+    from fx_rates import get_rates_for_holdings
+    from portfolio.performance import compute_performance
+    from portfolio.income import dividend_summary
+    from portfolio.zakat import (
+        compute_zakat, zakat_paid_to_date, RATE_LUNAR, RATE_GREGORIAN,
+    )
+    from portfolio.tax_report import realized_report
+    from portfolio.reconciliation import reconcile_holdings
+    import pandas as pd
+
+    st.header("📈 Wealth & Performance")
+    st.caption(
+        "Read-only analytics derived from your holdings, transactions, and cash "
+        "ledger. Nothing here changes your data."
+    )
+
+    base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    holdings = load_holdings()
+    accounts = _perf_load_accts()
+    txns     = load_transactions()
+    ledger   = load_ledger()
+    closed   = load_closed_lots()
+
+    if not holdings and not txns and not closed:
+        st.info(
+            "Add holdings and record transactions to see performance analytics.",
+            icon="💡",
+        )
+        return
+
+    _ccys = {getattr(h, "currency", base_ccy) for h in holdings.values()} if holdings else set()
+    _fx   = get_rates_for_holdings(list(_ccys), base_ccy) if _ccys else {}
+    val   = calculate_portfolio_valuation(holdings, accounts, base_ccy, fx_rates=_fx)
+    _fxu  = val.fx_rates_used
+
+    _cur_val   = val.total_portfolio_value_base
+    _mv_base   = val.holdings_value_base
+    _cash_base = val.cash_value_base
+    _cost_base = val.total_cost_basis_base
+
+    # ── Money-weighted return ───────────────────────────────────────────────
+    st.subheader("Money-Weighted Return")
+    _perf = compute_performance(holdings, txns, ledger, _cur_val, base_ccy, _fxu)
+    _p1, _p2, _p3, _p4 = st.columns(4)
+    _p1.metric("Current Value", f"{_cur_val:,.0f} {base_ccy}")
+    _p2.metric("Net Contributions", f"{_perf.net_contributions_base:,.0f} {base_ccy}")
+    _p3.metric(
+        "Growth",
+        f"{_perf.growth_base:,.0f} {base_ccy}",
+        f"{_perf.growth_pct:.1f}%" if _perf.growth_pct is not None else None,
+    )
+    _p4.metric(
+        "Annualized (XIRR)",
+        f"{_perf.xirr_pct:.1f}%" if _perf.xirr_pct is not None else "—",
+        help="Money-weighted annualized return. Approximate — historical FX is "
+             "converted at current rates.",
+    )
+    for _n in _perf.notes:
+        st.caption("ℹ️ " + _n)
+
+    st.divider()
+
+    # ── Dividend income ─────────────────────────────────────────────────────
+    st.subheader("Dividend Income")
+    _inc = dividend_summary(
+        txns, base_ccy, _fxu,
+        cost_basis_base=_cost_base, market_value_base=_mv_base,
+    )
+    if _inc.n_payments == 0:
+        st.caption("No dividend settlements recorded yet.")
+    else:
+        _d1, _d2, _d3, _d4 = st.columns(4)
+        _d1.metric("Lifetime", f"{_inc.total_base:,.0f} {base_ccy}")
+        _d2.metric("Year-to-Date", f"{_inc.ytd_base:,.0f} {base_ccy}")
+        _d3.metric("Trailing 12m", f"{_inc.ttm_base:,.0f} {base_ccy}")
+        _d4.metric(
+            "Yield on Cost",
+            f"{_inc.yield_on_cost_pct:.2f}%" if _inc.yield_on_cost_pct is not None else "—",
+        )
+        if _inc.by_ticker:
+            st.dataframe(
+                pd.DataFrame(
+                    [{"Ticker": _k, f"Income ({base_ccy})": round(_v, 2)}
+                     for _k, _v in sorted(_inc.by_ticker.items(), key=lambda x: -x[1])]
+                ),
+                hide_index=True, use_container_width=True,
+            )
+        for _n in _inc.notes:
+            st.caption("ℹ️ " + _n)
+
+    st.divider()
+
+    # ── Zakat estimate ──────────────────────────────────────────────────────
+    st.subheader("Zakat Estimate")
+    _rate_lbl = st.radio(
+        "Zakat year basis",
+        ["Lunar (2.5%)", "Gregorian (2.5775%)"],
+        horizontal=True, key="zakat_rate_choice",
+    )
+    _z_rate = RATE_GREGORIAN if _rate_lbl.startswith("Gregorian") else RATE_LUNAR
+    _z = compute_zakat(_mv_base, _cash_base, 0.0, rate=_z_rate)
+    _z_paid = zakat_paid_to_date(txns, base_ccy, _fxu)
+    _z1, _z2, _z3 = st.columns(3)
+    _z1.metric("Zakatable Base", f"{_z.zakatable_base:,.0f} {base_ccy}")
+    _z2.metric(f"Zakat Due ({_z.rate_label})", f"{_z.zakat_due:,.0f} {base_ccy}")
+    _z3.metric(
+        "Zakat Paid to Date", f"{_z_paid:,.0f} {base_ccy}",
+        help="Informational only — already deducted from your cash, never "
+             "subtracted from the base again.",
+    )
+    st.caption("⚠️ " + _z.note)
+
+    st.divider()
+
+    # ── Realized gains (tax report) ─────────────────────────────────────────
+    st.subheader("Realized Gains by Period")
+    _period_lbl = st.radio(
+        "Group by", ["Year", "Month"], horizontal=True, key="tax_period_choice",
+    )
+    _rep = realized_report(
+        closed, base_ccy, _fxu,
+        period="month" if _period_lbl == "Month" else "year",
+    )
+    if not _rep.rows:
+        st.caption("No closed positions yet.")
+    else:
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "Period": _r.period, "CCY": _r.currency,
+                    "Proceeds": round(_r.proceeds, 2), "Cost": round(_r.cost, 2),
+                    "Realized P&L": round(_r.realized_pnl, 2),
+                    "Fees": round(_r.fees, 2), "Lots": _r.n_lots,
+                } for _r in _rep.rows
+            ]),
+            hide_index=True, use_container_width=True,
+        )
+        st.caption(
+            f"Native per-currency totals above are exact. Base-converted realized "
+            f"P&L (approximate, current FX): **{_rep.base_total_approx:,.0f} {base_ccy}**"
+        )
+        for _n in _rep.notes:
+            st.caption("ℹ️ " + _n)
+
+    st.divider()
+
+    # ── Data integrity (reconciliation, C3-lite) ────────────────────────────
+    _rr = reconcile_holdings(holdings, txns)
+    _rr_label = (
+        "✅ Data Integrity — holdings reconcile with transactions"
+        if _rr.n_error == 0 else
+        f"⚠️ Data Integrity — {_rr.n_error} discrepancy(ies) need review"
+    )
+    with st.expander(_rr_label, expanded=_rr.n_error > 0):
+        if not _rr.records:
+            st.success("All holdings match their transaction history.")
+        else:
+            st.dataframe(
+                pd.DataFrame([
+                    {
+                        "Ticker": _r.ticker, "Stored Qty": round(_r.stored_qty, 4),
+                        "Txn Qty": round(_r.txn_qty, 4), "Drift": round(_r.drift, 4),
+                        "Severity": _r.severity, "Note": _r.message,
+                    } for _r in _rr.records
+                ]),
+                hide_index=True, use_container_width=True,
+            )
+        st.caption(
+            "Read-only check. Bousala never auto-edits quantities — investigate "
+            "any discrepancy and correct it via a transaction."
+        )
+
+
 # ── Global header — brand (left) · KPIs (center) · controls (right) ──────────
 def render_global_header() -> str:
     """
@@ -7259,6 +7541,30 @@ def render_global_header() -> str:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+
+    # ── Data-source transparency: FX source + price freshness (C1 + U7) ──────
+    # Headline numbers depend on FX rates and last-fetched prices; surface when
+    # either is stale or falling back to static defaults so totals aren't
+    # silently trusted.
+    if _has_any:
+        _fx_fallback = sorted(
+            _c for _c, _r in _gh_val.fx_rates_used.items()
+            if _c != _base_ccy and getattr(_r, "source", "") == "default"
+        )
+        _fresh_notes: list[str] = []
+        if _fx_fallback:
+            _fresh_notes.append(
+                "⚠️ FX fallback for " + ", ".join(_fx_fallback)
+                + " (no live rate — static/peg). Totals approximate; open "
+                "⚙️ → 💱 Refresh FX rates."
+            )
+        if _gh_ref and _gh_ref != "—":
+            _fresh_notes.append(f"🕒 Prices as of {_gh_ref}")
+        else:
+            _fresh_notes.append(
+                "🕒 Prices not refreshed this session — showing last saved values."
+            )
+        st.caption("&nbsp;&nbsp;·&nbsp;&nbsp;".join(_fresh_notes), unsafe_allow_html=True)
 
     # Handle FX refresh (after valuation so _gh_ccys is available)
     if _do_fx and _gh_hld:
@@ -9325,13 +9631,15 @@ if True:
     with tab_analysis:
         _analysis_page = st.pills(
             "analysis_nav",
-            ["🧭 Command Center", "🎯 Decision Queue", "🛡️ Portfolio Risk", "📝 Thesis Memory", "🌍 Market Intel"],
+            ["🧭 Command Center", "📈 Performance", "🎯 Decision Queue", "🛡️ Portfolio Risk", "📝 Thesis Memory", "🌍 Market Intel"],
             default="🧭 Command Center",
             label_visibility="collapsed",
             key="analysis_subnav",
         )
         st.divider()
-        if _analysis_page == "🎯 Decision Queue":
+        if _analysis_page == "📈 Performance":
+            render_performance_tab()
+        elif _analysis_page == "🎯 Decision Queue":
             render_decision_queue_tab()
         elif _analysis_page == "🛡️ Portfolio Risk":
             render_portfolio_risk_tab()
