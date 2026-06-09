@@ -21,7 +21,6 @@ args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
 NODE_ENV = "production"
 
 [services.production.run]
-# we don't run through pnpm to make startup faster in production
 args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
@@ -30,3 +29,14 @@ NODE_ENV = "production"
 
 [services.production.health.startup]
 path = "/api/healthz"
+
+[[services]]
+localPort = 5000
+name = "Bousala App"
+paths = ["/"]
+
+[services.development]
+run = "python -m streamlit run edgar_app/app.py --server.address=0.0.0.0 --server.port=5000"
+
+[services.production.run]
+args = ["sh", "-c", "python -m streamlit run edgar_app/app.py --server.address=0.0.0.0 --server.port=5000"]
