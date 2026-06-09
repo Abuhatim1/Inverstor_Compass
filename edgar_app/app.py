@@ -7007,7 +7007,7 @@ def render_global_header() -> str:
     """
     Professional three-zone app bar rendered above all tabs.
     LEFT : compass SVG + بوصلة المستثمر (inline, ~48 px logo)
-    CENTER: Portfolio · P&L · Cash · Refresh  — horizontal flex row
+    CENTER: Net Worth · This Month trend · Invested · Refresh — horizontal flex
     RIGHT : CCY selector + 💱 FX refresh button
     Returns the selected base currency string.
     Sticky behaviour via CSS  :has(.bousala-appbar) on the parent stHorizontalBlock.
@@ -7016,6 +7016,13 @@ def render_global_header() -> str:
     from portfolio.accounts import load_accounts as _gh_accts
     from fx_rates import get_rates_for_holdings, refresh_fx_rates
     from portfolio.valuation import calculate_portfolio_valuation
+    from portfolio.alt_investments import load_igi_investments as _gh_load_igi
+    from portfolio.crowdfunding import load_cf_accounts as _gh_load_cf
+    from portfolio.net_worth import (
+        compute_extra_assets_base,
+        record_nw_snapshot_if_needed,
+        get_monthly_trend,
+    )
 
     # ── Compass SVG — 48 × 48 px, two-tone needle, $ centre ──────────────
     _SVG = (
@@ -7081,15 +7088,39 @@ def render_global_header() -> str:
                 help="Refresh FX rates from Yahoo Finance.",
             )
 
-    # ── Compute portfolio valuation ────────────────────────────────────────
-    _gh_hld  = load_holdings()
-    _gh_ccys = list({getattr(h, "currency", "USD") for h in _gh_hld.values()}) if _gh_hld else []
-    _gh_fx   = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
-    _gh_val  = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
-    _gh_ref  = st.session_state.get("mp_last_refresh") or "—"
-    _has     = bool(_gh_hld)
-    _pc      = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
-    _ps      = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
+    # ── Load all asset classes ─────────────────────────────────────────────
+    _gh_hld = load_holdings()
+    _gh_igi = _gh_load_igi()
+    _gh_cf  = _gh_load_cf()
+
+    # Collect currencies from ALL sources so one FX call covers everything
+    _gh_ccys = list({
+        *({getattr(h, "currency", "USD") for h in _gh_hld.values()} if _gh_hld else set()),
+        *(inv.currency for inv in _gh_igi.values() if inv.status != "Closed"),
+        *(acct.currency for acct in _gh_cf.values() if acct.status == "Active"),
+    })
+    _gh_fx  = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
+    _gh_val = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
+    _gh_ref = st.session_state.get("mp_last_refresh") or "—"
+
+    # ── Net worth = portfolio (holdings + cash) + alt investments + CF ─────
+    _gh_extra = compute_extra_assets_base(
+        _gh_igi, _gh_cf, _base_ccy, _gh_val.fx_rates_used
+    )
+    _gh_nw    = _gh_val.total_portfolio_value_base + _gh_extra
+
+    # ── Monthly trend ──────────────────────────────────────────────────────
+    _gh_snaps          = record_nw_snapshot_if_needed(_gh_nw, _base_ccy)
+    _gh_delta_abs, _gh_delta_pct = get_monthly_trend(_gh_nw, _base_ccy, _gh_snaps)
+
+    # ── Invested (holdings MV only) P&L colour ─────────────────────────────
+    _gh_inv_pc = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
+    _gh_inv_ps = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
+
+    # ── Trend colour & symbol ──────────────────────────────────────────────
+    _gh_tc = (
+        "#22c55e" if (_gh_delta_abs or 0) >= 0 else "#ef4444"
+    )
 
     def _gh_fmt(v: float) -> str:
         av = abs(v)
@@ -7099,28 +7130,51 @@ def render_global_header() -> str:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.2f}"
 
+    _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or _gh_val.cash_value_base > 0
+
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
-        if _has:
-            _pct_html = f'<span class="gh-pct">({_ps}{_gh_val.unrealized_pnl_pct:.1f}%)</span>'
+        if _has_any:
+            # ── Monthly trend KPI ─────────────────────────────────────────
+            if _gh_delta_pct is not None:
+                _trend_arrow = "▲" if (_gh_delta_abs or 0) >= 0 else "▼"
+                _trend_sign  = "+" if (_gh_delta_abs or 0) >= 0 else ""
+                _trend_html  = (
+                    f'<span style="color:{_gh_tc};font-size:0.85em">'
+                    f'{_trend_arrow} {_trend_sign}{_gh_delta_pct:.1f}%'
+                    f'</span>'
+                    f'<span style="color:#94a3b8;font-size:0.72em;margin-left:4px">'
+                    f'({_trend_sign}{_gh_fmt(_gh_delta_abs or 0)})'
+                    f'</span>'
+                )
+            else:
+                _trend_html = '<span style="color:#94a3b8;font-size:0.82em">tracking…</span>'
+
+            # ── Invested (holdings MV) label ──────────────────────────────
+            _pnl_pct_html = (
+                f'<span class="gh-pct">'
+                f'({_gh_inv_ps}{_gh_val.unrealized_pnl_pct:.1f}%)'
+                f'</span>'
+            )
+
             st.markdown(
                 f'<div class="gh-kpi-row">'
-                # Portfolio value — largest
+                # Net Worth — largest, all-inclusive
                 f'  <div class="gh-kpi">'
-                f'    <div class="gh-lbl">Portfolio ({_base_ccy})</div>'
-                f'    <div class="gh-val-big">{_gh_fmt(_gh_val.total_portfolio_value_base)}</div>'
+                f'    <div class="gh-lbl">Net Worth ({_base_ccy})</div>'
+                f'    <div class="gh-val-big">{_gh_fmt(_gh_nw)}</div>'
                 f'  </div>'
-                # P&L — medium-large, coloured
+                # This Month — trend vs month-start snapshot
                 f'  <div class="gh-kpi">'
-                f'    <div class="gh-lbl">Unrealized P&amp;L</div>'
-                f'    <div class="gh-val-med" style="color:{_pc}">'
-                f'      {_ps}{_gh_fmt(_gh_val.unrealized_pnl_base)} {_pct_html}'
+                f'    <div class="gh-lbl">This Month</div>'
+                f'    <div class="gh-val-med">{_trend_html}</div>'
+                f'  </div>'
+                # Invested — holdings MV only (clearly scoped label)
+                f'  <div class="gh-kpi">'
+                f'    <div class="gh-lbl">Invested ({_base_ccy})</div>'
+                f'    <div class="gh-val-sm" style="color:{_gh_inv_pc}">'
+                f'      {_gh_inv_ps}{_gh_fmt(_gh_val.holdings_value_base)} {_pnl_pct_html}'
                 f'    </div>'
-                f'  </div>'
-                # Cash — medium
-                f'  <div class="gh-kpi">'
-                f'    <div class="gh-lbl">Cash</div>'
-                f'    <div class="gh-val-sm">{_gh_fmt(_gh_val.cash_value_base)}</div>'
                 f'  </div>'
                 # Last refresh — small / muted
                 f'  <div class="gh-kpi">'
@@ -7134,9 +7188,9 @@ def render_global_header() -> str:
             st.markdown(
                 f'<div class="gh-kpi-row">'
                 f'  <div class="gh-kpi">'
-                f'    <div class="gh-lbl">Portfolio ({_base_ccy})</div>'
+                f'    <div class="gh-lbl">Net Worth ({_base_ccy})</div>'
                 f'    <div class="gh-val-xs" style="color:#94a3b8;margin-top:4px">'
-                f'      No holdings yet — add one below</div>'
+                f'      No assets yet — add one below</div>'
                 f'  </div>'
                 f'</div>',
                 unsafe_allow_html=True,
