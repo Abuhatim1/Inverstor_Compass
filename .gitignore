@@ -54,3 +54,4 @@ edgar_app/portfolio/transactions.json
 edgar_app/portfolio/_asset_counter.json
 edgar_app/portfolio/deleted_holdings.json
 edgar_app/portfolio/networth_snapshots.json
+edgar_app/portfolio/fixed_assets.json

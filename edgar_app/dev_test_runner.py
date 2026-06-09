@@ -7144,6 +7144,218 @@ def _cat_cf() -> list[TestResult]:
     return results
 
 
+def _cat_fixed_assets() -> list[TestResult]:
+    """
+    FA: Fixed Assets regression tests.
+
+    FA-01  add_fixed_asset creates asset with correct fields.
+    FA-02  add_fixed_asset rejects empty name.
+    FA-03  add_fixed_asset rejects invalid asset_type.
+    FA-04  equity = current_value − outstanding_liability (basic).
+    FA-05  equity is zero when liability >= current_value.
+    FA-06  Sold asset excluded from equity sum (compute_extra_assets_base).
+    FA-07  edit_fixed_asset updates current_value field.
+    FA-08  edit_fixed_asset rejects edit of Sold asset.
+    FA-09  sell_fixed_asset marks asset as Sold.
+    FA-10  sell_fixed_asset rejects already-Sold asset.
+    FA-11  load/save round-trip preserves all fields.
+    FA-12  FX conversion applied correctly in compute_extra_assets_base.
+    """
+    CAT = "Fixed Assets"
+    results: list[TestResult] = []
+
+    def fa01():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, load_fixed_assets
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, err = add_fixed_asset(
+                name="Riyadh Apartment", asset_type="Real Estate",
+                currency="SAR", current_value=800_000.0,
+                outstanding_liability=200_000.0, path=p,
+            )
+            assets = load_fixed_assets(path=p)
+        ok_no_err = err is None
+        ok_name   = asset is not None and asset.name == "Riyadh Apartment"
+        ok_type   = asset is not None and asset.asset_type == "Real Estate"
+        ok_val    = asset is not None and asset.current_value == 800_000.0
+        ok_status = asset is not None and asset.status == "Active"
+        ok_saved  = len(assets) == 1
+        ok = ok_no_err and ok_name and ok_type and ok_val and ok_status and ok_saved
+        fails = [k for k, v in {"err": ok_no_err, "name": ok_name, "type": ok_type,
+                                 "value": ok_val, "status": ok_status, "saved": ok_saved}.items() if not v]
+        return ("name=Riyadh Apartment, type=Real Estate, value=800000, status=Active",
+                "PASS" if ok else "FAIL: " + ",".join(fails), ok)
+    results.append(_run("FA-01", "add_fixed_asset — creates asset correctly",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa01))
+
+    def fa02():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, err = add_fixed_asset(
+                name="", asset_type="Real Estate",
+                currency="SAR", current_value=100_000.0, path=p,
+            )
+        ok = asset is None and err is not None and "name" in err.lower()
+        return ("empty name rejected", "PASS" if ok else f"asset={asset}, err={err!r}", ok)
+    results.append(_run("FA-02", "add_fixed_asset — rejects empty name",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa02))
+
+    def fa03():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, err = add_fixed_asset(
+                name="Test", asset_type="INVALID_TYPE",
+                currency="SAR", current_value=100_000.0, path=p,
+            )
+        ok = asset is None and err is not None and "invalid asset type" in err.lower()
+        return ("invalid type rejected", "PASS" if ok else f"asset={asset}, err={err!r}", ok)
+    results.append(_run("FA-03", "add_fixed_asset — rejects invalid asset_type",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa03))
+
+    def fa04():
+        from portfolio.fixed_assets import FixedAsset
+        a = FixedAsset(
+            asset_id="test0001", name="Villa", asset_type="Real Estate",
+            currency="SAR", current_value=1_000_000.0, outstanding_liability=300_000.0,
+            purchase_price=0.0, purchase_date="", status="Active",
+        )
+        exp, act = 700_000.0, a.equity
+        return f"equity={exp:.2f}", f"equity={act:.2f}", abs(act - exp) < 0.01
+    results.append(_run("FA-04", "equity = current_value − outstanding_liability",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa04))
+
+    def fa05():
+        from portfolio.fixed_assets import FixedAsset
+        a = FixedAsset(
+            asset_id="test0002", name="Car", asset_type="Vehicle",
+            currency="SAR", current_value=50_000.0, outstanding_liability=80_000.0,
+            purchase_price=0.0, purchase_date="", status="Active",
+        )
+        exp, act = 0.0, a.equity
+        return f"equity=0.0 (liability>value)", f"equity={act:.2f}", abs(act - exp) < 0.001
+    results.append(_run("FA-05", "equity is 0.0 when liability >= current_value",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa05))
+
+    def fa06():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, sell_fixed_asset, load_fixed_assets
+        from portfolio.net_worth import compute_extra_assets_base
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            a1, _ = add_fixed_asset("Active Land", "Real Estate", "SAR", 500_000.0, path=p)
+            a2, _ = add_fixed_asset("Sold Car", "Vehicle", "SAR", 100_000.0, path=p)
+            sell_fixed_asset(a2.asset_id, path=p)
+            assets = load_fixed_assets(path=p)
+        fx = {"SAR": _fx("SAR", "SAR", 1.0)}
+        total = compute_extra_assets_base({}, {}, "SAR", fx, fixed_assets=assets)
+        exp = 500_000.0
+        ok = abs(total - exp) < 0.01
+        return f"total_equity={exp:.0f} (sold excluded)", f"total_equity={total:.2f}", ok
+    results.append(_run("FA-06", "Sold asset excluded from net-worth total",
+                        CAT, "portfolio.net_worth", "P0", True, fa06))
+
+    def fa07():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, edit_fixed_asset
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, _ = add_fixed_asset("House", "Real Estate", "SAR", 600_000.0, path=p)
+            updated, err = edit_fixed_asset(asset.asset_id, path=p, current_value=650_000.0)
+        ok = err is None and updated is not None and updated.current_value == 650_000.0
+        return "current_value updated to 650000", "PASS" if ok else f"err={err!r}, val={getattr(updated, 'current_value', None)}", ok
+    results.append(_run("FA-07", "edit_fixed_asset — updates current_value",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa07))
+
+    def fa08():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, sell_fixed_asset, edit_fixed_asset
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, _ = add_fixed_asset("Shop", "Real Estate", "SAR", 300_000.0, path=p)
+            sell_fixed_asset(asset.asset_id, path=p)
+            updated, err = edit_fixed_asset(asset.asset_id, path=p, current_value=400_000.0)
+        ok = updated is None and err is not None and "sold" in err.lower()
+        return "edit of Sold asset rejected", "PASS" if ok else f"updated={updated}, err={err!r}", ok
+    results.append(_run("FA-08", "edit_fixed_asset — rejects Sold asset",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa08))
+
+    def fa09():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, sell_fixed_asset, load_fixed_assets
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, _ = add_fixed_asset("Plot", "Real Estate", "SAR", 200_000.0, path=p)
+            ok_sell, err_sell = sell_fixed_asset(asset.asset_id, path=p)
+            assets = load_fixed_assets(path=p)
+        ok = ok_sell and err_sell is None and assets[asset.asset_id].status == "Sold"
+        return "status=Sold", "PASS" if ok else f"ok_sell={ok_sell}, err={err_sell!r}", ok
+    results.append(_run("FA-09", "sell_fixed_asset — marks asset as Sold",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa09))
+
+    def fa10():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, sell_fixed_asset
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, _ = add_fixed_asset("Garage", "Vehicle", "SAR", 50_000.0, path=p)
+            sell_fixed_asset(asset.asset_id, path=p)
+            ok_dup, err_dup = sell_fixed_asset(asset.asset_id, path=p)
+        ok = not ok_dup and err_dup is not None and "already" in err_dup.lower()
+        return "double-sell rejected", "PASS" if ok else f"ok={ok_dup}, err={err_dup!r}", ok
+    results.append(_run("FA-10", "sell_fixed_asset — rejects already-Sold asset",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa10))
+
+    def fa11():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, load_fixed_assets
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            asset, _ = add_fixed_asset(
+                name="Gold Bar", asset_type="Precious Metals (Physical)",
+                currency="USD", current_value=95_000.0,
+                outstanding_liability=0.0, purchase_price=80_000.0,
+                purchase_date="2023-01-15", notes="10 oz gold", path=p,
+            )
+            loaded = load_fixed_assets(path=p)
+        a = loaded.get(asset.asset_id)
+        ok = (a is not None
+              and a.name == "Gold Bar"
+              and a.asset_type == "Precious Metals (Physical)"
+              and a.currency == "USD"
+              and abs(a.current_value - 95_000.0) < 0.001
+              and a.purchase_date == "2023-01-15"
+              and a.notes == "10 oz gold")
+        return "round-trip fields preserved", "PASS" if ok else f"loaded={a}", ok
+    results.append(_run("FA-11", "load/save round-trip — all fields preserved",
+                        CAT, "portfolio.fixed_assets", "P0", True, fa11))
+
+    def fa12():
+        import tempfile, os
+        from portfolio.fixed_assets import add_fixed_asset, load_fixed_assets
+        from portfolio.net_worth import compute_extra_assets_base
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "fa.json")
+            add_fixed_asset("US Property", "Real Estate", "USD", 500_000.0, path=p)
+            assets = load_fixed_assets(path=p)
+        fx = {
+            "USD": _fx("USD", "SAR", 3.75),
+            "SAR": _fx("SAR", "SAR", 1.0),
+        }
+        total = compute_extra_assets_base({}, {}, "SAR", fx, fixed_assets=assets)
+        exp = 500_000.0 * 3.75   # 1_875_000.0
+        ok = abs(total - exp) < 0.10
+        return f"equity_in_SAR={exp:.2f}", f"equity_in_SAR={total:.2f}", ok
+    results.append(_run("FA-12", "FX conversion applied to fixed-asset equity",
+                        CAT, "portfolio.net_worth", "P0", True, fa12))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -7162,6 +7374,7 @@ def run_all_tests() -> TestReport:
         + _cat_settle()
         + _cat_igi()
         + _cat_cf()
+        + _cat_fixed_assets()
     )
 
     punch_list: list[PunchListItem] = []

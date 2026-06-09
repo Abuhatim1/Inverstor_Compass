@@ -31,10 +31,13 @@ def compute_extra_assets_base(
     cf_accounts:     dict,
     base_ccy:        str,
     fx_rates:        dict,
+    fixed_assets:    dict | None = None,
 ) -> float:
     """
-    Sum non-Closed alt-investment current_value + Active crowdfunding
-    current_account_value, FX-converted to base_ccy.
+    Sum all non-market asset classes, FX-converted to base_ccy:
+      · non-Closed alt-investment current_value
+      · Active crowdfunding current_account_value
+      · non-Sold fixed-asset equity (current_value − outstanding_liability)
 
     Parameters
     ----------
@@ -42,6 +45,7 @@ def compute_extra_assets_base(
     cf_accounts     : dict[str, CFAccount]
     base_ccy        : str
     fx_rates        : {ccy: FxRate}  — same dict produced by valuation engine
+    fixed_assets    : dict[str, FixedAsset] | None  — omit to skip
 
     Returns float rounded to 4 decimal places.
     """
@@ -60,6 +64,14 @@ def compute_extra_assets_base(
         rate_obj = fx_rates.get(acct.currency)
         rate = rate_obj.rate if rate_obj else 1.0
         total += acct.current_account_value * rate
+
+    if fixed_assets:
+        for asset in fixed_assets.values():
+            if asset.status == "Sold":
+                continue
+            rate_obj = fx_rates.get(asset.currency)
+            rate = rate_obj.rate if rate_obj else 1.0
+            total += asset.equity * rate
 
     return round(total, 4)
 

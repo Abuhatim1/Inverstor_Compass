@@ -7018,6 +7018,7 @@ def render_global_header() -> str:
     from portfolio.valuation import calculate_portfolio_valuation
     from portfolio.alt_investments import load_igi_investments as _gh_load_igi
     from portfolio.crowdfunding import load_cf_accounts as _gh_load_cf
+    from portfolio.fixed_assets import load_fixed_assets as _gh_load_fa
     from portfolio.net_worth import (
         compute_extra_assets_base,
         record_nw_snapshot_if_needed,
@@ -7092,20 +7093,23 @@ def render_global_header() -> str:
     _gh_hld = load_holdings()
     _gh_igi = _gh_load_igi()
     _gh_cf  = _gh_load_cf()
+    _gh_fa  = _gh_load_fa()
 
     # Collect currencies from ALL sources so one FX call covers everything
     _gh_ccys = list({
         *({getattr(h, "currency", "USD") for h in _gh_hld.values()} if _gh_hld else set()),
         *(inv.currency for inv in _gh_igi.values() if inv.status != "Closed"),
         *(acct.currency for acct in _gh_cf.values() if acct.status == "Active"),
+        *(a.currency for a in _gh_fa.values() if a.status != "Sold"),
     })
     _gh_fx  = get_rates_for_holdings(_gh_ccys, _base_ccy) if _gh_ccys else {}
     _gh_val = calculate_portfolio_valuation(_gh_hld, _gh_accts(), _base_ccy, fx_rates=_gh_fx)
     _gh_ref = st.session_state.get("mp_last_refresh") or "—"
 
-    # ── Net worth = portfolio (holdings + cash) + alt investments + CF ─────
+    # ── Net worth = portfolio + alt investments + CF + fixed assets ─────────
     _gh_extra = compute_extra_assets_base(
-        _gh_igi, _gh_cf, _base_ccy, _gh_val.fx_rates_used
+        _gh_igi, _gh_cf, _base_ccy, _gh_val.fx_rates_used,
+        fixed_assets=_gh_fa,
     )
     _gh_nw    = _gh_val.total_portfolio_value_base + _gh_extra
 
@@ -7130,7 +7134,7 @@ def render_global_header() -> str:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.2f}"
 
-    _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or _gh_val.cash_value_base > 0
+    _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or bool(_gh_fa) or _gh_val.cash_value_base > 0
 
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
@@ -8538,6 +8542,298 @@ def render_alt_investments_tab() -> None:
                         st.caption(f"📝 {_acct.notes}")
 
 
+# ── Fixed Assets Tab ──────────────────────────────────────────────────────────
+
+def render_fixed_assets_tab() -> None:
+    """Fixed Assets — manually-valued illiquid assets (real estate, vehicles, etc.)."""
+    from portfolio.fixed_assets import (
+        FIXED_ASSET_TYPES, FA_STATUSES,
+        load_fixed_assets, add_fixed_asset, edit_fixed_asset, sell_fixed_asset,
+    )
+    from portfolio import CURRENCIES
+    from fx_rates import get_rates_for_holdings
+    from datetime import date
+    import pandas as pd
+
+    st.header("🏠 Fixed Assets")
+    st.caption(
+        "Track illiquid assets — real estate, vehicles, physical gold, business stakes — "
+        "with a simple current value and optional mortgage / loan liability.  "
+        "**Equity** (value − liability) feeds the Net Worth total in the header."
+    )
+
+    _base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    _fa_all   = load_fixed_assets()
+
+    # ── Dialogs ───────────────────────────────────────────────────────────────
+
+    @st.dialog("➕ Add Fixed Asset")
+    def _dlg_fa_add():
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            _nm  = st.text_input("Asset Name *", key="fa_add_name",
+                                  placeholder="e.g. Riyadh Apartment, 2023 Camry")
+            _at  = st.selectbox("Asset Type *", FIXED_ASSET_TYPES, key="fa_add_type")
+            _cur = st.selectbox(
+                "Currency", CURRENCIES,
+                index=CURRENCIES.index("SAR") if "SAR" in CURRENCIES else 0,
+                key="fa_add_ccy",
+            )
+        with _c2:
+            _cv  = st.number_input("Current Value *", min_value=0.0, step=1_000.0,
+                                   format="%.2f", key="fa_add_cv",
+                                   help="Your best estimate of today's market value.")
+            _li  = st.number_input("Outstanding Liability", min_value=0.0, step=1_000.0,
+                                   format="%.2f", key="fa_add_li",
+                                   help="Mortgage, car loan, etc. Leave 0 if none.")
+            _pp  = st.number_input("Purchase Price (optional)", min_value=0.0, step=1_000.0,
+                                   format="%.2f", key="fa_add_pp",
+                                   help="Leave 0 if unknown — used only to show unrealised gain.")
+            _pd  = st.date_input("Purchase Date (optional)", value=None,
+                                  key="fa_add_pd")
+        _notes = st.text_area("Notes", key="fa_add_notes", max_chars=500)
+        _b1, _b2 = st.columns(2)
+        with _b1:
+            if st.button("💾 Save", type="primary", use_container_width=True, key="fa_add_save"):
+                _asset, _err = add_fixed_asset(
+                    name=_nm, asset_type=_at, currency=_cur,
+                    current_value=_cv, outstanding_liability=_li,
+                    purchase_price=_pp,
+                    purchase_date=_pd.isoformat() if _pd else "",
+                    notes=_notes,
+                )
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast(f"Asset added: {_asset.name}", icon="✅")
+                    st.rerun()
+        with _b2:
+            if st.button("Cancel", use_container_width=True, key="fa_add_cancel"):
+                st.rerun()
+
+    @st.dialog("✏️ Edit Fixed Asset")
+    def _dlg_fa_edit(asset):
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            _nm  = st.text_input("Asset Name", value=asset.name,
+                                  key=f"fa_e_nm_{asset.asset_id}")
+            _at  = st.selectbox("Asset Type", FIXED_ASSET_TYPES,
+                                 index=FIXED_ASSET_TYPES.index(asset.asset_type)
+                                       if asset.asset_type in FIXED_ASSET_TYPES else 0,
+                                 key=f"fa_e_at_{asset.asset_id}")
+            _cur = st.selectbox(
+                "Currency", CURRENCIES,
+                index=CURRENCIES.index(asset.currency) if asset.currency in CURRENCIES else 0,
+                key=f"fa_e_cur_{asset.asset_id}",
+            )
+        with _c2:
+            _cv  = st.number_input("Current Value", min_value=0.0, step=1_000.0,
+                                   format="%.2f", value=float(asset.current_value),
+                                   key=f"fa_e_cv_{asset.asset_id}")
+            _li  = st.number_input("Outstanding Liability", min_value=0.0, step=1_000.0,
+                                   format="%.2f", value=float(asset.outstanding_liability),
+                                   key=f"fa_e_li_{asset.asset_id}")
+            _pp  = st.number_input("Purchase Price", min_value=0.0, step=1_000.0,
+                                   format="%.2f", value=float(asset.purchase_price),
+                                   key=f"fa_e_pp_{asset.asset_id}")
+            try:
+                _pd_val = date.fromisoformat(asset.purchase_date) if asset.purchase_date else None
+            except ValueError:
+                _pd_val = None
+            _pd = st.date_input("Purchase Date", value=_pd_val,
+                                 key=f"fa_e_pd_{asset.asset_id}")
+        _notes = st.text_area("Notes", value=asset.notes,
+                               key=f"fa_e_notes_{asset.asset_id}", max_chars=500)
+        _b1, _b2 = st.columns(2)
+        with _b1:
+            if st.button("💾 Save", type="primary", use_container_width=True,
+                         key=f"fa_e_save_{asset.asset_id}"):
+                _, _err = edit_fixed_asset(
+                    asset.asset_id,
+                    name=_nm, asset_type=_at, currency=_cur,
+                    current_value=_cv, outstanding_liability=_li,
+                    purchase_price=_pp,
+                    purchase_date=_pd.isoformat() if _pd else "",
+                    notes=_notes,
+                )
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast("Asset updated.", icon="✅")
+                    st.rerun()
+        with _b2:
+            if st.button("Cancel", use_container_width=True,
+                         key=f"fa_e_cancel_{asset.asset_id}"):
+                st.rerun()
+
+    @st.dialog("🏷️ Mark as Sold")
+    def _dlg_fa_sell(asset):
+        st.warning(
+            f"Mark **{asset.name}** as Sold?\n\n"
+            "It will be removed from your Net Worth but kept in Sold History."
+        )
+        _b1, _b2 = st.columns(2)
+        with _b1:
+            if st.button("✅ Confirm Sold", type="primary", use_container_width=True,
+                         key=f"fa_sell_ok_{asset.asset_id}"):
+                _ok, _err = sell_fixed_asset(asset.asset_id)
+                if _err:
+                    st.error(_err)
+                else:
+                    st.toast(f"{asset.name} marked as Sold.", icon="🏷️")
+                    st.rerun()
+        with _b2:
+            if st.button("Cancel", use_container_width=True,
+                         key=f"fa_sell_cancel_{asset.asset_id}"):
+                st.rerun()
+
+    # ── Summary KPI row ───────────────────────────────────────────────────────
+
+    _active = {k: v for k, v in _fa_all.items() if v.status == "Active"}
+    _sold   = {k: v for k, v in _fa_all.items() if v.status == "Sold"}
+
+    if _active:
+        # Compute total equity in base ccy
+        _fa_ccys = list({a.currency for a in _active.values()})
+        _fa_fx   = get_rates_for_holdings(_fa_ccys, _base_ccy) if _fa_ccys else {}
+        _fa_total_equity = sum(
+            a.equity * ((_fa_fx.get(a.currency).rate if _fa_fx.get(a.currency) else 1.0))
+            for a in _active.values()
+        )
+        _fa_total_value = sum(
+            a.current_value * ((_fa_fx.get(a.currency).rate if _fa_fx.get(a.currency) else 1.0))
+            for a in _active.values()
+        )
+        _fa_total_liab = _fa_total_value - _fa_total_equity
+
+        def _fa_fmt(v: float) -> str:
+            av = abs(v)
+            if av >= 1_000_000:
+                return f"{v / 1_000_000:.2f}M"
+            if av >= 1_000:
+                return f"{v:,.0f}"
+            return f"{v:,.2f}"
+
+        st.markdown(
+            f'<div class="acct-summary-row">'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Total Equity ({_base_ccy})</div>'
+            f'    <div class="acct-kpi-val">{_fa_fmt(_fa_total_equity)}</div>'
+            f'  </div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Total Value ({_base_ccy})</div>'
+            f'    <div class="acct-kpi-val">{_fa_fmt(_fa_total_value)}</div>'
+            f'  </div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Total Liability ({_base_ccy})</div>'
+            f'    <div class="acct-kpi-val">{_fa_fmt(_fa_total_liab)}</div>'
+            f'  </div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">Active Assets</div>'
+            f'    <div class="acct-kpi-val">{len(_active)}</div>'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Sub-navigation ────────────────────────────────────────────────────────
+
+    _fa_view = st.pills(
+        "fa_view",
+        ["🏠 Active", "📦 Sold History"],
+        default="🏠 Active",
+        label_visibility="collapsed",
+        key="fa_subnav",
+    )
+
+    _cadd, _ = st.columns([1, 5])
+    with _cadd:
+        if st.button("➕ Add Asset", type="primary", use_container_width=True, key="fa_add_btn"):
+            _dlg_fa_add()
+
+    st.divider()
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # ACTIVE ASSETS
+    # ═════════════════════════════════════════════════════════════════════════
+    if _fa_view == "🏠 Active":
+        if not _active:
+            st.info(
+                "No fixed assets yet.  Click **➕ Add Asset** above to record your first "
+                "real estate property, vehicle, physical gold holding, or other illiquid asset.",
+                icon="🏠",
+            )
+        else:
+            _TYPE_ICON = {
+                "Real Estate":                "🏠",
+                "Vehicle":                    "🚗",
+                "Precious Metals (Physical)": "🪙",
+                "Business Stake":             "💼",
+                "Other":                      "📦",
+            }
+            for _asset in sorted(_active.values(), key=lambda a: a.name):
+                _icon = _TYPE_ICON.get(_asset.asset_type, "📦")
+                with st.expander(
+                    f"{_icon} **{_asset.name}** — {_asset.asset_type}  ·  "
+                    f"{_asset.currency} {_asset.current_value:,.0f}  →  "
+                    f"equity {_asset.currency} {_asset.equity:,.0f}",
+                    expanded=False,
+                ):
+                    _dc1, _dc2, _dc3 = st.columns(3)
+                    _dc1.metric("Current Value", f"{_asset.currency} {_asset.current_value:,.2f}")
+                    _dc2.metric("Liability",     f"{_asset.currency} {_asset.outstanding_liability:,.2f}")
+                    _dc3.metric("Equity",        f"{_asset.currency} {_asset.equity:,.2f}")
+
+                    if _asset.purchase_price > 0:
+                        _gain = _asset.unrealized_gain
+                        _gain_pct = (_gain / _asset.purchase_price * 100) if _gain is not None else None
+                        _gc4, _gc5 = st.columns(2)
+                        _gc4.metric("Purchase Price", f"{_asset.currency} {_asset.purchase_price:,.2f}")
+                        if _gain is not None and _gain_pct is not None:
+                            _gc5.metric(
+                                "Unrealised Gain",
+                                f"{_asset.currency} {_gain:+,.2f}",
+                                delta=f"{_gain_pct:+.1f}%",
+                            )
+
+                    if _asset.purchase_date:
+                        st.caption(f"📅 Purchased: {_asset.purchase_date}")
+                    if _asset.notes:
+                        st.caption(f"📝 {_asset.notes}")
+
+                    _ba1, _ba2 = st.columns(2)
+                    with _ba1:
+                        if st.button("✏️ Edit", key=f"fa_edit_{_asset.asset_id}",
+                                     use_container_width=True):
+                            _dlg_fa_edit(_asset)
+                    with _ba2:
+                        if st.button("🏷️ Mark as Sold", key=f"fa_sell_{_asset.asset_id}",
+                                     use_container_width=True):
+                            _dlg_fa_sell(_asset)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # SOLD HISTORY
+    # ═════════════════════════════════════════════════════════════════════════
+    else:
+        if not _sold:
+            st.info("No sold assets yet.", icon="📦")
+        else:
+            _rows = []
+            for a in sorted(_sold.values(), key=lambda x: x.updated_at or "", reverse=True):
+                _rows.append({
+                    "Name":           a.name,
+                    "Type":           a.asset_type,
+                    "Currency":       a.currency,
+                    "Value at Sale":  a.current_value,
+                    "Notes":          a.notes or "—",
+                })
+            st.dataframe(
+                pd.DataFrame(_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
 # ── Developer Mode: SAHMK Discovery Console ──────────────────────────────────
 
 def render_sahmk_discovery_tab() -> None:
@@ -8644,11 +8940,12 @@ with st.sidebar:
 render_global_header()
 
 if True:
-    (tab_portfolio, tab_alt, tab_accounts, tab_activity,
+    (tab_portfolio, tab_alt, tab_fixed, tab_accounts, tab_activity,
      tab_analysis, tab_research,
      tab_test) = st.tabs([
         "💼 Portfolio",
         "🏦 Alt Investments",
+        "🏠 Fixed Assets",
         "💳 Accounts",
         "📜 Activity",
         "🧭 Analysis",
@@ -8810,6 +9107,9 @@ if True:
 
     with tab_alt:
         render_alt_investments_tab()
+
+    with tab_fixed:
+        render_fixed_assets_tab()
 
     with tab_test:
         render_test_runner_tab()
