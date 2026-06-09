@@ -9668,7 +9668,11 @@ if True:
             _bs_trend_pts.sort(key=lambda x: x["month"])
 
             if len(_bs_trend_pts) >= 1:
-                _bs_months = [p["month"] for p in _bs_trend_pts]
+                import datetime as _bsdt
+                _bs_months = [
+                    _bsdt.datetime.strptime(p["month"], "%Y-%m").strftime("%b'%y").upper()
+                    for p in _bs_trend_pts
+                ]
                 _bs_values = [p["value"] for p in _bs_trend_pts]
                 _line_col  = "#22c55e" if (_bs_values[-1] >= _bs_values[0]) else "#ef4444"
                 _bs_trend_fig = go.Figure()
@@ -9689,13 +9693,13 @@ if True:
                     margin=dict(l=4, r=4, t=8, b=8),
                     height=240,
                     xaxis=dict(
-                        showgrid=False, zeroline=False,
+                        showgrid=False, zeroline=False, type="category",
                         tickfont=dict(size=10), tickangle=-30,
                     ),
                     yaxis=dict(
                         showgrid=True, zeroline=False,
                         gridcolor="#f1f5f9", tickfont=dict(size=10),
-                        tickformat=",.0f",
+                        tickformat=".2s",
                     ),
                     paper_bgcolor="rgba(0,0,0,0)",
                     plot_bgcolor="rgba(0,0,0,0)",
