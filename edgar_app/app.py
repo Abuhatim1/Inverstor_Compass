@@ -13,6 +13,7 @@ Structure:
 
 import sys
 import os
+import base64
 from datetime import datetime
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,11 +76,28 @@ from portfolio import (
 )
 
 # ── Page config ───────────────────────────────────────────────────────────────
+_ICON_PATH = os.path.join(_HERE, "static", "icon.png")
+try:
+    from PIL import Image as _PILImage
+    _page_icon = _PILImage.open(_ICON_PATH)
+except Exception:
+    _page_icon = "🧭"
+
 st.set_page_config(
     page_title="بوصلة",
-    page_icon="🧭",
+    page_icon=_page_icon,
     layout="wide",
 )
+
+# ── Apple touch icon (iPhone "Add to Home Screen") ────────────────────────────
+try:
+    _icon_b64 = base64.b64encode(open(_ICON_PATH, "rb").read()).decode()
+    st.markdown(
+        f'<link rel="apple-touch-icon" href="data:image/png;base64,{_icon_b64}">',
+        unsafe_allow_html=True,
+    )
+except Exception:
+    pass
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(
