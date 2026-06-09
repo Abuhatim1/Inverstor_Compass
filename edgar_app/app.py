@@ -9680,9 +9680,8 @@ if True:
                     marker=dict(size=6, color=_line_col,
                                 line=dict(color="#ffffff", width=1.5)),
                     fill="tozeroy",
-                    fillcolor=_line_col.replace(")", ",0.08)").replace("rgb", "rgba")
-                               if _line_col.startswith("rgb")
-                               else _line_col + "14",
+                    fillcolor="rgba(34,197,94,0.08)" if _line_col == "#22c55e"
+                              else "rgba(239,68,68,0.08)",
                     hovertemplate="<b>%{x}</b><br>%{y:,.0f} "
                                   + _bs_ccy + "<extra></extra>",
                 ))
