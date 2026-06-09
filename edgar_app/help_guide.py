@@ -1040,7 +1040,23 @@ Leave this off unless you're debugging a specific issue.
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_help_tab() -> None:
-    """Render the full user guide page."""
+    """Render the full user guide page (English or Arabic based on language selector)."""
+
+    # ── Language selector ─────────────────────────────────────────────────────
+    # Placed first so the Arabic version can take over before any EN widgets render.
+    _lang = st.pills(
+        "help_language",
+        ["🇬🇧 English", "🇸🇦 العربية"],
+        default=st.session_state.get("help_lang_sel", "🇬🇧 English"),
+        label_visibility="collapsed",
+        key="help_lang_sel",
+    )
+    if _lang == "🇸🇦 العربية":
+        from help_guide_ar import render_help_tab_ar
+        render_help_tab_ar()
+        return
+
+    # ── English content below ─────────────────────────────────────────────────
 
     # Back button at the very top so it's always visible
     col_back, col_title = st.columns([1, 5])
