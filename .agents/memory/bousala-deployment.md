@@ -17,9 +17,21 @@ Two services are defined in that one artifact.toml:
 
 ## Apple touch icon (iPhone "Add to Home Screen")
 
-`st.markdown('<link rel="apple-touch-icon" ...>')` does NOT work — it injects into `<body>`, but Safari only reads from `<head>`.
+`st.markdown('<link rel="apple-touch-icon" ...>')` injects into `<body>`, but Safari only reads from `<head>`.
 
-**Fix:** Use `streamlit.components.v1.html()` (same-origin iframe) to run JS that appends the link to `window.parent.document.head`. Resize the icon to 180×180 before base64-encoding to reduce payload.
+**Do NOT embed base64 in `st.markdown()`** — a 180×180 PNG base64-encoded is ~100KB of inline HTML. This bloats Streamlit's initial response and causes the proxy-level health check at `/` to time out during startup → deployment crashes with SIGTERM.
+
+**Do NOT use `streamlit.components.v1.html()`** — this also causes deployment instability (SIGTERM after ~5s).
+
+**Correct fix:** Enable static file serving (`enableStaticServing = true` in `.streamlit/config.toml`). This serves `edgar_app/static/icon.png` at `/app/static/icon.png`. Then use a lightweight URL reference:
+```python
+st.markdown('<link rel="apple-touch-icon" href="/app/static/icon.png">', unsafe_allow_html=True)
+```
+This injects into `<body>` (Safari may not always use it for Add to Home Screen), but the deployment stays stable.
+
+## Streamlit config.toml location
+
+`edgar_app/.streamlit/config.toml` IS picked up when running `edgar_app/app.py` even from the workspace root — Streamlit searches the script directory. The production run command does NOT need to `cd edgar_app` first.
 
 ## Production URL
 

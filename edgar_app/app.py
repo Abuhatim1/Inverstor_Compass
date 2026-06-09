@@ -90,18 +90,12 @@ st.set_page_config(
 )
 
 # ── Apple touch icon (iPhone "Add to Home Screen") ────────────────────────────
-try:
-    import io as _io
-    _img180 = _PILImage.open(_ICON_PATH).convert("RGBA").resize((180, 180))
-    _buf180 = _io.BytesIO()
-    _img180.save(_buf180, format="PNG", optimize=True)
-    _icon_b64 = base64.b64encode(_buf180.getvalue()).decode()
-    st.markdown(
-        f'<link rel="apple-touch-icon" href="data:image/png;base64,{_icon_b64}">',
-        unsafe_allow_html=True,
-    )
-except Exception:
-    pass
+# Static file serving enabled (enableStaticServing=true in .streamlit/config.toml)
+# → edgar_app/static/icon.png is served at /app/static/icon.png
+st.markdown(
+    '<link rel="apple-touch-icon" href="/app/static/icon.png">',
+    unsafe_allow_html=True,
+)
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(
