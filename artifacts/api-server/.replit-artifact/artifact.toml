@@ -40,3 +40,6 @@ run = "python -m streamlit run edgar_app/app.py --server.address=0.0.0.0 --serve
 
 [services.production.run]
 args = ["sh", "-c", "python -m streamlit run edgar_app/app.py --server.address=0.0.0.0 --server.port=5000"]
+
+[services.production.health.startup]
+path = "/_stcore/health"
