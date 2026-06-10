@@ -2863,12 +2863,16 @@ def render_holdings_tab(bundle: dict) -> None:
 
         # ── Action pills — native horizontal pill bar, wraps on mobile ─────────
         _active_holdings = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
+        # Deselect pill BEFORE it renders (Streamlit forbids post-render widget state edits)
+        if st.session_state.pop("_reset_action_pill", False):
+            st.session_state.pop("holdings_action_pill", None)
         _pill_action = st.pills(
             "Actions",
             options=["➕ New Position", "💰 Buy More", "📤 Sell / Close", "📋 Settlement"],
             selection_mode="single",
             key="holdings_action_pill",
             label_visibility="collapsed",
+            default=None,
         )
         _add_new_clicked    = _pill_action == "➕ New Position"
         _quick_buy_clicked  = _pill_action == "💰 Buy More"   and bool(_active_holdings)
@@ -2876,9 +2880,9 @@ def render_holdings_tab(bundle: dict) -> None:
         _settlement_clicked = _pill_action == "📋 Settlement"
         if _pill_action in ("💰 Buy More", "📤 Sell / Close") and not _active_holdings:
             st.toast("No active holdings to trade.", icon="ℹ️")
-        # Clear selection so the same pill can be tapped again on the next run
+        # Schedule deselect for next run (cannot touch widget key after instantiation)
         if _pill_action:
-            st.session_state["holdings_action_pill"] = None
+            st.session_state["_reset_action_pill"] = True
 
         # ── View toggle: Table (desktop) vs Cards (mobile-friendly) ──────────
         _hv_mode = st.radio(
