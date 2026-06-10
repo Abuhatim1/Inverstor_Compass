@@ -2861,6 +2861,37 @@ def render_holdings_tab(bundle: dict) -> None:
                 "_asset_id": asset_id,       # hidden; used by CSV export & action bar
             })
 
+        # ── Action buttons — 2×2 grid above the table ───────────────────────
+        _active_holdings = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
+        _add_new_clicked = False
+        _quick_buy_clicked = False
+        _quick_sell_clicked = False
+        _settlement_clicked = False
+        _ab1, _ab2 = st.columns(2)
+        with _ab1:
+            if st.button("➕ Add New Position", key="open_add_new_btn",
+                         type="primary", use_container_width=True,
+                         help="Open a single new position with a BUY transaction."):
+                _add_new_clicked = True
+        with _ab2:
+            if st.button("➕ Buy More", key="open_quick_buy_btn",
+                         type="primary", use_container_width=True,
+                         disabled=not _active_holdings,
+                         help="Add shares to an existing holding."):
+                _quick_buy_clicked = True
+        _ab3, _ab4 = st.columns(2)
+        with _ab3:
+            if st.button("📤 Sell / Close", key="open_quick_sell_btn",
+                         type="primary", use_container_width=True,
+                         disabled=not _active_holdings,
+                         help="Sell shares or close a position."):
+                _quick_sell_clicked = True
+        with _ab4:
+            if st.button("📋 Settlement", key="open_settlement_btn",
+                         use_container_width=True,
+                         help="Record a dividend, fee, tax, zakat, or other settlement."):
+                _settlement_clicked = True
+
         # ── View toggle: Table (desktop) vs Cards (mobile-friendly) ──────────
         _hv_mode = st.radio(
             "Holdings view",
@@ -2938,38 +2969,8 @@ def render_holdings_tab(bundle: dict) -> None:
             )
             st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
 
-        # ── Primary action bar — Buy / Sell / Add / Settlement always visible ───
-        _pa1, _pa2, _pa3, _pa4 = st.columns(4)
-        _add_new_clicked = False
-        _quick_buy_clicked = False
-        _quick_sell_clicked = False
-        _settlement_clicked = False
-        with _pa1:
-            if st.button("➕ Add New Position", key="open_add_new_btn",
-                         type="primary", use_container_width=True,
-                         help="Open a single new position with a BUY transaction."):
-                _add_new_clicked = True
-        with _pa2:
-            _active_holdings = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
-            if st.button("➕ Buy More", key="open_quick_buy_btn",
-                         type="primary", use_container_width=True,
-                         disabled=not _active_holdings,
-                         help="Add shares to an existing holding."):
-                _quick_buy_clicked = True
-        with _pa3:
-            if st.button("📤 Sell / Close", key="open_quick_sell_btn",
-                         type="primary", use_container_width=True,
-                         disabled=not _active_holdings,
-                         help="Sell shares or close a position."):
-                _quick_sell_clicked = True
-        with _pa4:
-            if st.button("📋 Settlement", key="open_settlement_btn",
-                         use_container_width=True,
-                         help="Record a dividend, fee, tax, zakat, or other settlement."):
-                _settlement_clicked = True
-
         # ── Secondary tools row ───────────────────────────────────────────────
-        _tb1, _tb2, _tb3 = st.columns(3)
+        _tb1, _tb2 = st.columns(2)
         with _tb1:
             # Refresh prices via multi-provider router (SAHMK → yfinance → cached)
             if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
@@ -2995,38 +2996,6 @@ def render_holdings_tab(bundle: dict) -> None:
                 )
                 st.rerun()
         with _tb2:
-            # Download CSV
-            import io as _io
-            _csv_buf = _io.StringIO()
-            _csv_buf.write(
-                "ticker,company_name,asset_type,market,sector,currency,"
-                "opening_quantity,avg_cost,current_price,market_value,unrealized_pnl_pct\n"
-            )
-            for _r in rows:
-                _hh  = holdings.get(_r.get("_asset_id", ""))
-                if _hh:
-                    _csv_buf.write(
-                        f"{_hh.ticker},"
-                        f"{_hh.company_name},"
-                        f"{getattr(_hh,'asset_type','Stock')},"
-                        f"{getattr(_hh,'market','US')},"
-                        f"{getattr(_hh,'sector','Other')},"
-                        f"{getattr(_hh,'currency','USD')},"
-                        f"{_hh.quantity},"
-                        f"{_hh.avg_cost},"
-                        f"{_hh.current_price},"
-                        f"{_hh.market_value},"
-                        f"{_hh.unrealized_pnl_pct}\n"
-                    )
-            st.download_button(
-                "⬇️ Download CSV",
-                data=_csv_buf.getvalue(),
-                file_name=f"holdings_{date.today()}.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key="dl_holdings_csv",
-            )
-        with _tb3:
             if st.button("⬆️ Bulk Upload", key="open_bulk_upload_btn",
                          use_container_width=True,
                          help="Upload multiple new positions from a CSV file."):
