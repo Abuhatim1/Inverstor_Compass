@@ -28,7 +28,24 @@ from datetime import datetime
 from typing import NamedTuple
 
 _SESSION_KEY = "fx_rate_cache"
-_CACHE_TTL   = 300   # 5 minutes
+_CACHE_TTL   = 300   # 5 minutes (only used when live FX is enabled)
+
+
+# ── Static-only helper (used when live FX toggle is OFF) ──────────────────────
+
+def _get_default_rates(currencies: list[str], base_ccy: str) -> "dict[str, FxRate]":
+    """Return rates computed purely from _DEFAULT_TO_USD — zero network calls."""
+    now = datetime.now().isoformat()
+    result: dict[str, FxRate] = {}
+    base_usd = _DEFAULT_TO_USD.get(base_ccy, 1.0)
+    for ccy in set(currencies):
+        if ccy == base_ccy:
+            result[ccy] = FxRate(ccy, base_ccy, 1.0, "same", now)
+        else:
+            from_usd = _DEFAULT_TO_USD.get(ccy, 1.0)
+            rate = from_usd / base_usd if base_usd else 1.0
+            result[ccy] = FxRate(ccy, base_ccy, rate, "default", now)
+    return result
 
 
 # ── Default rates (all relative to USD) ───────────────────────────────────────
@@ -141,9 +158,19 @@ def get_rates_for_holdings(
 ) -> dict[str, FxRate]:
     """
     Batch-fetch FX rates for all currencies in the portfolio.
-    Uses session-state cache (5-min TTL) to avoid repeated API calls.
+
+    When st.session_state["live_fx_enabled"] is False (the default), returns
+    static built-in rates instantly — no network call.  When True, hits
+    Yahoo Finance and caches results in session state for 5 minutes.
     Returns {currency: FxRate}.
     """
+    try:
+        import streamlit as st
+        if not st.session_state.get("live_fx_enabled", False):
+            return _get_default_rates(currencies, base_ccy)
+    except Exception:
+        pass
+
     import streamlit as st
 
     cache_key  = f"{_SESSION_KEY}_{base_ccy}"

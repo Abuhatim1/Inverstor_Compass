@@ -477,6 +477,28 @@ _api_key  = get_api_key(_st_secrets())
 _ai_ready = bool(_api_key)
 
 
+# ── Centralised money formatter (T11 / U6) ────────────────────────────────────
+def _fmt_money(val: float, ccy: str = "", decimals: int = 0) -> str:
+    """
+    Format a monetary value with thousands separator.
+
+    Examples:
+        _fmt_money(1234567.8, "SAR")      → "1,234,568 SAR"
+        _fmt_money(1234.5, "USD", 2)      → "1,234.50 USD"
+        _fmt_money(12.3456, decimals=2)   → "12.35"
+    """
+    s = f"{val:,.{decimals}f}"
+    return f"{s} {ccy}".rstrip() if ccy else s
+
+
+def _fmt_pct(val: float | None, decimals: int = 1, suffix: str = "%") -> str:
+    """Format a percentage; returns '—' when val is None."""
+    if val is None:
+        return "—"
+    sign = "+" if val > 0 else ""
+    return f"{sign}{val:.{decimals}f}{suffix}"
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
@@ -529,6 +551,17 @@ with st.sidebar:
 
     # ── 3. Settings (collapsed by default) ───────────────────────────────────
     with st.expander("⚙️ Settings", expanded=False):
+        st.toggle(
+            "Live FX Rates",
+            value=False,
+            key="live_fx_enabled",
+            help=(
+                "OFF (default): uses static built-in rates — instant, no network call. "
+                "SAR/AED/QAR are USD-pegged and rarely change. "
+                "ON: fetches live rates from Yahoo Finance (adds ~2–3 s per refresh)."
+            ),
+        )
+        st.divider()
         demo_mode = st.toggle(
             "Demo Analysis Mode",
             value=not _ai_ready,
@@ -783,11 +816,10 @@ def _run_price_refresh(*, force: bool = True) -> int:
         return 0
 
 
-# 1. Automatic fetch on first load of this browser session
+# 1. Skip automatic blocking price fetch on session start — app loads instantly
+#    with last-saved prices.  User taps 🔄 Refresh Prices when live data needed.
 if "mp_initial_done" not in st.session_state:
     st.session_state["mp_initial_done"] = True
-    if _collect_all_tickers():          # only if the user has tickers already
-        _run_price_refresh(force=False) # use cache if still warm (60 s TTL)
 
 # 2. Periodic auto-refresh via st_autorefresh (hidden component)
 if st.session_state.get("mp_auto_on", False):
@@ -2982,6 +3014,11 @@ def render_holdings_tab(bundle: dict) -> None:
                 save_to_session(_fetched_norm)
                 _ok_list, _fail_list = _apply_routed_prices(_routed, holdings)
                 _s_lbl = market_session_label()[1]
+                # Stamp refresh time explicitly so header KPI always shows correct time
+                import time as _t_stamp
+                from datetime import datetime as _dt_stamp
+                st.session_state["mp_last_refresh"] = _dt_stamp.now().strftime("%H:%M:%S")
+                st.session_state["mp_last_refresh_epoch"] = _t_stamp.time()
                 st.toast(
                     f"Updated {len(_ok_list)} · Failed {len(_fail_list)} · {_s_lbl}",
                     icon="✅" if _ok_list else "⚠️",
@@ -7264,16 +7301,16 @@ def render_performance_tab() -> None:
     st.subheader("Money-Weighted Return")
     _perf = compute_performance(holdings, txns, ledger, _cur_val, base_ccy, _fxu)
     _p1, _p2, _p3, _p4 = st.columns(4)
-    _p1.metric("Current Value", f"{_cur_val:,.0f} {base_ccy}")
-    _p2.metric("Net Contributions", f"{_perf.net_contributions_base:,.0f} {base_ccy}")
+    _p1.metric("Current Value",     _fmt_money(_cur_val, base_ccy))
+    _p2.metric("Net Contributions", _fmt_money(_perf.net_contributions_base, base_ccy))
     _p3.metric(
         "Growth",
-        f"{_perf.growth_base:,.0f} {base_ccy}",
-        f"{_perf.growth_pct:.1f}%" if _perf.growth_pct is not None else None,
+        _fmt_money(_perf.growth_base, base_ccy),
+        _fmt_pct(_perf.growth_pct) if _perf.growth_pct is not None else None,
     )
     _p4.metric(
         "Annualized (XIRR)",
-        f"{_perf.xirr_pct:.1f}%" if _perf.xirr_pct is not None else "—",
+        _fmt_pct(_perf.xirr_pct) if _perf.xirr_pct is not None else "—",
         help="Money-weighted annualized return. Approximate — historical FX is "
              "converted at current rates.",
     )
@@ -7292,12 +7329,12 @@ def render_performance_tab() -> None:
         st.caption("No dividend settlements recorded yet.")
     else:
         _d1, _d2, _d3, _d4 = st.columns(4)
-        _d1.metric("Lifetime", f"{_inc.total_base:,.0f} {base_ccy}")
-        _d2.metric("Year-to-Date", f"{_inc.ytd_base:,.0f} {base_ccy}")
-        _d3.metric("Trailing 12m", f"{_inc.ttm_base:,.0f} {base_ccy}")
+        _d1.metric("Lifetime",      _fmt_money(_inc.total_base, base_ccy))
+        _d2.metric("Year-to-Date",  _fmt_money(_inc.ytd_base,   base_ccy))
+        _d3.metric("Trailing 12m",  _fmt_money(_inc.ttm_base,   base_ccy))
         _d4.metric(
             "Yield on Cost",
-            f"{_inc.yield_on_cost_pct:.2f}%" if _inc.yield_on_cost_pct is not None else "—",
+            _fmt_pct(_inc.yield_on_cost_pct, 2) if _inc.yield_on_cost_pct is not None else "—",
         )
         if _inc.by_ticker:
             st.dataframe(
@@ -7323,10 +7360,10 @@ def render_performance_tab() -> None:
     _z = compute_zakat(_mv_base, _cash_base, 0.0, rate=_z_rate)
     _z_paid = zakat_paid_to_date(txns, base_ccy, _fxu)
     _z1, _z2, _z3 = st.columns(3)
-    _z1.metric("Zakatable Base", f"{_z.zakatable_base:,.0f} {base_ccy}")
-    _z2.metric(f"Zakat Due ({_z.rate_label})", f"{_z.zakat_due:,.0f} {base_ccy}")
+    _z1.metric("Zakatable Base",          _fmt_money(_z.zakatable_base, base_ccy))
+    _z2.metric(f"Zakat Due ({_z.rate_label})", _fmt_money(_z.zakat_due, base_ccy))
     _z3.metric(
-        "Zakat Paid to Date", f"{_z_paid:,.0f} {base_ccy}",
+        "Zakat Paid to Date", _fmt_money(_z_paid, base_ccy),
         help="Informational only — already deducted from your cash, never "
              "subtracted from the base again.",
     )
@@ -7359,7 +7396,7 @@ def render_performance_tab() -> None:
         )
         st.caption(
             f"Native per-currency totals above are exact. Base-converted realized "
-            f"P&L (approximate, current FX): **{_rep.base_total_approx:,.0f} {base_ccy}**"
+            f"P&L (approximate, current FX): **{_fmt_money(_rep.base_total_approx, base_ccy)}**"
         )
         for _n in _rep.notes:
             st.caption("ℹ️ " + _n)
