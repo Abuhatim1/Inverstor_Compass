@@ -527,48 +527,6 @@ with st.sidebar:
 
     st.divider()
 
-    # ── 2. Market Price Refresh ───────────────────────────────────────────────
-    st.caption("📡 **Market Price Refresh**")
-    from market_prices import market_session_label as _msl, is_us_market_open as _mko
-    _si, _sl = _msl()
-    st.caption(f"{_si} {_sl}")
-
-    mp_auto_on = st.toggle(
-        "Auto-refresh prices",
-        value=False,
-        key="mp_auto_on",
-        help="Automatically re-fetches live prices at the chosen interval. "
-             "Never triggers AI analysis.",
-    )
-    mp_interval = st.selectbox(
-        "Interval",
-        ["1 minute", "5 minutes", "15 minutes"],
-        index=1,
-        key="mp_interval",
-        disabled=not mp_auto_on,
-    )
-    _last_ts = st.session_state.get("mp_last_refresh")
-    if _last_ts:
-        st.caption(f"Last refresh: **{_last_ts}**")
-        if mp_auto_on:
-            import time as _t
-            _ivl_secs = {"1 minute": 60, "5 minutes": 300, "15 minutes": 900}.get(
-                mp_interval, 300
-            )
-            _ep       = st.session_state.get("mp_last_refresh_epoch", 0.0)
-            _secs_left = max(0, int(_ep + _ivl_secs - _t.time()))
-            if _secs_left > 0:
-                st.caption(f"Next refresh: ~{_secs_left}s")
-            else:
-                st.caption("Next refresh: imminent")
-    else:
-        st.caption("Prices not yet fetched this session.")
-
-    if mp_auto_on and not _mko():
-        st.caption("🔴 Market closed — prices may be delayed")
-
-    st.divider()
-
     # ── 3. Settings (collapsed by default) ───────────────────────────────────
     with st.expander("⚙️ Settings", expanded=False):
         demo_mode = st.toggle(
@@ -2711,31 +2669,18 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         except Exception:
             _report_bytes = None
 
-    _ex1, _ex2 = st.columns(2)
-    with _ex1:
-        if _report_bytes:
-            _btn_lbl = (
-                "⬇️ Export Report (PDF)"
-                if _report_mime == "application/pdf"
-                else "⬇️ Export Chart (PNG)"
-            )
-            st.download_button(
-                _btn_lbl,
-                data=_report_bytes,
-                file_name=_report_name,
-                mime=_report_mime,
-                key="alloc_dl_report",
-                use_container_width=True,
-            )
-    with _ex2:
-        _csv_io = _io.StringIO()
-        _disp.to_csv(_csv_io, index=False, float_format="%.2f")
+    if _report_bytes:
+        _btn_lbl = (
+            "⬇️ Export Report (PDF)"
+            if _report_mime == "application/pdf"
+            else "⬇️ Export Chart (PNG)"
+        )
         st.download_button(
-            "⬇️ Export Table (CSV)",
-            data=_csv_io.getvalue(),
-            file_name=f"allocation_{_slug}_{_ts_file}.csv",
-            mime="text/csv",
-            key="alloc_dl_csv",
+            _btn_lbl,
+            data=_report_bytes,
+            file_name=_report_name,
+            mime=_report_mime,
+            key="alloc_dl_report",
             use_container_width=True,
         )
 
@@ -3086,6 +3031,43 @@ def render_holdings_tab(bundle: dict) -> None:
                          use_container_width=True,
                          help="Upload multiple new positions from a CSV file."):
                 _dlg_bulk_upload()
+
+        with st.expander("⏱ Auto-refresh", expanded=False):
+            from market_prices import market_session_label as _msl_h, is_us_market_open as _mko_h
+            _si_h, _sl_h = _msl_h()
+            st.caption(f"{_si_h} {_sl_h}")
+            mp_auto_on = st.toggle(
+                "Auto-refresh prices",
+                value=False,
+                key="mp_auto_on",
+                help="Automatically re-fetches live prices at the chosen interval. "
+                     "Never triggers AI analysis.",
+            )
+            mp_interval = st.selectbox(
+                "Interval",
+                ["1 minute", "5 minutes", "15 minutes"],
+                index=1,
+                key="mp_interval",
+                disabled=not mp_auto_on,
+            )
+            _last_ts_h = st.session_state.get("mp_last_refresh")
+            if _last_ts_h:
+                st.caption(f"Last refresh: **{_last_ts_h}**")
+                if mp_auto_on:
+                    import time as _t_h
+                    _ivl_secs_h = {"1 minute": 60, "5 minutes": 300, "15 minutes": 900}.get(
+                        mp_interval, 300
+                    )
+                    _ep_h       = st.session_state.get("mp_last_refresh_epoch", 0.0)
+                    _secs_left_h = max(0, int(_ep_h + _ivl_secs_h - _t_h.time()))
+                    if _secs_left_h > 0:
+                        st.caption(f"Next refresh: ~{_secs_left_h}s")
+                    else:
+                        st.caption("Next refresh: imminent")
+            else:
+                st.caption("Prices not yet fetched this session.")
+            if mp_auto_on and not _mko_h():
+                st.caption("🔴 Market closed — prices may be delayed")
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
