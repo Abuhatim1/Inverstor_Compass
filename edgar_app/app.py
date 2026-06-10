@@ -9663,18 +9663,18 @@ if True:
     with tab_portfolio:
         _port_page = st.pills(
             "portfolio_nav",
-            ["💼 Holdings", "📊 Allocation", "📁 Closed Holdings"],
-            default="💼 Holdings",
+            ["📊 Allocation", "💼 Holdings", "📁 Closed Holdings"],
+            default="📊 Allocation",
             label_visibility="collapsed",
             key="portfolio_subnav",
         )
         st.divider()
-        if _port_page == "📊 Allocation":
-            render_allocation_tab(_shared_bundle)
+        if _port_page == "💼 Holdings":
+            render_holdings_tab(_shared_bundle)
         elif _port_page == "📁 Closed Holdings":
             render_closed_holdings_tab()
         else:
-            render_holdings_tab(_shared_bundle)
+            render_allocation_tab(_shared_bundle)
 
     with tab_accounts:
         _acct_page = st.pills(
