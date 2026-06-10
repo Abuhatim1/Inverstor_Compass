@@ -2867,27 +2867,44 @@ def render_holdings_tab(bundle: dict) -> None:
         _quick_buy_clicked = False
         _quick_sell_clicked = False
         _settlement_clicked = False
-        _ab1, _ab2 = st.columns(2)
+        # Compact pill row: force 4 columns to stay side-by-side on mobile
+        st.markdown(
+            """<style>
+            div[data-testid="stHorizontalBlock"]:has(
+                div[data-testid="stColumn"]:nth-child(4)
+            ) { flex-wrap: nowrap !important; gap: 0.25rem !important; }
+            div[data-testid="stHorizontalBlock"]:has(
+                div[data-testid="stColumn"]:nth-child(4)
+            ) button {
+                padding: 0.2rem 0.3rem !important;
+                font-size: 0.78rem !important;
+                border-radius: 1.5rem !important;
+                min-height: 0 !important;
+                line-height: 1.35 !important;
+            }
+            </style>""",
+            unsafe_allow_html=True,
+        )
+        _ab1, _ab2, _ab3, _ab4 = st.columns(4)
         with _ab1:
-            if st.button("➕ Add New Position", key="open_add_new_btn",
+            if st.button("➕ New", key="open_add_new_btn",
                          type="primary", use_container_width=True,
-                         help="Open a single new position with a BUY transaction."):
+                         help="Open a new position with a BUY transaction."):
                 _add_new_clicked = True
         with _ab2:
-            if st.button("➕ Buy More", key="open_quick_buy_btn",
+            if st.button("💰 Buy", key="open_quick_buy_btn",
                          type="primary", use_container_width=True,
                          disabled=not _active_holdings,
                          help="Add shares to an existing holding."):
                 _quick_buy_clicked = True
-        _ab3, _ab4 = st.columns(2)
         with _ab3:
-            if st.button("📤 Sell / Close", key="open_quick_sell_btn",
+            if st.button("📤 Sell", key="open_quick_sell_btn",
                          type="primary", use_container_width=True,
                          disabled=not _active_holdings,
                          help="Sell shares or close a position."):
                 _quick_sell_clicked = True
         with _ab4:
-            if st.button("📋 Settlement", key="open_settlement_btn",
+            if st.button("📋 Settle", key="open_settlement_btn",
                          use_container_width=True,
                          help="Record a dividend, fee, tax, zakat, or other settlement."):
                 _settlement_clicked = True
