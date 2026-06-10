@@ -2744,13 +2744,40 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         f"**{_view}** · {len(_disp)} holding(s) · "
         + (f"Filtered — {_filter_str}" if _active_filters else f"{base_ccy} {_total_mv:,.2f} total")
     )
+    # ── Table density (persisted preference) ──────────────────────────────────
+    from portfolio.table_prefs import (
+        DENSITY_OPTIONS as _D_OPTS,
+        allocation_col_widths as _a_col_w,
+        load_prefs as _load_tp,
+        save_prefs as _save_tp,
+    )
+    if "table_prefs" not in st.session_state:
+        st.session_state["table_prefs"] = _load_tp()
+    _tp = st.session_state["table_prefs"]
+    _a_dens_saved = _tp.get("allocation_density", "Normal")
+    _a_dens = st.radio(
+        "Column density",
+        _D_OPTS,
+        index=_D_OPTS.index(_a_dens_saved),
+        horizontal=True,
+        key="allocation_density_radio",
+        label_visibility="collapsed",
+    )
+    if _a_dens != _a_dens_saved:
+        _tp["allocation_density"] = _a_dens
+        _save_tp(_tp)
+        st.rerun()
+    _aw = _a_col_w(_a_dens)
     st.dataframe(
         _disp,
         hide_index=True,
         use_container_width=True,
         column_config={
             _mv_col_label: st.column_config.NumberColumn(_mv_col_label, format="%,.2f"),
-            "Weight %":    st.column_config.NumberColumn("Weight %",    format="%.1f%%"),
+            "Weight %":    st.column_config.NumberColumn("Weight %",    format="%.1f%%", width=_aw.get("Weight %")),
+            "Ticker":      st.column_config.TextColumn("Ticker",        width=_aw.get("Ticker")),
+            "Company":     st.column_config.TextColumn("Company",       width=_aw.get("Company")),
+            "CCY":         st.column_config.TextColumn("CCY",           width=_aw.get("CCY")),
         },
     )
 
@@ -2919,6 +2946,30 @@ def render_holdings_tab(bundle: dict) -> None:
                 "use the action bar below for Buy / Sell / Settlement."
             )
         else:
+            # ── Table density (persisted preference) ──────────────────────────
+            from portfolio.table_prefs import (
+                DENSITY_OPTIONS as _D_OPTS,
+                holdings_col_widths as _h_col_w,
+                load_prefs as _load_tp,
+                save_prefs as _save_tp,
+            )
+            if "table_prefs" not in st.session_state:
+                st.session_state["table_prefs"] = _load_tp()
+            _tp = st.session_state["table_prefs"]
+            _h_dens_saved = _tp.get("holdings_density", "Normal")
+            _h_dens = st.radio(
+                "Column density",
+                _D_OPTS,
+                index=_D_OPTS.index(_h_dens_saved),
+                horizontal=True,
+                key="holdings_density_radio",
+                label_visibility="collapsed",
+            )
+            if _h_dens != _h_dens_saved:
+                _tp["holdings_density"] = _h_dens
+                _save_tp(_tp)
+                st.rerun()
+            _hw = _h_col_w(_h_dens)
             _tbl_sel = st.dataframe(
                 pd.DataFrame(rows),
                 hide_index=True,
@@ -2926,18 +2977,18 @@ def render_holdings_tab(bundle: dict) -> None:
                 on_select="rerun",
                 selection_mode="single-row",
                 column_config={
-                    " ":        st.column_config.TextColumn(" ", width="small"),
-                    "Company":  st.column_config.TextColumn("Company"),
-                    "Ticker":   st.column_config.TextColumn("Ticker", width="small"),
-                    "Qty":      st.column_config.NumberColumn("Qty",      format="%,.4f"),
+                    " ":        st.column_config.TextColumn(" ",        width=_hw.get(" ", "small")),
+                    "Company":  st.column_config.TextColumn("Company",  width=_hw.get("Company")),
+                    "Ticker":   st.column_config.TextColumn("Ticker",   width=_hw.get("Ticker")),
+                    "Qty":      st.column_config.NumberColumn("Qty",    format="%,.4f",   width=_hw.get("Qty")),
                     "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%,.4f"),
-                    "Price":    st.column_config.NumberColumn("Price",    format="%,.4f"),
-                    _mv_col:    st.column_config.NumberColumn(_mv_col,    format="%,.2f"),
-                    "P&L %":    st.column_config.NumberColumn("P&L %",   format="%+.2f%%"),
-                    "Wt %":     st.column_config.NumberColumn("Wt %",    format="%.1f%%", width="small"),
-                    "CCY":      st.column_config.TextColumn("CCY", width="small"),
-                    "Src":      st.column_config.TextColumn("Src", width="small"),
-                    "Account":  st.column_config.TextColumn("Account"),
+                    "Price":    st.column_config.NumberColumn("Price",  format="%,.4f"),
+                    _mv_col:    st.column_config.NumberColumn(_mv_col,  format="%,.2f"),
+                    "P&L %":    st.column_config.NumberColumn("P&L %", format="%+.2f%%", width=_hw.get("P&L %")),
+                    "Wt %":     st.column_config.NumberColumn("Wt %",  format="%.1f%%",  width=_hw.get("Wt %")),
+                    "CCY":      st.column_config.TextColumn("CCY",     width=_hw.get("CCY")),
+                    "Src":      st.column_config.TextColumn("Src",     width=_hw.get("Src")),
+                    "Account":  st.column_config.TextColumn("Account", width=_hw.get("Account")),
                 },
             )
             st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
