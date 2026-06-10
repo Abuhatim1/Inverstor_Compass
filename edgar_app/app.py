@@ -609,6 +609,46 @@ with st.sidebar:
         _n_cached = cache_size()
         st.caption(f"{_n_cached} filing(s) cached — repeat analyses are instant and free.")
 
+        # ── Data Backup & Restore ─────────────────────────────────────────────
+        st.divider()
+        st.caption("💾 **Data Backup & Restore**")
+        st.caption(
+            "Export your entire portfolio to a file, then import it on any device "
+            "or in the published app to keep your data in sync."
+        )
+
+        from portfolio.data_backup import export_bundle_bytes, import_bundle
+
+        _bk_bytes, _bk_name = export_bundle_bytes()
+        st.download_button(
+            "⬇️ Export all data",
+            data=_bk_bytes,
+            file_name=_bk_name,
+            mime="application/json",
+            use_container_width=True,
+            help="Downloads a single .json file with all your holdings, transactions, accounts, and settings.",
+        )
+
+        _uploaded_backup = st.file_uploader(
+            "⬆️ Import from backup",
+            type=["json"],
+            key="backup_upload",
+            help="Upload a .json file previously exported from Bousala to restore your data.",
+        )
+        if _uploaded_backup is not None:
+            st.warning(
+                "⚠️ This will **overwrite** all current data with the backup. "
+                "Make sure you've exported the current data first if you want to keep it.",
+                icon="⚠️",
+            )
+            if st.button("✅ Confirm Restore", type="primary", use_container_width=True, key="confirm_restore"):
+                _ok, _msg = import_bundle(_uploaded_backup.read())
+                if _ok:
+                    st.success(_msg, icon="✅")
+                    st.rerun()
+                else:
+                    st.error(_msg, icon="❌")
+
         st.divider()
         st.checkbox(
             "🔧 Developer Mode",
