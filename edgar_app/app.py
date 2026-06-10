@@ -2701,19 +2701,33 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         except Exception:
             _report_bytes = None
 
+    _exp_c1, _exp_c2 = st.columns(2)
     if _report_bytes:
         _btn_lbl = (
             "⬇️ Export Report (PDF)"
             if _report_mime == "application/pdf"
             else "⬇️ Export Chart (PNG)"
         )
+        with _exp_c1:
+            st.download_button(
+                _btn_lbl,
+                data=_report_bytes,
+                file_name=_report_name,
+                mime=_report_mime,
+                key="alloc_dl_report",
+                use_container_width=True,
+            )
+    # CSV export of the filtered allocation table
+    _alloc_csv_export = _disp.copy()
+    with _exp_c2:
         st.download_button(
-            _btn_lbl,
-            data=_report_bytes,
-            file_name=_report_name,
-            mime=_report_mime,
-            key="alloc_dl_report",
-            use_container_width=True,
+            "⬇️ Export Table (CSV)",
+            data      = _alloc_csv_export.to_csv(index=False),
+            file_name = f"allocation_{_ts_file}.csv",
+            mime      = "text/csv",
+            key       = "alloc_dl_csv",
+            use_container_width = True,
+            help      = "Download the filtered allocation table as CSV.",
         )
 
     # ── Filtered asset table ──────────────────────────────────────────────────
@@ -2994,7 +3008,7 @@ def render_holdings_tab(bundle: dict) -> None:
             st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
 
         # ── Secondary tools row ───────────────────────────────────────────────
-        _tb1, _tb2 = st.columns(2)
+        _tb1, _tb2, _tb3 = st.columns(3)
         with _tb1:
             # Refresh prices via multi-provider router (SAHMK → yfinance → cached)
             if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
@@ -3029,6 +3043,24 @@ def render_holdings_tab(bundle: dict) -> None:
                          use_container_width=True,
                          help="Upload multiple new positions from a CSV file."):
                 _dlg_bulk_upload()
+        with _tb3:
+            # CSV export — strip the hidden asset_id column and the status emoji column
+            import io as _csv_io
+            _csv_cols = [c for c in (rows[0].keys() if rows else []) if c not in (" ", "_asset_id")]
+            _csv_buf  = _csv_io.StringIO()
+            import csv as _csv_mod
+            _csv_wr   = _csv_mod.DictWriter(_csv_buf, fieldnames=_csv_cols, extrasaction="ignore")
+            _csv_wr.writeheader()
+            _csv_wr.writerows(rows)
+            st.download_button(
+                "⬇️ Download CSV",
+                data    = _csv_buf.getvalue(),
+                file_name = f"holdings_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime    = "text/csv",
+                key     = "dl_holdings_csv",
+                use_container_width = True,
+                help    = "Download the current holdings table as a CSV file.",
+            )
 
         with st.expander("⏱ Auto-refresh", expanded=False):
             from market_prices import market_session_label as _msl_h, is_us_market_open as _mko_h
