@@ -4838,7 +4838,12 @@ def _cat_hld_ui() -> list[TestResult]:
         """
         old_flag_gone  = 'st.session_state["holdings_modal_open"] = True' not in _text
         hm_alive_gone  = "_hm_alive" not in _text
-        clicked_var    = "_add_new_clicked = True" in _text
+        # Accept either the old `= True` assignment or the pill-comparison pattern
+        clicked_var    = (
+            "_add_new_clicked = True" in _text
+            or "_add_new_clicked    = _pill_action ==" in _text
+            or "_add_new_clicked = _pill_action ==" in _text
+        )
         ok = old_flag_gone and hm_alive_gone and clicked_var
         return (
             "No holdings_modal_open flag; no _hm_alive; _add_new_clicked var present",

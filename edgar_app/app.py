@@ -2861,49 +2861,24 @@ def render_holdings_tab(bundle: dict) -> None:
                 "_asset_id": asset_id,       # hidden; used by CSV export & action bar
             })
 
-        # ── Action buttons — 2×2 grid above the table ───────────────────────
+        # ── Action pills — native horizontal pill bar, wraps on mobile ─────────
         _active_holdings = {aid: h for aid, h in holdings.items() if h.quantity > 1e-9}
-        _add_new_clicked = False
-        _quick_buy_clicked = False
-        _quick_sell_clicked = False
-        _settlement_clicked = False
-        # Pill style — no layout overrides, just cosmetic
-        st.markdown(
-            """<style>
-            button[data-testid="baseButton-primary"],
-            button[data-testid="baseButton-secondary"] {
-                border-radius: 1.5rem !important;
-                padding: 0.25rem 0.9rem !important;
-                font-size: 0.8rem !important;
-                min-height: 0 !important;
-                line-height: 1.35 !important;
-            }
-            </style>""",
-            unsafe_allow_html=True,
+        _pill_action = st.pills(
+            "Actions",
+            options=["➕ New Position", "💰 Buy More", "📤 Sell / Close", "📋 Settlement"],
+            selection_mode="single",
+            key="holdings_action_pill",
+            label_visibility="collapsed",
         )
-        _ab1, _ab2 = st.columns(2)
-        with _ab1:
-            if st.button("➕ New", key="open_add_new_btn",
-                         type="primary",
-                         help="Open a new position with a BUY transaction."):
-                _add_new_clicked = True
-        with _ab2:
-            if st.button("💰 Buy More", key="open_quick_buy_btn",
-                         type="primary",
-                         disabled=not _active_holdings,
-                         help="Add shares to an existing holding."):
-                _quick_buy_clicked = True
-        _ab3, _ab4 = st.columns(2)
-        with _ab3:
-            if st.button("📤 Sell / Close", key="open_quick_sell_btn",
-                         type="primary",
-                         disabled=not _active_holdings,
-                         help="Sell shares or close a position."):
-                _quick_sell_clicked = True
-        with _ab4:
-            if st.button("📋 Settlement", key="open_settlement_btn",
-                         help="Record a dividend, fee, tax, zakat, or other settlement."):
-                _settlement_clicked = True
+        _add_new_clicked    = _pill_action == "➕ New Position"
+        _quick_buy_clicked  = _pill_action == "💰 Buy More"   and bool(_active_holdings)
+        _quick_sell_clicked = _pill_action == "📤 Sell / Close" and bool(_active_holdings)
+        _settlement_clicked = _pill_action == "📋 Settlement"
+        if _pill_action in ("💰 Buy More", "📤 Sell / Close") and not _active_holdings:
+            st.toast("No active holdings to trade.", icon="ℹ️")
+        # Clear selection so the same pill can be tapped again on the next run
+        if _pill_action:
+            st.session_state["holdings_action_pill"] = None
 
         # ── View toggle: Table (desktop) vs Cards (mobile-friendly) ──────────
         _hv_mode = st.radio(
