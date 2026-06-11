@@ -3008,36 +3008,7 @@ def render_holdings_tab(bundle: dict) -> None:
             st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
 
         # ── Secondary tools row ───────────────────────────────────────────────
-        _tb1, _tb2, _tb3 = st.columns(3)
-        with _tb1:
-            # Refresh prices via multi-provider router (SAHMK → yfinance → cached)
-            if st.button("🔄 Refresh Prices", key="refresh_mp_holdings",
-                         use_container_width=True,
-                         help="Fetch live prices (SAHMK → Yahoo Finance → cached)."):
-                from market_data_router import refresh_holdings_prices as _rr
-                _has_tk_holdings = {
-                    aid: h for aid, h in holdings.items()
-                    if getattr(h, "has_ticker", True)
-                }
-                with st.spinner(f"Fetching {len(_has_tk_holdings)} price(s)…"):
-                    _routed = _rr(_has_tk_holdings, force=True)
-                # Also update yfinance session cache for the debug tab
-                _ticker_map = {_normalize_ticker(h.ticker): aid
-                               for aid, h in _has_tk_holdings.items()}
-                _fetched_norm = refresh_all_prices(list(_ticker_map.keys()), force=False)
-                save_to_session(_fetched_norm)
-                _ok_list, _fail_list = _apply_routed_prices(_routed, holdings)
-                _s_lbl = market_session_label()[1]
-                # Stamp refresh time explicitly so header KPI always shows correct time
-                import time as _t_stamp
-                from datetime import datetime as _dt_stamp
-                st.session_state["mp_last_refresh"] = _dt_stamp.now().strftime("%H:%M:%S")
-                st.session_state["mp_last_refresh_epoch"] = _t_stamp.time()
-                st.toast(
-                    f"Updated {len(_ok_list)} · Failed {len(_fail_list)} · {_s_lbl}",
-                    icon="✅" if _ok_list else "⚠️",
-                )
-                st.rerun()
+        _tb2, _tb3 = st.columns(2)
         with _tb2:
             if st.button("⬆️ Bulk Upload", key="open_bulk_upload_btn",
                          use_container_width=True,
@@ -3061,43 +3032,6 @@ def render_holdings_tab(bundle: dict) -> None:
                 use_container_width = True,
                 help    = "Download the current holdings table as a CSV file.",
             )
-
-        with st.expander("⏱ Auto-refresh", expanded=False):
-            from market_prices import market_session_label as _msl_h, is_us_market_open as _mko_h
-            _si_h, _sl_h = _msl_h()
-            st.caption(f"{_si_h} {_sl_h}")
-            mp_auto_on = st.toggle(
-                "Auto-refresh prices",
-                value=False,
-                key="mp_auto_on",
-                help="Automatically re-fetches live prices at the chosen interval. "
-                     "Never triggers AI analysis.",
-            )
-            mp_interval = st.selectbox(
-                "Interval",
-                ["1 minute", "5 minutes", "15 minutes"],
-                index=1,
-                key="mp_interval",
-                disabled=not mp_auto_on,
-            )
-            _last_ts_h = st.session_state.get("mp_last_refresh")
-            if _last_ts_h:
-                st.caption(f"Last refresh: **{_last_ts_h}**")
-                if mp_auto_on:
-                    import time as _t_h
-                    _ivl_secs_h = {"1 minute": 60, "5 minutes": 300, "15 minutes": 900}.get(
-                        mp_interval, 300
-                    )
-                    _ep_h       = st.session_state.get("mp_last_refresh_epoch", 0.0)
-                    _secs_left_h = max(0, int(_ep_h + _ivl_secs_h - _t_h.time()))
-                    if _secs_left_h > 0:
-                        st.caption(f"Next refresh: ~{_secs_left_h}s")
-                    else:
-                        st.caption("Next refresh: imminent")
-            else:
-                st.caption("Prices not yet fetched this session.")
-            if mp_auto_on and not _mko_h():
-                st.caption("🔴 Market closed — prices may be delayed")
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
         # FX rate warnings
@@ -7534,12 +7468,10 @@ def render_global_header() -> str:
     with _cL:
         st.markdown(_BRAND, unsafe_allow_html=True)
 
-    # RIGHT — CCY + FX inside a collapsible.
-    # Streamlit renders expander contents even when collapsed, so the
-    # selectbox always returns its value for the valuation below.
+    # RIGHT — ⋮ popover: currency, FX refresh, price refresh, auto-refresh
     with _cR:
-        _cur_ccy_lbl = st.session_state.get("global_base_ccy", "SAR")
-        with st.expander(f"⚙️ {_cur_ccy_lbl}", expanded=False):
+        with st.popover("⋮", use_container_width=True):
+            # ── Currency ──────────────────────────────────────────────
             _base_ccy = st.selectbox(
                 "Base currency",
                 options=["SAR", "USD", "EUR", "GBP"],
@@ -7552,6 +7484,37 @@ def render_global_header() -> str:
                 use_container_width=True,
                 help="Refresh FX rates from Yahoo Finance.",
             )
+            st.divider()
+            # ── Prices ────────────────────────────────────────────────
+            _do_refresh_prices = st.button(
+                "🔄 Refresh Prices",
+                key="global_refresh_prices_btn",
+                use_container_width=True,
+                help="Fetch live prices for all holdings (SAHMK → Yahoo Finance → cached).",
+            )
+            st.divider()
+            # ── Auto-refresh ──────────────────────────────────────────
+            from market_prices import market_session_label as _msl_ar, is_us_market_open as _mko_ar
+            _si_ar, _sl_ar = _msl_ar()
+            st.caption(f"{_si_ar} {_sl_ar}")
+            mp_auto_on = st.toggle(
+                "Auto-refresh",
+                value=False,
+                key="mp_auto_on",
+                help="Automatically re-fetch prices at the chosen interval.",
+            )
+            mp_interval = st.selectbox(
+                "Interval",
+                ["1 minute", "5 minutes", "15 minutes"],
+                index=1,
+                key="mp_interval",
+                disabled=not mp_auto_on,
+            )
+            _last_ref_ar = st.session_state.get("mp_last_refresh")
+            if _last_ref_ar:
+                st.caption(f"Last refresh: **{_last_ref_ar}**")
+            if mp_auto_on and not _mko_ar():
+                st.caption("🔴 Market closed — prices may be delayed")
 
     # ── Load all asset classes ─────────────────────────────────────────────
     _gh_hld  = load_holdings()
@@ -7673,10 +7636,7 @@ def render_global_header() -> str:
                 unsafe_allow_html=True,
             )
 
-    # ── Data-source transparency: FX source + price freshness (C1 + U7) ──────
-    # Headline numbers depend on FX rates and last-fetched prices; surface when
-    # either is stale or falling back to static defaults so totals aren't
-    # silently trusted.
+    # ── Status caption (FX source + price freshness) ──────────────────────────
     if _has_any:
         _fx_fallback = sorted(
             _c for _c, _r in _gh_val.fx_rates_used.items()
@@ -7687,7 +7647,7 @@ def render_global_header() -> str:
             _fresh_notes.append(
                 "⚠️ FX fallback for " + ", ".join(_fx_fallback)
                 + " (no live rate — static/peg). Totals approximate; open "
-                "⚙️ → 💱 Refresh FX rates."
+                "⋮ → 💱 Refresh FX rates."
             )
         if _gh_ref and _gh_ref != "—":
             _fresh_notes.append(f"🕒 Prices as of {_gh_ref}")
@@ -7697,12 +7657,31 @@ def render_global_header() -> str:
             )
         st.caption("&nbsp;&nbsp;·&nbsp;&nbsp;".join(_fresh_notes), unsafe_allow_html=True)
 
-    # Handle FX refresh (after valuation so _gh_ccys is available)
+    # ── Handle actions from the ⋮ popover ─────────────────────────────────────
+    # FX refresh
     if _do_fx and _gh_hld:
         with st.spinner("Fetching rates…"):
             refresh_fx_rates(_gh_ccys, _base_ccy)
         st.toast("FX rates updated", icon="💱")
         st.rerun()
+
+    # Price refresh
+    if _do_refresh_prices:
+        with st.spinner("Fetching prices…"):
+            _n_ok = _run_price_refresh(force=True)
+        st.toast(f"Prices updated for {_n_ok} holding(s)", icon="✅" if _n_ok else "⚠️")
+        st.rerun()
+
+    # Auto-refresh timer (runs every render regardless of active tab)
+    _mp_auto = st.session_state.get("mp_auto_on", False)
+    if _mp_auto:
+        import time as _t_ar
+        _ivl_map = {"1 minute": 60, "5 minutes": 300, "15 minutes": 900}
+        _ivl_s   = _ivl_map.get(st.session_state.get("mp_interval", "5 minutes"), 300)
+        _ep_ar   = st.session_state.get("mp_last_refresh_epoch", 0.0)
+        if _t_ar.time() - _ep_ar >= _ivl_s:
+            _run_price_refresh(force=True)
+            st.rerun()
 
     return _base_ccy
 
