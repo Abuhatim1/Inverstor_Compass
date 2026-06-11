@@ -20,6 +20,8 @@ Design rules:
 
 from __future__ import annotations
 
+import json
+import os
 import time
 import threading
 from dataclasses import dataclass
@@ -28,9 +30,32 @@ from typing import Optional
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-CACHE_TTL_SECONDS      = 60          # 1 minute — short so "Refresh" always gets fresh data
-_SESSION_CACHE_KEY     = "mp_price_cache"
+CACHE_TTL_SECONDS         = 60          # 1 minute — short so "Refresh" always gets fresh data
+_SESSION_CACHE_KEY        = "mp_price_cache"
 _SESSION_LAST_REFRESH_KEY = "mp_last_refresh"
+
+# Persistent refresh timestamp — survives app restarts
+_REFRESH_TS_FILE = os.path.join(os.path.dirname(__file__), "portfolio", "price_refresh_ts.json")
+
+
+def save_refresh_ts(epoch: float) -> None:
+    """Write last-refresh epoch to disk so the 60-min freshness window survives restarts."""
+    try:
+        with open(_REFRESH_TS_FILE, "w") as _f:
+            json.dump({"ts": epoch}, _f)
+    except Exception:
+        pass
+
+
+def load_refresh_ts() -> Optional[float]:
+    """Return persisted last-refresh epoch, or None if file is missing or corrupt."""
+    try:
+        with open(_REFRESH_TS_FILE) as _f:
+            d = json.load(_f)
+            ts = d.get("ts")
+            return float(ts) if ts is not None else None
+    except Exception:
+        return None
 
 PRICE_SOURCES = {
     "last_price":              "fast_info.last_price",
@@ -322,9 +347,11 @@ def save_to_session(results: dict[str, "MarketData"]) -> None:
         existing: dict = st.session_state.get(_SESSION_CACHE_KEY, {})
         existing.update(results)          # store everything, including failures
         now_str = datetime.now().strftime("%H:%M:%S")
+        _ep = time.time()
         st.session_state[_SESSION_CACHE_KEY]          = existing
         st.session_state[_SESSION_LAST_REFRESH_KEY]   = now_str
-        st.session_state["mp_last_refresh_epoch"]     = time.time()
+        st.session_state["mp_last_refresh_epoch"]     = _ep
+        save_refresh_ts(_ep)          # persist so 60-min window survives restarts
     except Exception:
         pass
 

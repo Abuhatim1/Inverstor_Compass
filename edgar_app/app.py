@@ -580,6 +580,12 @@ with st.sidebar:
         _sb_last = st.session_state.get("mp_last_refresh")
         if _sb_last:
             st.caption(f"Last refresh: **{_sb_last}**")
+        st.button(
+            "💱 Refresh FX Rates",
+            key="sb_refresh_fx_btn",
+            use_container_width=True,
+            help="Fetch live exchange rates from Yahoo Finance. FX rates are used to convert holdings to your base currency.",
+        )
         st.divider()
         demo_mode = st.toggle(
             "Demo Analysis Mode",
@@ -2368,7 +2374,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     if _excluded:
         st.caption(
             f"⚠️ Excluded from allocation (missing price or FX): "
-            f"**{', '.join(_excluded)}** — tap 🔄 or 💱 to refresh."
+            f"**{', '.join(_excluded)}** — tap 🔄 to refresh prices."
         )
 
     if not _rows:
@@ -2588,28 +2594,14 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             return f"{v / 1_000:.1f}K"
         return f"{v:,.2f}"
 
-    # ── Stale-data badges for allocation KPIs ────────────────────────────────
-    _alloc_ref = st.session_state.get("mp_last_refresh")
-    _alloc_price_stale = not (_alloc_ref and _alloc_ref != "—")
-    _alloc_fx_stale = any(
-        getattr(_r, "source", "") == "default"
-        for _c, _r in val.fx_rates_used.items()
-        if _c != base_ccy
-    )
-    # One combined badge on Market Value — fires when EITHER prices OR FX is stale.
-    # P&L is purely derived from the same inputs so it gets no separate badge.
-    _alloc_stale = _alloc_price_stale or _alloc_fx_stale
-    _alloc_stale_tip = (
-        "Prices &amp; FX rates not refreshed — tap 🔄 and 💱 to update."
-        if _alloc_price_stale and _alloc_fx_stale else
-        "Prices not refreshed — tap 🔄 to update."
-        if _alloc_price_stale else
-        "FX rates not refreshed — tap 💱 to update."
-    )
+    # ── Stale-data badge for allocation KPIs (price-only; FX is user-controlled)
+    import time as _alloc_t
+    _alloc_ep = st.session_state.get("mp_last_refresh_epoch")
+    _alloc_price_stale = (not _alloc_ep) or (_alloc_t.time() - _alloc_ep > 3600)
     _ALLOC_MV_BADGE = (
-        f'<span title="{_alloc_stale_tip}" '
-        f'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
-        if _alloc_stale else ""
+        '<span title="Prices not refreshed in the last hour — showing last saved values. Tap 🔄 to update." '
+        'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
+        if _alloc_price_stale else ""
     )
 
     # ── Build day-change sub-line HTML ────────────────────────────────────────
@@ -3165,7 +3157,7 @@ def render_holdings_tab(bundle: dict) -> None:
         if _manual_fx:
             st.caption(
                 f"⚠️ Totals in **{_base_ccy}** use estimated FX for "
-                f"**{', '.join(_manual_fx)}** — tap 💱 to refresh."
+                f"**{', '.join(_manual_fx)}** — refresh FX in Settings to update."
             )
         elif _val.warnings:
             for _w in _val.warnings:
@@ -7528,7 +7520,7 @@ def render_global_header() -> str:
     Professional three-zone app bar rendered above all tabs.
     LEFT : compass SVG + بوصلة المستثمر (inline, ~48 px logo)
     CENTER: Net Worth · This Month trend · Invested · Refresh — horizontal flex
-    RIGHT : CCY selector + 💱 FX refresh button
+    RIGHT : CCY selector + 🔄 price refresh button
     Returns the selected base currency string.
     Sticky behaviour via CSS  :has(.bousala-appbar) on the parent stHorizontalBlock.
     """
@@ -7594,9 +7586,9 @@ def render_global_header() -> str:
     with _cL:
         st.markdown(_BRAND, unsafe_allow_html=True)
 
-    # RIGHT — compact inline controls: currency selector · FX refresh · price refresh
+    # RIGHT — compact inline controls: currency selector · price refresh
     with _cR:
-        _hc1, _hc2, _hc3 = st.columns([3, 1, 1])
+        _hc1, _hc2 = st.columns([3, 1])
         with _hc1:
             _base_ccy = st.selectbox(
                 "Currency",
@@ -7606,13 +7598,6 @@ def render_global_header() -> str:
                 help="Base currency — all portfolio totals shown in this currency.",
             )
         with _hc2:
-            _do_fx = st.button(
-                "💱",
-                key="global_refresh_fx_btn",
-                use_container_width=True,
-                help="Refresh FX rates from Yahoo Finance.",
-            )
-        with _hc3:
             _do_refresh_prices = st.button(
                 "🔄",
                 key="global_refresh_prices_btn",
@@ -7671,24 +7656,29 @@ def render_global_header() -> str:
     _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or bool(_gh_fa) or bool(_gh_libs) or _gh_val.cash_value_base > 0
 
     # ── Stale-data flags — computed before KPI HTML so badges render inline ───
-    _fx_fallback: list[str] = []
+    # On first render after restart, restore epoch from the persisted file
+    # so the 60-min freshness window survives app restarts.
     _prices_stale = False
     if _has_any:
-        _fx_fallback = sorted(
-            _c for _c, _r in _gh_val.fx_rates_used.items()
-            if _c != _base_ccy and getattr(_r, "source", "") == "default"
-        )
-        _prices_stale = not (_gh_ref and _gh_ref != "—")
+        if not st.session_state.get("mp_last_refresh_epoch"):
+            from market_prices import load_refresh_ts as _lrts
+            _persisted_ep = _lrts()
+            if _persisted_ep:
+                st.session_state["mp_last_refresh_epoch"] = _persisted_ep
+                if not st.session_state.get("mp_last_refresh"):
+                    from datetime import datetime as _dt2
+                    st.session_state["mp_last_refresh"] = (
+                        _dt2.fromtimestamp(_persisted_ep).strftime("%H:%M:%S")
+                    )
+                # Also refresh the display reference used by the KPI "Refresh" tile
+                _gh_ref = st.session_state.get("mp_last_refresh") or "—"
+        import time as _t_stale
+        _ref_ep = st.session_state.get("mp_last_refresh_epoch")
+        _prices_stale = (not _ref_ep) or (_t_stale.time() - _ref_ep > 3600)
 
-    # ── Inline badge helpers ───────────────────────────────────────────────────
-    _FX_BADGE = (
-        '<span title="FX rate not refreshed — using static/peg values. '
-        'Tap 💱 to update." '
-        'style="font-size:0.75em;cursor:default;margin-left:3px;">⚠️</span>'
-        if _fx_fallback else ""
-    )
+    # ── Inline badge helper (price only — FX freshness is user-controlled) ────
     _PRICE_BADGE = (
-        '<span title="Prices not refreshed this session — showing last saved values. '
+        '<span title="Prices not refreshed in the last hour — showing last saved values. '
         'Tap 🔄 to update." '
         'style="font-size:0.75em;cursor:default;margin-left:3px;">⚠️</span>'
         if _prices_stale else ""
@@ -7729,7 +7719,7 @@ def render_global_header() -> str:
                 # Net Worth — ⚠️ when FX is stale
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Net Worth ({_base_ccy})</div>'
-                f'    <div class="gh-val-big">{_gh_fmt(_gh_nw)}{_FX_BADGE}</div>'
+                f'    <div class="gh-val-big">{_gh_fmt(_gh_nw)}</div>'
                 f'    {_gh_liab_html}'
                 f'  </div>'
                 # This Month
@@ -7764,9 +7754,9 @@ def render_global_header() -> str:
                 unsafe_allow_html=True,
             )
 
-    # ── Handle actions from the ⋮ popover ─────────────────────────────────────
-    # FX refresh
-    if _do_fx and _gh_hld:
+    # ── Handle actions from header / Settings sidebar ─────────────────────────
+    # FX refresh — triggered from the 💱 button in Settings sidebar
+    if st.session_state.get("sb_refresh_fx_btn") and _gh_hld:
         with st.spinner("Fetching rates…"):
             refresh_fx_rates(_gh_ccys, _base_ccy)
         st.toast("FX rates updated", icon="💱")
@@ -10029,23 +10019,14 @@ if True:
 
         _net_col = "#22c55e" if _bs_net >= 0 else "#ef4444"
 
-        # ── Stale-data badges for Balance Sheet KPIs ───────────────────────
-        _bs_ref = st.session_state.get("mp_last_refresh")
-        _bs_price_stale = not (_bs_ref and _bs_ref != "—")
-        _bs_fx_stale = any(
-            getattr(_r, "source", "") == "default"
-            for _c, _r in _bs_rates.items()
-            if _c != _bs_ccy
-        )
+        # ── Stale-data badge for Balance Sheet KPIs (price-only; FX is user-controlled)
+        import time as _bs_t
+        _bs_epoch = st.session_state.get("mp_last_refresh_epoch")
+        _bs_price_stale = (not _bs_epoch) or (_bs_t.time() - _bs_epoch > 3600)
         _BS_PRICE_BADGE = (
-            '<span title="Prices not refreshed — tap 🔄 to update." '
+            '<span title="Prices not refreshed in the last hour — tap 🔄 to update." '
             'style="font-size:0.68em;cursor:default;margin-left:3px;">⚠️</span>'
             if _bs_price_stale else ""
-        )
-        _BS_FX_BADGE = (
-            '<span title="FX rates not refreshed — tap 💱 to update." '
-            'style="font-size:0.68em;cursor:default;margin-left:3px;">⚠️</span>'
-            if _bs_fx_stale else ""
         )
 
         # ── Daily Balance Sheet snapshots + day-over-day deltas ───────────
@@ -10179,7 +10160,7 @@ if True:
             f'  <div>'
             f'    <div class="acct-kpi-lbl" style="color:#0ea5e9">Total Assets</div>'
             f'    <div class="acct-kpi-val" style="color:#0ea5e9;font-size:1.5rem">'
-            f'      {_bs_fmt(_bs_total_assets)}{_BS_FX_BADGE}'
+            f'      {_bs_fmt(_bs_total_assets)}'
             f'    </div>'
             f'    {_bs_dh_assets}'
             f'  </div>'
@@ -10196,7 +10177,7 @@ if True:
             f'  <div>'
             f'    <div class="acct-kpi-lbl" style="color:{_net_col}">&#128142; Net Worth</div>'
             f'    <div class="acct-kpi-val" style="color:{_net_col};font-size:1.65rem;font-weight:700">'
-            f'      {_bs_fmt(_bs_net)}{_BS_FX_BADGE}'
+            f'      {_bs_fmt(_bs_net)}'
             f'    </div>'
             f'    {_bs_dh_net}'
             f'  </div>'
