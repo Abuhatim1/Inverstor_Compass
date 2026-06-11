@@ -2510,6 +2510,32 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
     _pnl_sign     = "+" if _fas_pnl >= 0 else ""
 
+    # ── Daily change — derived from in-memory price cache (no network call) ───
+    # For each filtered holding: day_Δ_base ≈ mv × (pct / (100 + pct))
+    # Works only for tickers whose daily_change_pct was fetched this session.
+    from market_prices import _cache as _mp_cache, _cache_lock as _mp_lock
+    _fas_day_abs  = 0.0
+    _fas_day_covered_mv = 0.0   # mv of holdings we have a day-change for
+    for _, _row in _filt.iterrows():
+        _tk = str(_row.get("Ticker", "")).strip().upper()
+        if not _tk:
+            continue
+        with _mp_lock:
+            _cached = _mp_cache.get(_tk)
+        _md = _cached[0] if _cached else None
+        if _md and _md.daily_change_pct is not None:
+            _pct = _md.daily_change_pct
+            _mv_h = float(_row["_mv"])
+            _fas_day_abs += _mv_h * _pct / (100.0 + _pct)
+            _fas_day_covered_mv += _mv_h
+    _fas_day_pct: float | None = None
+    if _fas_day_covered_mv > 0:
+        _prev_mv = _fas_day_covered_mv - (_fas_day_abs * _fas_day_covered_mv / _fas_mv if _fas_mv else 0)
+        # Simpler: use covered portion only
+        _prev_mv = _fas_day_covered_mv / (1 + _fas_day_abs / _fas_day_covered_mv) if _fas_day_covered_mv else None
+        if _prev_mv and _prev_mv > 0:
+            _fas_day_pct = _fas_day_abs / _prev_mv * 100
+
     def _fmt_compact(v: float) -> str:
         """Round to 2 dp for M, nearest K for large numbers; keep sign."""
         av = abs(v)
@@ -2518,6 +2544,20 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         if av >= 10_000:
             return f"{v / 1_000:.1f}K"
         return f"{v:,.2f}"
+
+    # ── Build day-change sub-line HTML ────────────────────────────────────────
+    if _fas_day_pct is not None:
+        _dc_color = "#22c55e" if _fas_day_abs >= 0 else "#ef4444"
+        _dc_sign  = "+" if _fas_day_abs >= 0 else ""
+        _dc_arrow = "▲" if _fas_day_abs >= 0 else "▼"
+        _day_html = (
+            f'<div style="font-size:0.72em;color:{_dc_color};margin-top:2px;">'
+            f'{_dc_arrow} {_dc_sign}{_fmt_compact(_fas_day_abs)}'
+            f'&nbsp;<span style="opacity:0.85">({_dc_sign}{_fas_day_pct:.2f}%)</span>'
+            f'</div>'
+        )
+    else:
+        _day_html = '<div style="font-size:0.68em;color:#94a3b8;margin-top:2px;">— refresh prices for day Δ</div>'
 
     # ── KPI grid — pure HTML flex, portrait-safe ─────────────────────────────
     # _kpi_pc is defined locally (NOT _pc which belongs to render_global_header)
@@ -2530,6 +2570,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">Market Value ({base_ccy})</div>
     <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}</div>
+    {_day_html}
   </div>
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">Cost ({base_ccy})</div>
