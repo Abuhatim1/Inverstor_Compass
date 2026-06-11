@@ -7667,10 +7667,10 @@ def render_global_header() -> str:
                 st.session_state["mp_last_refresh_epoch"] = _persisted_ep
                 if not st.session_state.get("mp_last_refresh"):
                     from datetime import datetime as _dt2
+                    # Always label as UTC so the display is unambiguous regardless of server TZ
                     st.session_state["mp_last_refresh"] = (
-                        _dt2.fromtimestamp(_persisted_ep).strftime("%H:%M:%S")
+                        _dt2.utcfromtimestamp(_persisted_ep).strftime("%H:%M") + " UTC"
                     )
-                # Also refresh the display reference used by the KPI "Refresh" tile
                 _gh_ref = st.session_state.get("mp_last_refresh") or "—"
         import time as _t_stale
         _ref_ep = st.session_state.get("mp_last_refresh_epoch")
@@ -7683,6 +7683,21 @@ def render_global_header() -> str:
         'style="font-size:0.75em;cursor:default;margin-left:3px;">⚠️</span>'
         if _prices_stale else ""
     )
+
+    # ── Relative-time label for the Refresh KPI tile (timezone-agnostic) ──────
+    # Using age-based label avoids server-TZ vs user-TZ mismatch entirely.
+    import time as _t_rel
+    _ref_ep_rel = st.session_state.get("mp_last_refresh_epoch")
+    if _ref_ep_rel:
+        _age_s = _t_rel.time() - _ref_ep_rel
+        if _age_s < 60:
+            _gh_ref_display = "just now"
+        elif _age_s < 3600:
+            _gh_ref_display = f"{int(_age_s // 60)} min ago"
+        else:
+            _gh_ref_display = "> 60 min ago"
+    else:
+        _gh_ref_display = _gh_ref  # "—" when never refreshed
 
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
@@ -7737,7 +7752,7 @@ def render_global_header() -> str:
                 # Last refresh
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Refresh</div>'
-                f'    <div class="gh-val-xs">{_gh_ref}</div>'
+                f'    <div class="gh-val-xs">{_gh_ref_display}</div>'
                 f'  </div>'
                 f'</div>',
                 unsafe_allow_html=True,
