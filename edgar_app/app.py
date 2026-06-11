@@ -2366,10 +2366,9 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         })
 
     if _excluded:
-        st.warning(
-            "Excluded from allocation due to missing price or FX: "
-            f"**{', '.join(_excluded)}**",
-            icon="⚠️",
+        st.caption(
+            f"⚠️ Excluded from allocation (missing price or FX): "
+            f"**{', '.join(_excluded)}** — tap 🔄 or 💱 to refresh."
         )
 
     if not _rows:
@@ -2576,15 +2575,35 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             return f"{v / 1_000:.1f}K"
         return f"{v:,.2f}"
 
+    # ── Stale-data badges for allocation KPIs ────────────────────────────────
+    _alloc_ref = st.session_state.get("mp_last_refresh")
+    _alloc_price_stale = not (_alloc_ref and _alloc_ref != "—")
+    _alloc_fx_stale = any(
+        getattr(_r, "source", "") == "default"
+        for _c, _r in val.fx_rates_used.items()
+        if _c != base_ccy
+    )
+    _ALLOC_PRICE_BADGE = (
+        '<span title="Prices not refreshed — tap 🔄 to update." '
+        'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
+        if _alloc_price_stale else ""
+    )
+    _ALLOC_FX_BADGE = (
+        '<span title="FX rates not refreshed — tap 💱 to update." '
+        'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
+        if _alloc_fx_stale else ""
+    )
+
     # ── Build day-change sub-line HTML ────────────────────────────────────────
     if _fas_day_pct is not None:
-        _dc_color = "#22c55e" if _fas_day_abs >= 0 else "#ef4444"
-        _dc_sign  = "+" if _fas_day_abs >= 0 else ""
-        _dc_arrow = "▲" if _fas_day_abs >= 0 else "▼"
+        _dc_color  = "#22c55e" if _fas_day_abs >= 0 else "#ef4444"
+        _dc_sign   = "+" if _fas_day_abs >= 0 else ""
+        _dc_arrow  = "▲" if _fas_day_abs >= 0 else "▼"
+        _dc_approx = "~" if _fas_day_approx else ""
         _day_html = (
             f'<div style="font-size:0.72em;color:{_dc_color};margin-top:2px;">'
-            f'{_dc_arrow} {_dc_sign}{_fmt_compact(_fas_day_abs)}'
-            f'&nbsp;<span style="opacity:0.85">({_dc_sign}{_fas_day_pct:.2f}%)</span>'
+            f'{_dc_arrow} {_dc_approx}{_dc_sign}{_fmt_compact(_fas_day_abs)}'
+            f'&nbsp;<span style="opacity:0.85">({_dc_approx}{_dc_sign}{_fas_day_pct:.2f}%)</span>'
             f'</div>'
         )
     else:
@@ -2600,7 +2619,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 <div class="fas-kpi-grid">
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">Market Value ({base_ccy})</div>
-    <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}</div>
+    <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}{_ALLOC_PRICE_BADGE}</div>
     {_day_html}
   </div>
   <div class="fas-kpi-card">
@@ -2609,7 +2628,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
   </div>
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">P&amp;L ({base_ccy})</div>
-    <div class="fas-kpi-val" style="color:{_kpi_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}</div>
+    <div class="fas-kpi-val" style="color:{_kpi_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}{_ALLOC_FX_BADGE}</div>
     <div><span class="fas-kpi-pct" style="background:{_pct_bg};color:{_pct_fg};">{_arrow} {_pnl_sign}{_fas_pnl_pct:.1f}%</span></div>
   </div>
   <div class="fas-kpi-card">
@@ -3125,16 +3144,14 @@ def render_holdings_tab(bundle: dict) -> None:
             )
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
-        # FX rate warnings
         if _manual_fx:
-            st.warning(
-                f"Totals in **{_base_ccy}** use estimated FX for: "
-                f"**{', '.join(_manual_fx)}**. Click 💱 to refresh.",
-                icon="💱",
+            st.caption(
+                f"⚠️ Totals in **{_base_ccy}** use estimated FX for "
+                f"**{', '.join(_manual_fx)}** — tap 💱 to refresh."
             )
         elif _val.warnings:
             for _w in _val.warnings:
-                st.warning(_w, icon="⚠️")
+                st.caption(f"⚠️ {_w}")
         else:
             _s_icon, _s_lbl2 = market_session_label()
             st.caption(
@@ -9994,6 +10011,25 @@ if True:
 
         _net_col = "#22c55e" if _bs_net >= 0 else "#ef4444"
 
+        # ── Stale-data badges for Balance Sheet KPIs ───────────────────────
+        _bs_ref = st.session_state.get("mp_last_refresh")
+        _bs_price_stale = not (_bs_ref and _bs_ref != "—")
+        _bs_fx_stale = any(
+            getattr(_r, "source", "") == "default"
+            for _c, _r in _bs_rates.items()
+            if _c != _bs_ccy
+        )
+        _BS_PRICE_BADGE = (
+            '<span title="Prices not refreshed — tap 🔄 to update." '
+            'style="font-size:0.68em;cursor:default;margin-left:3px;">⚠️</span>'
+            if _bs_price_stale else ""
+        )
+        _BS_FX_BADGE = (
+            '<span title="FX rates not refreshed — tap 💱 to update." '
+            'style="font-size:0.68em;cursor:default;margin-left:3px;">⚠️</span>'
+            if _bs_fx_stale else ""
+        )
+
         # ── Daily Balance Sheet snapshots + day-over-day deltas ───────────
         try:
             from portfolio.bs_snapshot import record_bs_snapshot_if_needed as _bs_snap_rec
@@ -10100,7 +10136,7 @@ if True:
 
             f'  <div>'
             f'    <div class="acct-kpi-lbl">&#128200; Investment Portfolio</div>'
-            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_port)}</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_port)}{_BS_PRICE_BADGE}</div>'
             f'    {_bs_dh_port}'
             f'  </div>'
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
@@ -10112,20 +10148,20 @@ if True:
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
             f'    <div class="acct-kpi-lbl">&#127974; Alt Investments</div>'
-            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_alts)}</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_alts)}{_BS_FX_BADGE}</div>'
             f'    {_bs_dh_alts}'
             f'  </div>'
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
             f'    <div class="acct-kpi-lbl">&#127963; Fixed Assets (Equity)</div>'
-            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_fixed)}</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_fixed)}{_BS_FX_BADGE}</div>'
             f'    {_bs_dh_fixed}'
             f'  </div>'
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">=</div>'
             f'  <div>'
             f'    <div class="acct-kpi-lbl" style="color:#0ea5e9">Total Assets</div>'
             f'    <div class="acct-kpi-val" style="color:#0ea5e9;font-size:1.5rem">'
-            f'      {_bs_fmt(_bs_total_assets)}'
+            f'      {_bs_fmt(_bs_total_assets)}{_BS_FX_BADGE}'
             f'    </div>'
             f'    {_bs_dh_assets}'
             f'  </div>'
@@ -10142,7 +10178,7 @@ if True:
             f'  <div>'
             f'    <div class="acct-kpi-lbl" style="color:{_net_col}">&#128142; Net Worth</div>'
             f'    <div class="acct-kpi-val" style="color:{_net_col};font-size:1.65rem;font-weight:700">'
-            f'      {_bs_fmt(_bs_net)}'
+            f'      {_bs_fmt(_bs_net)}{_BS_FX_BADGE}'
             f'    </div>'
             f'    {_bs_dh_net}'
             f'  </div>'
