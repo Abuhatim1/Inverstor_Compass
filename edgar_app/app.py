@@ -530,6 +530,8 @@ with st.sidebar:
         height=90,
     )
     _ws_base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    if _ws_base_ccy == "— Native —":
+        _ws_base_ccy = "SAR"
     try:
         from portfolio.wealth_statement import build_wealth_statement as _build_ws
         import datetime as _wdt
@@ -2243,6 +2245,8 @@ def render_portfolio_risk_tab() -> None:
     from portfolio.accounts import load_accounts as _load_accts_risk
     from fx_rates import get_rates_for_holdings as _gfx_risk
     _base_ccy_risk = st.session_state.get("global_base_ccy", "SAR")
+    if _base_ccy_risk == "— Native —":
+        _base_ccy_risk = "SAR"
     _ccys_risk = list({getattr(h, "currency", "USD") for h in holdings.values()})
     _fx_risk   = _gfx_risk(_ccys_risk, _base_ccy_risk) if _ccys_risk else {}
     _val_risk  = calculate_portfolio_valuation(
@@ -2979,7 +2983,8 @@ def render_holdings_tab(bundle: dict) -> None:
         live_cache = get_all_from_session()
 
         # ── Build the holdings table ───────────────────────────────────────────
-        _mv_col         = f"MV ({_base_ccy})"
+        _native_mode    = st.session_state.get("_native_mode", False)
+        _mv_col         = "MV (CCY)" if _native_mode else f"MV ({_base_ccy})"
         rows            = []
         _asset_id_order: list[str] = []    # parallel to rows; tracks asset_id per row
         manual_tickers:  list[str] = []    # asset_ids of holdings without live ticker
@@ -2991,7 +2996,8 @@ def render_holdings_tab(bundle: dict) -> None:
             ccy     = getattr(h, "currency", "USD")
             fx_r    = _fx.get(ccy)
             fx_rate = fx_r.rate if fx_r else 1.0
-            mv_base = round(h.market_value * fx_rate, 2)
+            # Native mode: show local value (qty×price in asset's own CCY, no FX conversion)
+            mv_base = round(h.market_value, 2) if _native_mode else round(h.market_value * fx_rate, 2)
             pnl_pct = h.unrealized_pnl_pct
             status  = "🟢" if pnl_pct > 0.01 else ("🔴" if pnl_pct < -0.01 else "⚪")
 
@@ -7371,6 +7377,8 @@ def render_performance_tab() -> None:
     )
 
     base_ccy = st.session_state.get("global_base_ccy", "SAR")
+    if base_ccy == "— Native —":
+        base_ccy = "SAR"   # analytics engine always needs a real ISO currency
     holdings = load_holdings()
     accounts = _perf_load_accts()
     txns     = load_transactions()
@@ -7388,6 +7396,11 @@ def render_performance_tab() -> None:
     _fx   = get_rates_for_holdings(list(_ccys), base_ccy) if _ccys else {}
     val   = calculate_portfolio_valuation(holdings, accounts, base_ccy, fx_rates=_fx)
     _fxu  = val.fx_rates_used
+
+    # ── T8: surface FX / valuation warnings at the top of the tab ───────────
+    if val.warnings:
+        for _vw in val.warnings:
+            st.caption(f"⚠️ {_vw}")
 
     _cur_val   = val.total_portfolio_value_base
     _mv_base   = val.holdings_value_base
@@ -7603,13 +7616,21 @@ def render_global_header() -> str:
     with _cR:
         _hc1, _hc2 = st.columns([3, 1])
         with _hc1:
-            _base_ccy = st.selectbox(
+            _selected_ccy = st.selectbox(
                 "Currency",
-                options=["SAR", "USD", "EUR", "GBP"],
+                options=["SAR", "USD", "EUR", "GBP", "— Native —"],
                 key="global_base_ccy",
                 label_visibility="collapsed",
-                help="Base currency — all portfolio totals shown in this currency.",
+                help=(
+                    "Base currency for portfolio totals. "
+                    "'— Native —' shows each holding in its own original currency "
+                    "(totals stay in SAR since mixed currencies cannot be summed)."
+                ),
             )
+            _native_mode = (_selected_ccy == "— Native —")
+            # Engine always needs a real ISO code — fall back to SAR in native mode
+            _base_ccy = "SAR" if _native_mode else _selected_ccy
+            st.session_state["_native_mode"] = _native_mode
         with _hc2:
             _do_refresh_prices = st.button(
                 "🔄",
