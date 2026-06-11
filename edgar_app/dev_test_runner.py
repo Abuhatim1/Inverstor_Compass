@@ -7914,6 +7914,139 @@ def _cat_acct_inline() -> list[TestResult]:
     return results
 
 
+def _cat_bs_snapshot() -> list[TestResult]:
+    """Category BSS — Balance Sheet daily snapshot round-trips and delta math."""
+    results = []
+    import tempfile
+    import os
+    from datetime import date, timedelta
+
+    CAT = "Balance Sheet Snapshot"
+    MOD = "portfolio.bs_snapshot"
+
+    from portfolio.bs_snapshot import (
+        load_bs_snapshots,
+        save_bs_snapshots,
+        record_bs_snapshot_if_needed,
+        compute_bs_delta,
+    )
+
+    _COMPS = {
+        "port": 1_000_000.0, "alts": 500_000.0, "fixed": 2_000_000.0,
+        "assets": 3_500_000.0, "debt": 200_000.0, "net": 3_300_000.0,
+    }
+
+    def bss01():
+        """Round-trip: save then load returns identical entry."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "bs.json")
+            save_bs_snapshots(
+                [{"date": "2026-01-01", "ccy": "SAR", "net": 1_000.0}], path=p
+            )
+            loaded = load_bs_snapshots(path=p)
+            ok = len(loaded) == 1 and loaded[0].get("net") == 1_000.0
+            return (
+                "count=1, net=1000.0",
+                f"count={len(loaded)}, net={loaded[0].get('net') if loaded else 'n/a'}",
+                ok,
+            )
+    results.append(_run("BSS01", "BS snapshot — round-trip save/load",
+                        CAT, MOD, "P1", False, bss01))
+
+    def bss02():
+        """record_bs_snapshot_if_needed writes only once for the same day."""
+        today = date.today().isoformat()
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "bs.json")
+            record_bs_snapshot_if_needed(_COMPS, "SAR", path=p)
+            record_bs_snapshot_if_needed(
+                {"port": 999.0, "alts": 0.0, "fixed": 0.0,
+                 "assets": 999.0, "debt": 0.0, "net": 999.0},
+                "SAR", path=p,
+            )
+            snaps = load_bs_snapshots(path=p)
+            today_entries = [s for s in snaps if s.get("date") == today]
+            original_port = today_entries[0].get("port") if today_entries else None
+            ok = len(today_entries) == 1 and _near(float(original_port or 0), 1_000_000.0)
+            return (
+                "today_entries=1, port=1000000.0",
+                f"today_entries={len(today_entries)}, port={original_port}",
+                ok,
+            )
+    results.append(_run("BSS02", "BS snapshot — idempotent (no duplicate same day)",
+                        CAT, MOD, "P1", False, bss02))
+
+    def bss03():
+        """compute_bs_delta returns correct abs and pct."""
+        d_abs, d_pct = compute_bs_delta(
+            1_050_000.0, {"port": 1_000_000.0}, "port"
+        )
+        ok = (d_abs is not None and _near(d_abs, 50_000.0, 0.01)
+              and d_pct is not None and _near(d_pct, 5.0, 0.001))
+        return (
+            "d_abs=50000.0, d_pct=5.0",
+            f"d_abs={d_abs}, d_pct={d_pct}",
+            ok,
+        )
+    results.append(_run("BSS03", "BS snapshot — delta math (abs + pct correct)",
+                        CAT, MOD, "P1", False, bss03))
+
+    def bss04():
+        """First-day render returns None (no prior-day snapshot)."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "bs.json")
+            prev = record_bs_snapshot_if_needed(_COMPS, "SAR", path=p)
+            return "prev=None", f"prev={prev}", prev is None
+    results.append(_run("BSS04", "BS snapshot — None returned on first day",
+                        CAT, MOD, "P1", False, bss04))
+
+    def bss05():
+        """Currency mismatch: prior USD snapshot not returned for SAR query."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "bs.json")
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            save_bs_snapshots(
+                [{"date": yesterday, "ccy": "USD",
+                  "port": 1_000.0, "alts": 0.0, "fixed": 0.0,
+                  "assets": 1_000.0, "debt": 0.0, "net": 1_000.0}],
+                path=p,
+            )
+            prev = record_bs_snapshot_if_needed(_COMPS, "SAR", path=p)
+            return "prev=None (ccy mismatch)", f"prev={prev}", prev is None
+    results.append(_run("BSS05", "BS snapshot — ccy mismatch returns None",
+                        CAT, MOD, "P1", False, bss05))
+
+    def bss06():
+        """compute_bs_delta returns (None, None) when prev_snap is None."""
+        d_abs, d_pct = compute_bs_delta(1_000.0, None, "net")
+        ok = d_abs is None and d_pct is None
+        return "(None, None)", f"({d_abs}, {d_pct})", ok
+    results.append(_run("BSS06", "BS snapshot — compute_bs_delta None guard",
+                        CAT, MOD, "P1", False, bss06))
+
+    def bss07():
+        """Prior-day snapshot is returned when today != yesterday."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "bs.json")
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            ycomps = dict(_COMPS)
+            ycomps["net"] = 3_250_000.0
+            save_bs_snapshots(
+                [{"date": yesterday, "ccy": "SAR", **ycomps}], path=p
+            )
+            prev = record_bs_snapshot_if_needed(_COMPS, "SAR", path=p)
+            ok = prev is not None and _near(float(prev.get("net", 0)), 3_250_000.0)
+            return (
+                f"prev.net=3250000.0",
+                f"prev.net={prev.get('net') if prev else 'None'}",
+                ok,
+            )
+    results.append(_run("BSS07", "BS snapshot — prior-day entry returned correctly",
+                        CAT, MOD, "P1", False, bss07))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -7937,6 +8070,7 @@ def run_all_tests() -> TestReport:
         + _cat_liabilities()
         + _cat_perf() + _cat_inc() + _cat_zak() + _cat_tax() + _cat_recon()
         + _cat_acct_inline()
+        + _cat_bs_snapshot()
     )
 
     punch_list: list[PunchListItem] = []

@@ -9941,6 +9941,93 @@ if True:
 
         _net_col = "#22c55e" if _bs_net >= 0 else "#ef4444"
 
+        # ── Daily Balance Sheet snapshots + day-over-day deltas ───────────
+        try:
+            from portfolio.bs_snapshot import record_bs_snapshot_if_needed as _bs_snap_rec
+            _bs_prev = _bs_snap_rec(
+                {"port": _bs_port, "alts": _bs_alts, "fixed": _bs_fixed,
+                 "assets": _bs_total_assets, "debt": _bs_debt, "net": _bs_net},
+                _bs_ccy,
+            )
+        except Exception:
+            _bs_prev = None
+
+        def _bs_comp_delta(key: str, current: float):
+            if _bs_prev is None:
+                return None, None
+            pv = _bs_prev.get(key)
+            if pv is None:
+                return None, None
+            pv = float(pv)
+            if pv == 0.0:
+                return None, None
+            d = current - pv
+            p = d / abs(pv) * 100.0
+            return round(d, 2), round(p, 2)
+
+        _bs_d_port_abs,   _bs_d_port_pct   = _bs_comp_delta("port",   _bs_port)
+        _bs_d_alts_abs,   _bs_d_alts_pct   = _bs_comp_delta("alts",   _bs_alts)
+        _bs_d_fixed_abs,  _bs_d_fixed_pct  = _bs_comp_delta("fixed",  _bs_fixed)
+        _bs_d_assets_abs, _bs_d_assets_pct = _bs_comp_delta("assets", _bs_total_assets)
+        _bs_d_debt_abs,   _bs_d_debt_pct   = _bs_comp_delta("debt",   _bs_debt)
+        _bs_d_net_abs,    _bs_d_net_pct    = _bs_comp_delta("net",    _bs_net)
+
+        # ── Enrich portfolio delta with live session-cache prices ─────────
+        _bs_d_port_src = "vs yday" if _bs_prev else ""
+        try:
+            from market_prices import get_all_from_session as _bs_get_sess
+            _bs_sess = _bs_get_sess()
+            if _bs_sess:
+                _bs_live_acc = 0.0
+                _bs_live_cnt = 0
+                for _bsh in _shared_bundle["holdings"].values():
+                    if _bsh.quantity <= 1e-9:
+                        continue
+                    _bstk = _normalize_ticker(_bsh.ticker)
+                    _bsmd = _bs_sess.get(_bstk) or _bs_sess.get(_bsh.ticker)
+                    if _bsmd and getattr(_bsmd, "daily_change_pct", None) is not None:
+                        _bsccy = getattr(_bsh, "currency", _bs_ccy)
+                        _bsfxr = _bs_rates.get(_bsccy)
+                        _bsrt  = _bsfxr.rate if _bsfxr else 1.0
+                        _bs_live_acc += (_bsh.quantity * _bsh.current_price
+                                         * (_bsmd.daily_change_pct / 100.0) * _bsrt)
+                        _bs_live_cnt += 1
+                if _bs_live_cnt > 0 and _bs_port > 0:
+                    _bs_d_port_abs = round(_bs_live_acc, 2)
+                    _bs_d_port_pct = round(_bs_live_acc / _bs_port * 100.0, 2)
+                    _bs_d_port_src = ""          # live feed — no qualifier needed
+        except Exception:
+            pass
+
+        def _bs_delta_html(
+            d_abs, d_pct, label: str = "", invert_color: bool = False,
+        ) -> str:
+            """Compact day-change sub-line rendered below a Balance Sheet KPI value."""
+            if d_abs is None or d_pct is None:
+                return ('<div style="font-size:0.7rem;color:#94a3b8;'
+                        'margin-top:2px">&#8212;</div>')
+            col_pos = "#22c55e" if not invert_color else "#ef4444"
+            col_neg = "#ef4444" if not invert_color else "#22c55e"
+            col     = col_pos if d_abs >= 0 else col_neg
+            arrow   = "&#9650;" if d_abs >= 0 else "&#9660;"   # ▲ / ▼
+            sign    = "+" if d_abs >= 0 else "\u2212"
+            pct_s   = f"{sign}{abs(d_pct):.1f}%"
+            abs_s   = sign + _bs_fmt(abs(d_abs))
+            lbl_s   = (f'&nbsp;<span style="opacity:.5;font-size:0.65rem">'
+                       f'{label}</span>' if label else "")
+            return (f'<div style="font-size:0.72rem;color:{col};margin-top:3px;'
+                    f'white-space:nowrap">{arrow}&thinsp;{pct_s}&nbsp;({abs_s})'
+                    f'{lbl_s}</div>')
+
+        _yd = "vs yday" if _bs_prev else ""
+        _bs_dh_port   = _bs_delta_html(_bs_d_port_abs,   _bs_d_port_pct,   _bs_d_port_src)
+        _bs_dh_alts   = _bs_delta_html(_bs_d_alts_abs,   _bs_d_alts_pct,   _yd)
+        _bs_dh_fixed  = _bs_delta_html(_bs_d_fixed_abs,  _bs_d_fixed_pct,  _yd)
+        _bs_dh_assets = _bs_delta_html(_bs_d_assets_abs, _bs_d_assets_pct, _yd)
+        _bs_dh_debt   = _bs_delta_html(_bs_d_debt_abs,   _bs_d_debt_pct,   _yd,
+                                       invert_color=True)
+        _bs_dh_net    = _bs_delta_html(_bs_d_net_abs,    _bs_d_net_pct,    _yd)
+
         # ── Balance Sheet banner ───────────────────────────────────────────
         st.markdown(
             f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
@@ -9952,44 +10039,50 @@ if True:
             f'Balance Sheet · {_bs_ccy}</div>'
 
             # Row 1 — Assets
-            f'<div style="display:flex;flex-wrap:wrap;gap:0.4rem 2rem;align-items:flex-end;'
+            f'<div style="display:flex;flex-wrap:wrap;gap:0.4rem 2rem;align-items:flex-start;'
             f'padding-bottom:10px;border-bottom:1px solid #e2e8f0;margin-bottom:10px;">'
 
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">📈 Investment Portfolio</div>'
+            f'    <div class="acct-kpi-lbl">&#128200; Investment Portfolio</div>'
             f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_port)}</div>'
+            f'    {_bs_dh_port}'
             f'  </div>'
-            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">+</div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">🏦 Alt Investments</div>'
+            f'    <div class="acct-kpi-lbl">&#127974; Alt Investments</div>'
             f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_alts)}</div>'
+            f'    {_bs_dh_alts}'
             f'  </div>'
-            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">+</div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">🏛️ Fixed Assets (Equity)</div>'
+            f'    <div class="acct-kpi-lbl">&#127963; Fixed Assets (Equity)</div>'
             f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_fixed)}</div>'
+            f'    {_bs_dh_fixed}'
             f'  </div>'
-            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">=</div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">=</div>'
             f'  <div>'
             f'    <div class="acct-kpi-lbl" style="color:#0ea5e9">Total Assets</div>'
             f'    <div class="acct-kpi-val" style="color:#0ea5e9;font-size:1.5rem">'
             f'      {_bs_fmt(_bs_total_assets)}'
             f'    </div>'
+            f'    {_bs_dh_assets}'
             f'  </div>'
             f'</div>'
 
             # Row 2 — Liabilities + Net Worth
-            f'<div style="display:flex;flex-wrap:wrap;gap:0.4rem 2rem;align-items:flex-end;">'
+            f'<div style="display:flex;flex-wrap:wrap;gap:0.4rem 2rem;align-items:flex-start;">'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl">📋 Total Liabilities</div>'
+            f'    <div class="acct-kpi-lbl">&#128203; Total Liabilities</div>'
             f'    <div class="acct-kpi-val" style="color:#ef4444">({_bs_fmt(_bs_debt)})</div>'
+            f'    {_bs_dh_debt}'
             f'  </div>'
-            f'  <div style="color:#94a3b8;font-size:1rem;padding-bottom:4px">=</div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">=</div>'
             f'  <div>'
-            f'    <div class="acct-kpi-lbl" style="color:{_net_col}">💎 Net Worth</div>'
+            f'    <div class="acct-kpi-lbl" style="color:{_net_col}">&#128142; Net Worth</div>'
             f'    <div class="acct-kpi-val" style="color:{_net_col};font-size:1.65rem;font-weight:700">'
             f'      {_bs_fmt(_bs_net)}'
             f'    </div>'
+            f'    {_bs_dh_net}'
             f'  </div>'
             f'</div>'
 
