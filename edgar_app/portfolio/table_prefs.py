@@ -34,6 +34,7 @@ def holdings_col_widths(density: str) -> dict:
             "Qty": "small",
             "Wt %": "small",
             "P&L %": "small",
+            "Day %": "small",
             "CCY": "small",
             "Src": "small",
         }

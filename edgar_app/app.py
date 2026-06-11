@@ -3011,6 +3011,11 @@ def render_holdings_tab(bundle: dict) -> None:
             _acct_name = _acct_obj.account_name if _acct_obj else ("Unassigned" if not _acct_id else "Unknown")
 
             _asset_id_order.append(asset_id)
+            _day_pct = (
+                round(md.daily_change_pct, 2)
+                if (md and md.daily_change_pct is not None)
+                else None
+            )
             rows.append({
                 " ":         status,
                 "Company":   h.company_name or h.ticker,
@@ -3020,6 +3025,7 @@ def render_holdings_tab(bundle: dict) -> None:
                 "Price":     round(h.current_price, 4),
                 _mv_col:     mv_base,
                 "P&L %":     round(pnl_pct, 2),
+                "Day %":     _day_pct,
                 "Wt %":      round(_wt_map.get(asset_id, 0.0), 1),
                 "CCY":       ccy,
                 "Src":       _src_label,
@@ -3070,9 +3076,15 @@ def render_holdings_tab(bundle: dict) -> None:
                     _cc1.metric(_mv_col, f"{_r[_mv_col]:,.2f}")
                     _cc2.metric("P&L %", f"{_pnl_sym}{_c_pnl:.2f}%")
                     _cc3.metric("Wt %", f"{_r['Wt %']:.1f}%")
+                    _card_day = _r.get("Day %")
+                    _card_day_str = (
+                        f"Day {'+' if _card_day >= 0 else ''}{_card_day:.2f}%  ·  "
+                        if _card_day is not None else ""
+                    )
                     st.caption(
                         f"Qty {_r['Qty']:,.4f} @ {_r['Avg Cost']:,.4f}  ·  "
                         f"Price {_r['Price']:,.4f} {_r['CCY']}  ·  "
+                        f"{_card_day_str}"
                         f"Src {_r['Src']}  ·  {_r['Account']}"
                     )
             st.caption(
@@ -3118,8 +3130,9 @@ def render_holdings_tab(bundle: dict) -> None:
                     "Avg Cost": st.column_config.NumberColumn("Avg Cost", format="%,.4f"),
                     "Price":    st.column_config.NumberColumn("Price",  format="%,.4f"),
                     _mv_col:    st.column_config.NumberColumn(_mv_col,  format="%,.2f"),
-                    "P&L %":    st.column_config.NumberColumn("P&L %", format="%+.2f%%", width=_hw.get("P&L %")),
-                    "Wt %":     st.column_config.NumberColumn("Wt %",  format="%.1f%%",  width=_hw.get("Wt %")),
+                    "P&L %":    st.column_config.NumberColumn("P&L %",  format="%+.2f%%", width=_hw.get("P&L %")),
+                    "Day %":    st.column_config.NumberColumn("Day %",  format="%+.2f%%", width=_hw.get("Day %")),
+                    "Wt %":     st.column_config.NumberColumn("Wt %",   format="%.1f%%",  width=_hw.get("Wt %")),
                     "CCY":      st.column_config.TextColumn("CCY",     width=_hw.get("CCY")),
                     "Src":      st.column_config.TextColumn("Src",     width=_hw.get("Src")),
                     "Account":  st.column_config.TextColumn("Account", width=_hw.get("Account")),
