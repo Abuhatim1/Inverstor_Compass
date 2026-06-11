@@ -2525,8 +2525,34 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _fas_day_pct: float | None = None
     _fas_day_approx = False  # True when using per-ticker estimate
 
+    # ── Helper: weighted day-Δ from session price cache ──────────────────────
+    def _day_from_session(df) -> tuple:
+        """Return (day_abs, day_pct) from session cache for the given rows df.
+        Returns (None, None) when no tickers have daily_change_pct available."""
+        from market_prices import get_all_from_session as _gass
+        _sess = _gass()
+        if not _sess:
+            return None, None
+        _dsum, _cmv = 0.0, 0.0
+        for _, _row in df.iterrows():
+            _tk = str(_row.get("Ticker", "")).strip().upper()
+            if not _tk:
+                continue
+            _md = _sess.get(_tk)
+            if _md and _md.daily_change_pct is not None:
+                _pct = _md.daily_change_pct
+                _mv_h = float(_row["_mv"])
+                _dsum += _mv_h * _pct / (100.0 + _pct)
+                _cmv  += _mv_h
+        if _cmv <= 0:
+            return None, None
+        _d_abs = _dsum
+        _prev = _cmv - _dsum
+        _d_pct = _dsum / _prev * 100 if _prev > 0 else None
+        return _d_abs, _d_pct
+
     if _no_filters:
-        # Use BS snapshot for exact day-over-day comparison
+        # Priority 1 — BS snapshot vs yesterday (exact, consistent with BS tab)
         from portfolio.bs_snapshot import load_bs_snapshots
         from datetime import date as _dt_date
         _bs_snaps = load_bs_snapshots()
@@ -2539,31 +2565,18 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             _prev_snap = max(_prev_snaps, key=lambda s: s.get("date", ""))
             _prev_port = _prev_snap.get("port")
             if _prev_port and float(_prev_port) > 0:
-                _prev_port = float(_prev_port)
-                _fas_day_abs = _fas_mv - _prev_port
-                _fas_day_pct = _fas_day_abs / _prev_port * 100
+                _fas_day_abs = _fas_mv - float(_prev_port)
+                _fas_day_pct = _fas_day_abs / float(_prev_port) * 100
+
+        # Priority 2 — session cache (works immediately after 🔄, same as BS tab)
+        if _fas_day_pct is None:
+            _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
+            if _fas_day_pct is not None:
+                _fas_day_approx = True
     else:
-        # Filters active — derive from in-memory price cache per holding
-        from market_prices import _cache as _mp_cache, _cache_lock as _mp_lock
-        _day_sum = 0.0
-        _cov_mv  = 0.0
-        for _, _row in _filt.iterrows():
-            _tk = str(_row.get("Ticker", "")).strip().upper()
-            if not _tk:
-                continue
-            with _mp_lock:
-                _cached = _mp_cache.get(_tk)
-            _md = _cached[0] if _cached else None
-            if _md and _md.daily_change_pct is not None:
-                _pct = _md.daily_change_pct
-                _mv_h = float(_row["_mv"])
-                _day_sum += _mv_h * _pct / (100.0 + _pct)
-                _cov_mv  += _mv_h
-        if _cov_mv > 0:
-            _fas_day_abs = _day_sum
-            _prev_cov = _cov_mv - _day_sum
-            if _prev_cov > 0:
-                _fas_day_pct = _day_sum / _prev_cov * 100
+        # Filters active — session cache only (no full-portfolio snapshot applies)
+        _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
+        if _fas_day_pct is not None:
             _fas_day_approx = True
 
     def _fmt_compact(v: float) -> str:
