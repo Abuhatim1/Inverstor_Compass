@@ -2510,31 +2510,62 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
     _pnl_sign     = "+" if _fas_pnl >= 0 else ""
 
-    # ── Daily change — derived from in-memory price cache (no network call) ───
-    # For each filtered holding: day_Δ_base ≈ mv × (pct / (100 + pct))
-    # Works only for tickers whose daily_change_pct was fetched this session.
-    from market_prices import _cache as _mp_cache, _cache_lock as _mp_lock
-    _fas_day_abs  = 0.0
-    _fas_day_covered_mv = 0.0   # mv of holdings we have a day-change for
-    for _, _row in _filt.iterrows():
-        _tk = str(_row.get("Ticker", "")).strip().upper()
-        if not _tk:
-            continue
-        with _mp_lock:
-            _cached = _mp_cache.get(_tk)
-        _md = _cached[0] if _cached else None
-        if _md and _md.daily_change_pct is not None:
-            _pct = _md.daily_change_pct
-            _mv_h = float(_row["_mv"])
-            _fas_day_abs += _mv_h * _pct / (100.0 + _pct)
-            _fas_day_covered_mv += _mv_h
+    # ── Daily change ──────────────────────────────────────────────────────────
+    # Strategy:
+    #   · No active filters (All) → BS snapshot port value (consistent with
+    #     Balance Sheet tab — same single source of truth).
+    #   · Any filter active      → per-ticker yfinance cache (approximate, ~).
+    _no_filters = (
+        not _cur_mkt                                            # market = All
+        and set(_sel_sectors)   == set(_all_sectors)
+        and set(_sel_ccys_u)    == set(_all_ccys_u)
+        and set(_sel_companies) == set(_all_companies)
+        and set(_sel_atypes)    == set(_all_atypes)
+    )
+    _fas_day_abs: float | None = None
     _fas_day_pct: float | None = None
-    if _fas_day_covered_mv > 0:
-        _prev_mv = _fas_day_covered_mv - (_fas_day_abs * _fas_day_covered_mv / _fas_mv if _fas_mv else 0)
-        # Simpler: use covered portion only
-        _prev_mv = _fas_day_covered_mv / (1 + _fas_day_abs / _fas_day_covered_mv) if _fas_day_covered_mv else None
-        if _prev_mv and _prev_mv > 0:
-            _fas_day_pct = _fas_day_abs / _prev_mv * 100
+    _fas_day_approx = False  # True when using per-ticker estimate
+
+    if _no_filters:
+        # Use BS snapshot for exact day-over-day comparison
+        from portfolio.bs_snapshot import load_bs_snapshots
+        from datetime import date as _dt_date
+        _bs_snaps = load_bs_snapshots()
+        _today_str = _dt_date.today().isoformat()
+        _prev_snaps = [
+            s for s in _bs_snaps
+            if s.get("ccy") == base_ccy and s.get("date", "") < _today_str
+        ]
+        if _prev_snaps:
+            _prev_snap = max(_prev_snaps, key=lambda s: s.get("date", ""))
+            _prev_port = _prev_snap.get("port")
+            if _prev_port and float(_prev_port) > 0:
+                _prev_port = float(_prev_port)
+                _fas_day_abs = _fas_mv - _prev_port
+                _fas_day_pct = _fas_day_abs / _prev_port * 100
+    else:
+        # Filters active — derive from in-memory price cache per holding
+        from market_prices import _cache as _mp_cache, _cache_lock as _mp_lock
+        _day_sum = 0.0
+        _cov_mv  = 0.0
+        for _, _row in _filt.iterrows():
+            _tk = str(_row.get("Ticker", "")).strip().upper()
+            if not _tk:
+                continue
+            with _mp_lock:
+                _cached = _mp_cache.get(_tk)
+            _md = _cached[0] if _cached else None
+            if _md and _md.daily_change_pct is not None:
+                _pct = _md.daily_change_pct
+                _mv_h = float(_row["_mv"])
+                _day_sum += _mv_h * _pct / (100.0 + _pct)
+                _cov_mv  += _mv_h
+        if _cov_mv > 0:
+            _fas_day_abs = _day_sum
+            _prev_cov = _cov_mv - _day_sum
+            if _prev_cov > 0:
+                _fas_day_pct = _day_sum / _prev_cov * 100
+            _fas_day_approx = True
 
     def _fmt_compact(v: float) -> str:
         """Round to 2 dp for M, nearest K for large numbers; keep sign."""
@@ -7604,6 +7635,30 @@ def render_global_header() -> str:
 
     _has_any = bool(_gh_hld) or bool(_gh_igi) or bool(_gh_cf) or bool(_gh_fa) or bool(_gh_libs) or _gh_val.cash_value_base > 0
 
+    # ── Stale-data flags — computed before KPI HTML so badges render inline ───
+    _fx_fallback: list[str] = []
+    _prices_stale = False
+    if _has_any:
+        _fx_fallback = sorted(
+            _c for _c, _r in _gh_val.fx_rates_used.items()
+            if _c != _base_ccy and getattr(_r, "source", "") == "default"
+        )
+        _prices_stale = not (_gh_ref and _gh_ref != "—")
+
+    # ── Inline badge helpers ───────────────────────────────────────────────────
+    _FX_BADGE = (
+        '<span title="FX rate not refreshed — using static/peg values. '
+        'Tap 💱 to update." '
+        'style="font-size:0.75em;cursor:default;margin-left:3px;">⚠️</span>'
+        if _fx_fallback else ""
+    )
+    _PRICE_BADGE = (
+        '<span title="Prices not refreshed this session — showing last saved values. '
+        'Tap 🔄 to update." '
+        'style="font-size:0.75em;cursor:default;margin-left:3px;">⚠️</span>'
+        if _prices_stale else ""
+    )
+
     # CENTER — horizontal KPI flex row (all four metrics in one HTML block)
     with _cM:
         if _has_any:
@@ -7636,25 +7691,25 @@ def render_global_header() -> str:
             )
             st.markdown(
                 f'<div class="gh-kpi-row">'
-                # Net Worth — largest, all-inclusive (net of liabilities)
+                # Net Worth — ⚠️ when FX is stale
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Net Worth ({_base_ccy})</div>'
-                f'    <div class="gh-val-big">{_gh_fmt(_gh_nw)}</div>'
+                f'    <div class="gh-val-big">{_gh_fmt(_gh_nw)}{_FX_BADGE}</div>'
                 f'    {_gh_liab_html}'
                 f'  </div>'
-                # This Month — trend vs month-start snapshot
+                # This Month
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">This Month</div>'
                 f'    <div class="gh-val-med">{_trend_html}</div>'
                 f'  </div>'
-                # Invested — holdings MV only (clearly scoped label)
+                # Invested — ⚠️ when prices are stale
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Invested ({_base_ccy})</div>'
                 f'    <div class="gh-val-sm" style="color:{_gh_inv_pc}">'
-                f'      {_gh_inv_ps}{_gh_fmt(_gh_val.holdings_value_base)} {_pnl_pct_html}'
+                f'      {_gh_inv_ps}{_gh_fmt(_gh_val.holdings_value_base)}{_PRICE_BADGE} {_pnl_pct_html}'
                 f'    </div>'
                 f'  </div>'
-                # Last refresh — small / muted
+                # Last refresh
                 f'  <div class="gh-kpi">'
                 f'    <div class="gh-lbl">Refresh</div>'
                 f'    <div class="gh-val-xs">{_gh_ref}</div>'
@@ -7673,26 +7728,6 @@ def render_global_header() -> str:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-
-    # ── Status caption (FX source + price freshness) ──────────────────────────
-    if _has_any:
-        _fx_fallback = sorted(
-            _c for _c, _r in _gh_val.fx_rates_used.items()
-            if _c != _base_ccy and getattr(_r, "source", "") == "default"
-        )
-        _fresh_notes: list[str] = []
-        if _fx_fallback:
-            _fresh_notes.append(
-                "⚠️ FX fallback for " + ", ".join(_fx_fallback)
-                + " (no live rate — static/peg). Totals approximate; use 💱 in the header to refresh."
-            )
-        if _gh_ref and _gh_ref != "—":
-            _fresh_notes.append(f"🕒 Prices as of {_gh_ref}")
-        else:
-            _fresh_notes.append(
-                "🕒 Prices not refreshed this session — showing last saved values."
-            )
-        st.caption("&nbsp;&nbsp;·&nbsp;&nbsp;".join(_fresh_notes), unsafe_allow_html=True)
 
     # ── Handle actions from the ⋮ popover ─────────────────────────────────────
     # FX refresh
