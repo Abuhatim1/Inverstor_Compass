@@ -562,6 +562,25 @@ with st.sidebar:
             ),
         )
         st.divider()
+        # ── Auto-refresh ──────────────────────────────────────────────────
+        st.caption("⏱ **Auto-refresh Prices**")
+        mp_auto_on = st.toggle(
+            "Auto-refresh",
+            value=False,
+            key="mp_auto_on",
+            help="Automatically re-fetch live prices at the chosen interval.",
+        )
+        mp_interval = st.selectbox(
+            "Frequency",
+            ["1 minute", "5 minutes", "15 minutes"],
+            index=1,
+            key="mp_interval",
+            disabled=not mp_auto_on,
+        )
+        _sb_last = st.session_state.get("mp_last_refresh")
+        if _sb_last:
+            st.caption(f"Last refresh: **{_sb_last}**")
+        st.divider()
         demo_mode = st.toggle(
             "Demo Analysis Mode",
             value=not _ai_ready,
@@ -7468,53 +7487,31 @@ def render_global_header() -> str:
     with _cL:
         st.markdown(_BRAND, unsafe_allow_html=True)
 
-    # RIGHT — ⋮ popover: currency, FX refresh, price refresh, auto-refresh
+    # RIGHT — compact inline controls: currency selector · FX refresh · price refresh
     with _cR:
-        with st.popover("⋮", use_container_width=True):
-            # ── Currency ──────────────────────────────────────────────
+        _hc1, _hc2, _hc3 = st.columns([3, 1, 1])
+        with _hc1:
             _base_ccy = st.selectbox(
-                "Base currency",
+                "Currency",
                 options=["SAR", "USD", "EUR", "GBP"],
                 key="global_base_ccy",
-                help="All portfolio totals shown in this currency.",
+                label_visibility="collapsed",
+                help="Base currency — all portfolio totals shown in this currency.",
             )
+        with _hc2:
             _do_fx = st.button(
-                "💱 Refresh FX rates",
+                "💱",
                 key="global_refresh_fx_btn",
                 use_container_width=True,
                 help="Refresh FX rates from Yahoo Finance.",
             )
-            st.divider()
-            # ── Prices ────────────────────────────────────────────────
+        with _hc3:
             _do_refresh_prices = st.button(
-                "🔄 Refresh Prices",
+                "🔄",
                 key="global_refresh_prices_btn",
                 use_container_width=True,
-                help="Fetch live prices for all holdings (SAHMK → Yahoo Finance → cached).",
+                help="Refresh live prices for all holdings.",
             )
-            st.divider()
-            # ── Auto-refresh ──────────────────────────────────────────
-            from market_prices import market_session_label as _msl_ar, is_us_market_open as _mko_ar
-            _si_ar, _sl_ar = _msl_ar()
-            st.caption(f"{_si_ar} {_sl_ar}")
-            mp_auto_on = st.toggle(
-                "Auto-refresh",
-                value=False,
-                key="mp_auto_on",
-                help="Automatically re-fetch prices at the chosen interval.",
-            )
-            mp_interval = st.selectbox(
-                "Interval",
-                ["1 minute", "5 minutes", "15 minutes"],
-                index=1,
-                key="mp_interval",
-                disabled=not mp_auto_on,
-            )
-            _last_ref_ar = st.session_state.get("mp_last_refresh")
-            if _last_ref_ar:
-                st.caption(f"Last refresh: **{_last_ref_ar}**")
-            if mp_auto_on and not _mko_ar():
-                st.caption("🔴 Market closed — prices may be delayed")
 
     # ── Load all asset classes ─────────────────────────────────────────────
     _gh_hld  = load_holdings()
@@ -7646,8 +7643,7 @@ def render_global_header() -> str:
         if _fx_fallback:
             _fresh_notes.append(
                 "⚠️ FX fallback for " + ", ".join(_fx_fallback)
-                + " (no live rate — static/peg). Totals approximate; open "
-                "⋮ → 💱 Refresh FX rates."
+                + " (no live rate — static/peg). Totals approximate; use 💱 in the header to refresh."
             )
         if _gh_ref and _gh_ref != "—":
             _fresh_notes.append(f"🕒 Prices as of {_gh_ref}")
