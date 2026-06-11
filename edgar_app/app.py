@@ -2583,15 +2583,20 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         for _c, _r in val.fx_rates_used.items()
         if _c != base_ccy
     )
-    _ALLOC_PRICE_BADGE = (
-        '<span title="Prices not refreshed — tap 🔄 to update." '
-        'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
-        if _alloc_price_stale else ""
+    # One combined badge on Market Value — fires when EITHER prices OR FX is stale.
+    # P&L is purely derived from the same inputs so it gets no separate badge.
+    _alloc_stale = _alloc_price_stale or _alloc_fx_stale
+    _alloc_stale_tip = (
+        "Prices &amp; FX rates not refreshed — tap 🔄 and 💱 to update."
+        if _alloc_price_stale and _alloc_fx_stale else
+        "Prices not refreshed — tap 🔄 to update."
+        if _alloc_price_stale else
+        "FX rates not refreshed — tap 💱 to update."
     )
-    _ALLOC_FX_BADGE = (
-        '<span title="FX rates not refreshed — tap 💱 to update." '
-        'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
-        if _alloc_fx_stale else ""
+    _ALLOC_MV_BADGE = (
+        f'<span title="{_alloc_stale_tip}" '
+        f'style="font-size:0.7em;cursor:default;margin-left:3px;">⚠️</span>'
+        if _alloc_stale else ""
     )
 
     # ── Build day-change sub-line HTML ────────────────────────────────────────
@@ -2619,7 +2624,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 <div class="fas-kpi-grid">
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">Market Value ({base_ccy})</div>
-    <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}{_ALLOC_PRICE_BADGE}</div>
+    <div class="fas-kpi-val">{_fmt_compact(_fas_mv)}{_ALLOC_MV_BADGE}</div>
     {_day_html}
   </div>
   <div class="fas-kpi-card">
@@ -2628,7 +2633,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
   </div>
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">P&amp;L ({base_ccy})</div>
-    <div class="fas-kpi-val" style="color:{_kpi_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}{_ALLOC_FX_BADGE}</div>
+    <div class="fas-kpi-val" style="color:{_kpi_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}</div>
     <div><span class="fas-kpi-pct" style="background:{_pct_bg};color:{_pct_fg};">{_arrow} {_pnl_sign}{_fas_pnl_pct:.1f}%</span></div>
   </div>
   <div class="fas-kpi-card">
@@ -10148,13 +10153,13 @@ if True:
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
             f'    <div class="acct-kpi-lbl">&#127974; Alt Investments</div>'
-            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_alts)}{_BS_FX_BADGE}</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_alts)}</div>'
             f'    {_bs_dh_alts}'
             f'  </div>'
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
             f'    <div class="acct-kpi-lbl">&#127963; Fixed Assets (Equity)</div>'
-            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_fixed)}{_BS_FX_BADGE}</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_fixed)}</div>'
             f'    {_bs_dh_fixed}'
             f'  </div>'
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">=</div>'
