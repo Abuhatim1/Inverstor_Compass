@@ -7596,7 +7596,7 @@ def render_global_header() -> str:
     def _gh_fmt(v: float) -> str:
         av = abs(v)
         if av >= 1_000_000:
-            return f"{v / 1_000_000:.1f}M"
+            return f"{v / 1_000_000:.2f}M"
         if av >= 10_000:
             return f"{v / 1_000:.0f}K"
         return f"{v:,.2f}"
