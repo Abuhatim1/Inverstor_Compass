@@ -2511,12 +2511,12 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _pnl_sign     = "+" if _fas_pnl >= 0 else ""
 
     def _fmt_compact(v: float) -> str:
-        """Round to nearest K or M for compact display; keep sign."""
+        """Round to 2 dp for M, nearest K for large numbers; keep sign."""
         av = abs(v)
         if av >= 1_000_000:
-            return f"{v / 1_000_000:.1f}M"
+            return f"{v / 1_000_000:.2f}M"
         if av >= 10_000:
-            return f"{v / 1_000:.0f}K"
+            return f"{v / 1_000:.1f}K"
         return f"{v:,.2f}"
 
     # ── KPI grid — pure HTML flex, portrait-safe ─────────────────────────────
