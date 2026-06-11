@@ -9947,8 +9947,9 @@ if True:
         try:
             from portfolio.bs_snapshot import record_bs_snapshot_if_needed as _bs_snap_rec
             _bs_prev = _bs_snap_rec(
-                {"port": _bs_port, "alts": _bs_alts, "fixed": _bs_fixed,
-                 "assets": _bs_total_assets, "debt": _bs_debt, "net": _bs_net},
+                {"port": _bs_port, "cash": _bs_cash, "alts": _bs_alts,
+                 "fixed": _bs_fixed, "assets": _bs_total_assets,
+                 "debt": _bs_debt, "net": _bs_net},
                 _bs_ccy,
             )
         except Exception:
@@ -9968,6 +9969,7 @@ if True:
             return round(d, 2), round(p, 2)
 
         _bs_d_port_abs,   _bs_d_port_pct   = _bs_comp_delta("port",   _bs_port)
+        _bs_d_cash_abs,   _bs_d_cash_pct   = _bs_comp_delta("cash",   _bs_cash)
         _bs_d_alts_abs,   _bs_d_alts_pct   = _bs_comp_delta("alts",   _bs_alts)
         _bs_d_fixed_abs,  _bs_d_fixed_pct  = _bs_comp_delta("fixed",  _bs_fixed)
         _bs_d_assets_abs, _bs_d_assets_pct = _bs_comp_delta("assets", _bs_total_assets)
@@ -10023,6 +10025,7 @@ if True:
 
         _yd = "vs yday" if _bs_prev else ""
         _bs_dh_port   = _bs_delta_html(_bs_d_port_abs,   _bs_d_port_pct,   _bs_d_port_src)
+        _bs_dh_cash   = _bs_delta_html(_bs_d_cash_abs,   _bs_d_cash_pct,   _yd)
         _bs_dh_alts   = _bs_delta_html(_bs_d_alts_abs,   _bs_d_alts_pct,   _yd)
         _bs_dh_fixed  = _bs_delta_html(_bs_d_fixed_abs,  _bs_d_fixed_pct,  _yd)
         _bs_dh_assets = _bs_delta_html(_bs_d_assets_abs, _bs_d_assets_pct, _yd)
@@ -10048,6 +10051,12 @@ if True:
             f'    <div class="acct-kpi-lbl">&#128200; Investment Portfolio</div>'
             f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_port)}</div>'
             f'    {_bs_dh_port}'
+            f'  </div>'
+            f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
+            f'  <div>'
+            f'    <div class="acct-kpi-lbl">&#128181; Cash &amp; Banks</div>'
+            f'    <div class="acct-kpi-val" style="color:#0f172a">{_bs_fmt(_bs_cash)}</div>'
+            f'    {_bs_dh_cash}'
             f'  </div>'
             f'  <div style="color:#94a3b8;font-size:1rem;padding-top:16px">+</div>'
             f'  <div>'
