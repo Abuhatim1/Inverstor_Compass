@@ -9891,8 +9891,10 @@ if True:
 
         _bs_ccy = st.session_state.get("global_base_ccy", "SAR")
 
-        # Portfolio value (holdings + cash accounts) — already computed above
-        _bs_port = _shared_bundle["val"].total_portfolio_value_base
+        # Investment Portfolio = securities MV only (matches header "Invested" KPI)
+        # Cash is tracked separately and added into Total Assets below
+        _bs_port = _shared_bundle["val"].holdings_value_base
+        _bs_cash = _shared_bundle["val"].cash_value_base
 
         # Load remaining asset classes
         _bs_igi  = _bs_load_igi()
@@ -9928,7 +9930,7 @@ if True:
             a.equity * _bs_rate(a.currency) for a in _bs_fa.values()
         ), 2)
 
-        _bs_total_assets = _bs_port + _bs_alts + _bs_fixed
+        _bs_total_assets = _bs_port + _bs_cash + _bs_alts + _bs_fixed
         _bs_debt         = _bs_clib(_bs_libs, _bs_ccy, _bs_rates)
         _bs_net          = _bs_total_assets - _bs_debt
 
