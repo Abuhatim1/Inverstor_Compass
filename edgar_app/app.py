@@ -2249,9 +2249,9 @@ def _render_valuation_debug(val) -> None:
         # ── Totals reconciliation ───────────────────────────────────────────────
         st.markdown("**Totals reconciliation**")
         rc1, rc2, rc3, rc4 = st.columns(4)
-        rc1.metric(f"Holdings ({val.base_currency})", f"{val.holdings_value_base:,.2f}")
-        rc2.metric(f"Cash ({val.base_currency})",     f"{val.cash_value_base:,.2f}")
-        rc3.metric("Total Portfolio",                  f"{val.total_portfolio_value_base:,.2f}")
+        rc1.metric(f"Holdings ({val.base_currency})", _fmt_money(val.holdings_value_base, val.base_currency, 2))
+        rc2.metric(f"Cash ({val.base_currency})",     _fmt_money(val.cash_value_base, val.base_currency, 2))
+        rc3.metric("Total Portfolio",                  _fmt_money(val.total_portfolio_value_base, val.base_currency, 2))
         _wt_sum = round(sum(r.invested_weight_pct for r in val.per_holding), 1)
         rc4.metric("Weight Sum Check", f"{_wt_sum}% (should be ≈100%)")
 
@@ -7470,10 +7470,34 @@ def render_performance_tab() -> None:
     val   = calculate_portfolio_valuation(holdings, accounts, base_ccy, fx_rates=_fx)
     _fxu  = val.fx_rates_used
 
-    # ── T8: surface FX / valuation warnings at the top of the tab ───────────
+    # ── T8: FX source warnings + price freshness ─────────────────────────────
     if val.warnings:
         for _vw in val.warnings:
-            st.caption(f"⚠️ {_vw}")
+            st.warning(_vw, icon="⚠️")
+
+    # Price freshness indicator — reads the same epoch the 🔄 button writes
+    import time as _pf_t
+    _pf_ep = st.session_state.get("mp_last_refresh_epoch")
+    if _pf_ep:
+        _pf_age_s = _pf_t.time() - _pf_ep
+        if _pf_age_s < 60:
+            _pf_label = "just now"
+        elif _pf_age_s < 3600:
+            _pf_label = f"{int(_pf_age_s // 60)} min ago"
+        else:
+            _pf_label = "> 60 min ago"
+        if _pf_age_s > 3600:
+            st.caption(
+                f"⚠️ Prices last refreshed {_pf_label} — market values may be "
+                f"outdated. Tap 🔄 in the sidebar to update."
+            )
+        else:
+            st.caption(f"Prices refreshed {_pf_label}.")
+    else:
+        st.caption(
+            "⚠️ No price refresh on record — tap 🔄 in the sidebar to fetch "
+            "current prices. Values shown use last-saved prices."
+        )
 
     _cur_val   = val.total_portfolio_value_base
     _mv_base   = val.holdings_value_base
