@@ -4493,6 +4493,37 @@ def _cat_alloc() -> list[TestResult]:
             ok,
         )
 
+    def alloc14():
+        # Design decision: Allocation tab daily Δ uses session-cache ONLY (_day_from_session).
+        # Snapshot fallback is intentionally absent because _fas_mv is the FILTERED portfolio MV
+        # (scoped to selected account/asset-type/sector), while the BS snapshot 'port' key stores
+        # the TOTAL unfiltered portfolio MV (all accounts, all asset types incl. cash/alts/fixed).
+        # Comparing filtered vs unfiltered produces a phantom delta proportional to the excluded
+        # slice — e.g., 80% equities / 20% cash → filtered MV shows 20% phantom drop on startup.
+        # Correct UX: show "—" before the first refresh; live feed populates on 🔄.
+        ok = "_day_from_session(" in _section_fn
+        return (
+            "Allocation tab daily Δ uses session-cache helper _day_from_session (session-cache-only design)",
+            f"found={ok}",
+            ok,
+        )
+
+    def alloc15():
+        # Guard: no snapshot-port comparison inside the Allocation section.
+        # _bs_prev["port"] or snapshot["port"] must not appear in _render_allocation_section —
+        # that would reintroduce the filter-mismatch phantom (filtered MV vs unfiltered snapshot).
+        has_snapshot_port = (
+            '_bs_prev["port"]' in _section_fn or
+            'snapshot["port"]' in _section_fn or
+            "_fbs_prev_port" in _section_fn
+        )
+        ok = not has_snapshot_port
+        return (
+            "Allocation section has no unfiltered snapshot-port comparison (phantom guard)",
+            f"phantom_ref_absent={ok}",
+            ok,
+        )
+
     _tests = [
         ("ALLOC-01", "render_allocation_tab() function exists in app.py",                        "P0", True,  alloc01),
         ("ALLOC-02", "render_holdings_tab() does not call _render_allocation_section",            "P0", True,  alloc02),
@@ -4507,6 +4538,8 @@ def _cat_alloc() -> list[TestResult]:
         ("ALLOC-11", "All ALLOC-01–10 sub-checks consistent (meta)",                              "P0", True,  alloc11),
         ("ALLOC-12", "Both tab renderers accept bundle parameter",                                "P0", True,  alloc12),
         ("ALLOC-13", "No independent valuation call inside either render tab function",           "P0", True,  alloc13),
+        ("ALLOC-14", "Allocation daily Δ uses _day_from_session (session-cache-only design)",    "P0", True,  alloc14),
+        ("ALLOC-15", "Allocation section has no unfiltered snapshot-port comparison (phantom guard)", "P0", True, alloc15),
     ]
 
     for tid, name, sev, blocker, fn in _tests:

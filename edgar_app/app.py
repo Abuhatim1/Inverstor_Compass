@@ -10213,6 +10213,8 @@ if True:
 
         # ── Enrich portfolio delta with live session-cache prices ─────────
         _bs_d_port_src = "vs yday" if _bs_prev else ""
+        _bs_live_cnt = 0          # initialised here; set > 0 only when live enrichment fires
+        _bs_live_acc = 0.0
         try:
             from market_prices import get_all_from_session as _bs_get_sess
             _bs_sess = _bs_get_sess()
