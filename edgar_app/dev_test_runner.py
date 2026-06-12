@@ -4494,33 +4494,30 @@ def _cat_alloc() -> list[TestResult]:
         )
 
     def alloc14():
-        # Design decision: Allocation tab daily Δ uses session-cache ONLY (_day_from_session).
-        # Snapshot fallback is intentionally absent because _fas_mv is the FILTERED portfolio MV
-        # (scoped to selected account/asset-type/sector), while the BS snapshot 'port' key stores
-        # the TOTAL unfiltered portfolio MV (all accounts, all asset types incl. cash/alts/fixed).
-        # Comparing filtered vs unfiltered produces a phantom delta proportional to the excluded
-        # slice — e.g., 80% equities / 20% cash → filtered MV shows 20% phantom drop on startup.
-        # Correct UX: show "—" before the first refresh; live feed populates on 🔄.
-        ok = "_day_from_session(" in _section_fn
+        # Priority 1 (session cache) must be present.
+        # Priority 2 (snapshot fallback) is gated by _no_filters — only fires when the
+        # allocation view shows all holdings (unfiltered), matching the snapshot 'port' population.
+        has_p1 = "_day_from_session(" in _section_fn
+        has_p2 = "_no_filters" in _section_fn and "load_bs_snapshots" in _section_fn
+        ok = has_p1 and has_p2
         return (
-            "Allocation tab daily Δ uses session-cache helper _day_from_session (session-cache-only design)",
-            f"found={ok}",
+            "Allocation daily Δ has Priority 1 (_day_from_session) and Priority 2 (snapshot, _no_filters gated)",
+            f"p1={has_p1}, p2={has_p2}",
             ok,
         )
 
     def alloc15():
-        # Guard: no snapshot-port comparison inside the Allocation section.
-        # _bs_prev["port"] or snapshot["port"] must not appear in _render_allocation_section —
-        # that would reintroduce the filter-mismatch phantom (filtered MV vs unfiltered snapshot).
-        has_snapshot_port = (
-            '_bs_prev["port"]' in _section_fn or
-            'snapshot["port"]' in _section_fn or
-            "_fbs_prev_port" in _section_fn
+        # Priority 2 snapshot fallback must be guarded by _no_filters so it only fires
+        # when the unfiltered view is shown (snapshot 'port' == _fas_mv at that point).
+        # Direct comparison of snapshot 'port' against a filtered _fas_mv is a phantom bug.
+        # Verify: the snapshot branch is inside `if _fas_day_abs is None and _no_filters`.
+        ok = (
+            "_fas_day_abs is None and _no_filters" in _section_fn or
+            "is None and _no_filters" in _section_fn
         )
-        ok = not has_snapshot_port
         return (
-            "Allocation section has no unfiltered snapshot-port comparison (phantom guard)",
-            f"phantom_ref_absent={ok}",
+            "Allocation snapshot fallback gated by _no_filters (phantom guard for filtered views)",
+            f"guard_present={ok}",
             ok,
         )
 

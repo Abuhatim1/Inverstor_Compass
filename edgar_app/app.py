@@ -2638,15 +2638,47 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _d_pct = _dsum / _prev * 100 if _prev > 0 else None
         return _d_abs, _d_pct
 
-    # Portfolio daily Δ — session cache only (live, after 🔄).
-    # The BS snapshot stores the TOTAL unfiltered portfolio value, but _fas_mv is
-    # the FILTERED allocation MV (subset of accounts / asset types). Comparing them
-    # produces a phantom large delta proportional to the excluded portion.
-    # There is no safe per-filter snapshot baseline, so we only show a delta after
-    # the user taps 🔄 and the session cache is populated. Before refresh → "—".
+    # ── Portfolio daily Δ — Priority 1: session cache (live, after 🔄) ─────────
     _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
-    if _fas_day_pct is not None:
-        _fas_day_approx = True
+    if _fas_day_abs is not None:
+        _fas_day_approx = True  # per-ticker weighted estimate
+
+    # ── Priority 2: snapshot fallback at startup (unfiltered view only) ─────────
+    # The BS snapshot 'port' key = total holdings MV.  This equals _fas_mv exactly
+    # when _no_filters is True (no account / sector / asset-type / CCY filter active).
+    # Applying the snapshot to a FILTERED _fas_mv would compare different populations
+    # and produce a phantom delta proportional to the excluded slice — e.g. an equity-
+    # only view vs. the total-portfolio snapshot shows a phantom when prices differ.
+    # Guard A: any holding has missing_fx (rate defaulted to 1.0) → skip.
+    # Guard B: snapshot older than 4 days (covers Saudi Thu→Sun gap) → skip.
+    if _fas_day_abs is None and _no_filters:
+        try:
+            from portfolio.bs_snapshot import load_bs_snapshots as _alloc_load_snaps
+            from datetime import date as _alloc_dt, timedelta as _alloc_td
+            _alloc_today   = _alloc_dt.today().isoformat()
+            _alloc_cutoff  = (_alloc_dt.today() - _alloc_td(days=4)).isoformat()
+            _alloc_snaps   = _alloc_load_snaps()
+            _alloc_prev = [
+                s for s in _alloc_snaps
+                if s.get("ccy") == base_ccy
+                and _alloc_cutoff <= s.get("date", "") < _alloc_today
+            ]
+            if _alloc_prev:
+                _alloc_snap     = max(_alloc_prev, key=lambda s: s.get("date", ""))
+                _alloc_port_pv  = _alloc_snap.get("port")
+                _alloc_miss_fx  = any(
+                    getattr(r, "missing_fx", False) for r in val.per_holding
+                )
+                if _alloc_port_pv and not _alloc_miss_fx and _fas_mv > 0:
+                    _alloc_pv_f    = float(_alloc_port_pv)
+                    _fas_day_abs   = round(_fas_mv - _alloc_pv_f, 2)
+                    _fas_day_pct   = (
+                        round(_fas_day_abs / _alloc_pv_f * 100.0, 2)
+                        if _alloc_pv_f > 0 else None
+                    )
+                    _fas_day_approx = False  # snapshot-based: same engine as BS tab
+        except Exception:
+            pass
 
     # ── Stale-data badge for allocation KPIs (price-only; FX is user-controlled)
     import time as _alloc_t
