@@ -668,6 +668,32 @@ with st.sidebar:
                     st.error(_msg, icon="❌")
 
         st.divider()
+        st.caption("📡 **Price Data Provider**")
+        _sahmk_key_present = bool(__import__("os").environ.get("SAHMK_API_KEY", "").strip())
+        _sahmk_opts = ["SAHMK + Yahoo", "Yahoo only"]
+        _sahmk_default = 0 if _sahmk_key_present else 1
+        _sahmk_choice = st.radio(
+            "Provider",
+            _sahmk_opts,
+            index=_sahmk_default,
+            key="sahmk_provider_mode",
+            label_visibility="collapsed",
+            help=(
+                "**SAHMK + Yahoo** — Saudi stocks fetched from SAHMK (requires active subscription); "
+                "all others via Yahoo Finance.\n\n"
+                "**Yahoo only** — all tickers via Yahoo Finance. Use this if your SAHMK subscription "
+                "has expired. Saudi tickers need a .SR suffix (e.g. 2222.SR); bare 4-5 digit symbols "
+                "are auto-suffixed automatically."
+            ),
+        )
+        if not _sahmk_key_present and _sahmk_choice == "SAHMK + Yahoo":
+            st.caption("⚠️ SAHMK_API_KEY not set — using Yahoo only.")
+        elif _sahmk_key_present and _sahmk_choice == "SAHMK + Yahoo":
+            st.caption("✅ SAHMK active.")
+        else:
+            st.caption("ℹ️ Yahoo only — Discovery Console unavailable.")
+
+        st.divider()
         st.checkbox(
             "🔧 Developer Mode",
             key="dev_mode",
@@ -814,22 +840,55 @@ def _run_price_refresh(*, force: bool = True) -> int:
     """
     Refresh market prices for every known ticker using the multi-provider router.
 
-    Holdings with an exchange_symbol go through SAHMK first; all others fall
-    through to yfinance then cached/manual.  Watchlist-only tickers are still
-    fetched via yfinance and stored in the session cache for UI display.
+    Holdings with an exchange_symbol go through SAHMK first (unless the user has
+    selected "Yahoo only" in Settings); all others fall through to yfinance then
+    cached/manual.  Watchlist-only tickers are still fetched via yfinance and
+    stored in the session cache for UI display.
     Returns the count of tickers successfully updated.
     """
-    from market_prices import refresh_all_prices, save_to_session
-    from market_data_router import refresh_holdings_prices
+    from market_prices import refresh_all_prices, save_to_session, MarketData
+    from market_data_router import refresh_holdings_prices, PROVIDER_SAHMK
     from portfolio import load_holdings as _lh_inner
+    import datetime as _rpr_dt
     try:
+        # Read the provider toggle set by the user in sidebar Settings
+        _sahmk_on = st.session_state.get("sahmk_provider_mode", "SAHMK + Yahoo") != "Yahoo only"
+
         # ── Routed refresh for actual holdings ────────────────────────────────
         _holdings_inner = _lh_inner()
         ok_count = 0
+        _routed_all: dict = {}
         if _holdings_inner:
-            routed = refresh_holdings_prices(_holdings_inner, force=force)
-            ok_list, _ = _apply_routed_prices(routed, _holdings_inner)
+            _routed_all = refresh_holdings_prices(
+                _holdings_inner, force=force, sahmk_enabled=_sahmk_on
+            )
+            ok_list, _ = _apply_routed_prices(_routed_all, _holdings_inner)
             ok_count = len(ok_list)
+
+            # ── Bridge SAHMK change_pct into the yfinance session cache ──────
+            # The Holdings table Day % column reads from the session cache.
+            # SAHMK provides change_pct directly; bridge it so Saudi stocks show
+            # their daily Δ even when yfinance doesn't have previousClose data.
+            _sahmk_md: dict[str, MarketData] = {}
+            for _aid, _rp in _routed_all.items():
+                if (
+                    _rp.provider == PROVIDER_SAHMK
+                    and _rp.is_ok
+                    and _rp.change_pct is not None
+                ):
+                    _hld = _holdings_inner.get(_aid)
+                    if _hld and _hld.ticker:
+                        _norm = _normalize_ticker(_hld.ticker)
+                        _sahmk_md[_norm] = MarketData(
+                            ticker           = _norm,
+                            current_price    = _rp.price,
+                            price_source     = "SAHMK",
+                            price_timestamp  = _rp.updated_at or _rpr_dt.datetime.utcnow().isoformat(),
+                            daily_change_pct = _rp.change_pct,
+                            currency         = _rp.currency or "SAR",
+                        )
+            if _sahmk_md:
+                save_to_session(_sahmk_md)
 
         # ── yfinance session cache for watchlist / price-debug UI ─────────────
         raw_tickers = _collect_all_tickers()
@@ -2562,19 +2621,33 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         return _d_abs, _d_pct
 
     if _no_filters:
-        # Priority 1 — BS snapshot vs yesterday (exact, consistent with BS tab)
+        # Priority 1 — BS snapshot vs previous day (exact, consistent with BS tab)
+        # Guards:
+        #   A) Skip if any holding has missing_fx — the snapshot used a real FX rate
+        #      but today's fallback (1.0) makes _fas_mv lower → phantom large drop.
+        #   B) Skip if snapshot is older than 4 calendar days — covers the Saudi
+        #      Thu→Sun gap (3 days) plus one buffer day.  Older snapshots reflect
+        #      multi-day changes, not a single-day move.
         from portfolio.bs_snapshot import load_bs_snapshots
-        from datetime import date as _dt_date
+        from datetime import date as _dt_date, timedelta as _dt_td
         _bs_snaps = load_bs_snapshots()
-        _today_str = _dt_date.today().isoformat()
+        _today_str   = _dt_date.today().isoformat()
+        _cutoff_str  = (_dt_date.today() - _dt_td(days=4)).isoformat()
         _prev_snaps = [
             s for s in _bs_snaps
             if s.get("ccy") == base_ccy and s.get("date", "") < _today_str
         ]
         if _prev_snaps:
-            _prev_snap = max(_prev_snaps, key=lambda s: s.get("date", ""))
-            _prev_port = _prev_snap.get("port")
-            if _prev_port and float(_prev_port) > 0:
+            _prev_snap  = max(_prev_snaps, key=lambda s: s.get("date", ""))
+            _snap_date  = _prev_snap.get("date", "")
+            _prev_port  = _prev_snap.get("port")
+            _any_miss_fx = any(r.missing_fx for r in val.per_holding)
+            if (
+                _prev_port
+                and float(_prev_port) > 0
+                and not _any_miss_fx          # Guard A — FX integrity
+                and _snap_date >= _cutoff_str # Guard B — snapshot freshness
+            ):
                 _fas_day_abs = _fas_mv - float(_prev_port)
                 _fas_day_pct = _fas_day_abs / float(_prev_port) * 100
 
@@ -9748,6 +9821,15 @@ def render_sahmk_discovery_tab() -> None:
     st.header("🔍 SAHMK Data")
 
     from sahmk_client import is_configured as _sahmk_configured
+    _disc_yahoo_only = st.session_state.get("sahmk_provider_mode", "SAHMK + Yahoo") == "Yahoo only"
+    if _disc_yahoo_only:
+        st.info(
+            "**Price provider is set to Yahoo only.**  \n"
+            "Discovery Console requires SAHMK. Switch to **SAHMK + Yahoo** in ⚙️ Settings "
+            "(sidebar) to access this tab.",
+            icon="📡",
+        )
+        return
     if not _sahmk_configured():
         st.error("**SAHMK_API_KEY is not set.** Add it in Secrets to continue.", icon="🔑")
         return

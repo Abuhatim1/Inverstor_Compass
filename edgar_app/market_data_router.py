@@ -70,6 +70,7 @@ class RoutedPrice:
     source:     str            = ""      # display name
     updated_at: str            = ""      # ISO-8601
     is_delayed: bool           = True
+    change_pct: Optional[float] = None  # daily % change from provider (e.g. SAHMK)
     # --- diagnostics ---
     error:      Optional[str]  = None    # human-readable reason when price is None
 
@@ -121,7 +122,8 @@ def get_routed_price(
     last_known_price:  float = 0.0,
     last_known_source: str   = "manual",
     *,
-    force: bool = False,
+    force:         bool = False,
+    sahmk_enabled: bool = True,
 ) -> RoutedPrice:
     """
     Return the best available price for *ticker* using the priority chain.
@@ -133,13 +135,16 @@ def get_routed_price(
     last_known_price  : The holding's stored price (fallback)
     last_known_source : The holding's price_source string (to detect manual)
     force             : Bypass in-memory caches on all providers
+    sahmk_enabled     : When False, skip SAHMK entirely and go straight to yfinance.
+                        Also auto-appends .SR to bare 4-5 digit Saudi tickers so yfinance
+                        can resolve them (e.g. "2222" → "2222.SR").
     """
     now = _now_iso()
 
     # ── Step 1: SAHMK — local_market_symbol → GET /quote/{symbol}/ ───────────
     # Normalise: strip .SE/.SR/.SA suffixes; fall back to ticker for bare Saudi codes
     local_sym = _saudi_local_sym(exchange_symbol, ticker)
-    if local_sym:
+    if sahmk_enabled and local_sym:
         try:
             import sahmk_client
             if sahmk_client.is_configured():
@@ -155,12 +160,21 @@ def get_routed_price(
                             source     = _DISPLAY[PROVIDER_SAHMK],
                             updated_at = quote.get("timestamp") or now,
                             is_delayed = bool(quote.get("is_delayed", True)),
+                            change_pct = (
+                                float(quote["change_pct"])
+                                if isinstance(quote.get("change_pct"), (int, float))
+                                else None
+                            ),
                         )
         except Exception:
             pass
 
     # ── Step 2: yfinance — yahoo_symbol ───────────────────────────────────────
+    # When SAHMK is disabled, auto-suffix bare Saudi tickers (e.g. "2222" → "2222.SR")
+    # so yfinance can resolve them on the Saudi exchange.
     yahoo_sym = ticker.strip()
+    if not sahmk_enabled and _re.match(r'^\d{4,5}$', yahoo_sym):
+        yahoo_sym = yahoo_sym + ".SR"
     if yahoo_sym:
         try:
             from market_prices import get_market_data
@@ -218,25 +232,30 @@ def get_routed_price(
 def refresh_holdings_prices(
     holdings: "dict[str, Holding]",
     *,
-    force: bool = False,
+    force:         bool = False,
+    sahmk_enabled: bool = True,
 ) -> "dict[str, RoutedPrice]":
     """
     Route prices for every holding in *holdings*.
 
-    Returns dict[original_ticker → RoutedPrice].
+    Returns dict[asset_id → RoutedPrice].
     Never raises; failed holdings get RoutedPrice(price=None).
+
+    sahmk_enabled=False skips SAHMK entirely; bare Saudi tickers get .SR appended
+    automatically so yfinance can resolve them.
     """
     results: dict[str, RoutedPrice] = {}
     for asset_id, h in holdings.items():
         try:
             routed = get_routed_price(
-                ticker            = h.ticker,          # use h.ticker, not the dict key (asset_id)
+                ticker            = h.ticker,
                 exchange_symbol   = getattr(h, "exchange_symbol", "") or "",
                 last_known_price  = float(getattr(h, "current_price", 0.0) or 0.0),
                 last_known_source = getattr(h, "price_source", "manual") or "manual",
                 force             = force,
+                sahmk_enabled     = sahmk_enabled,
             )
         except Exception as exc:
             routed = RoutedPrice(price=None, provider=PROVIDER_MANUAL, error=str(exc))
-        results[asset_id] = routed            # key by asset_id (matches caller's dict key)
+        results[asset_id] = routed
     return results
