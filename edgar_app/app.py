@@ -499,6 +499,22 @@ def _fmt_pct(val: float | None, decimals: int = 1, suffix: str = "%") -> str:
     return f"{sign}{val:.{decimals}f}{suffix}"
 
 
+def _fmt_compact(v: float) -> str:
+    """Compact money label: 2dp millions, 1dp thousands, 2dp otherwise.
+
+    Examples:
+        _fmt_compact(1_234_567.8)  → "1.23M"
+        _fmt_compact(12_345.6)     → "12.3K"
+        _fmt_compact(999.99)       → "999.99"
+    """
+    av = abs(v)
+    if av >= 1_000_000:
+        return f"{v / 1_000_000:.2f}M"
+    if av >= 10_000:
+        return f"{v / 1_000:.1f}K"
+    return f"{v:,.2f}"
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
@@ -2631,15 +2647,6 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
     if _fas_day_pct is not None:
         _fas_day_approx = True
-
-    def _fmt_compact(v: float) -> str:
-        """Round to 2 dp for M, nearest K for large numbers; keep sign."""
-        av = abs(v)
-        if av >= 1_000_000:
-            return f"{v / 1_000_000:.2f}M"
-        if av >= 10_000:
-            return f"{v / 1_000:.1f}K"
-        return f"{v:,.2f}"
 
     # ── Stale-data badge for allocation KPIs (price-only; FX is user-controlled)
     import time as _alloc_t
