@@ -8215,29 +8215,29 @@ def _cat_consist() -> list[TestResult]:
         "helper: empty session → day_abs=None, day_pct=None, live_cnt=0",
         CAT, MOD, "P0", True, cs06))
 
-    # ── CS07: compute_effective_portfolio_mv cold-start == stored ────────────
+    # ── CS07: compute_effective_portfolio_mv cold-start: no session → eff == stored ──
     def cs07():
         from portfolio.display_metrics import compute_effective_portfolio_mv
         h = {"A": _holding("AAPL", qty=10.0, avg_cost=150.0, price=160.0, ccy="USD")}
         a = {"acc": _account("acc", cash=0.0, ccy="SAR")}
         fx = {"USD": _fx("USD", "SAR", 3.75)}
         v  = _val(h, a, "SAR", fx)
-        # No session → effective == stored == holdings_value_base; da/dp/cnt all empty
+        # No session → no overlay; effective falls back to stored engine values
         eff, stored, da, dp, cnt = compute_effective_portfolio_mv(v.per_holding, {})
         ok = (_near(eff, v.holdings_value_base, 0.01)
               and _near(stored, v.holdings_value_base, 0.01)
-              and eff == stored  # invariant: effective == stored always
+              and _near(eff, stored, 0.01)
               and da is None and cnt == 0)
         return (
-            f"effective==stored=={v.holdings_value_base:.2f}, da=None",
+            f"effective≈stored≈{v.holdings_value_base:.2f}, da=None",
             f"eff={eff:.2f}, stored={stored:.2f}, da={da}, cnt={cnt}",
             ok,
         )
     results.append(_run("CS07",
-        "compute_effective_portfolio_mv: cold-start → effective == stored == holdings_value_base",
+        "compute_effective_portfolio_mv: cold-start (no session) → effective ≈ stored ≈ holdings_value_base",
         CAT, MOD, "P0", True, cs07))
 
-    # ── CS08: pct/(100+pct) convention; build_effective_mv_map sum == effective_total ─
+    # ── CS08: live overlay: eff = mv×(1+pct/100); eff≠stored; map_total==eff ──────────
     def cs08():
         import types as _types
         from portfolio.display_metrics import (
@@ -8245,38 +8245,37 @@ def _cat_consist() -> list[TestResult]:
             build_effective_mv_map,
         )
         # SAR holding: stored MV = 5 × 110 = 550 SAR; session pct = +10%
-        # Convention: effective_total == stored_total == 550 (headline unchanged)
-        # day_abs = 550 × 10/110 = 50 (mv × pct/(100+pct))
-        # day_pct = 50 / (550−50) × 100 = 50/500 × 100 = 10.0%
+        # effective_mv = 550 × 1.10 = 605 (live-estimated KPI headline)
+        # day_abs = 605 − 550 = 55; day_pct = 55 / 550 × 100 = 10.0%
         h    = {"A": _holding("TST", qty=5.0, avg_cost=100.0, price=110.0, ccy="SAR")}
         a    = {"acc": _account("acc", cash=0.0, ccy="SAR")}
         v    = _val(h, a, "SAR", {})
         sess = {"TST": _types.SimpleNamespace(daily_change_pct=10.0)}
         eff, stored, da, dp, cnt = compute_effective_portfolio_mv(v.per_holding, sess)
-        exp_da = round(stored * 10.0 / (100.0 + 10.0), 2)   # pct/(100+pct) formula
-        exp_dp = 10.0
-        # effective_total == stored_total (headline headline is unchanged by overlay)
-        headlines_equal = _near(eff, stored, 0.01)
+        exp_eff = round(stored * 1.10, 2)   # 550 × 1.10 = 605
+        exp_da  = round(stored * 0.10, 2)   # 605 − 550 = 55
+        exp_dp  = 10.0                      # 55 / 550 × 100
+        live_inflated = eff > stored         # headline must exceed stored when pct > 0
         # Holdings row sum via build_effective_mv_map must equal effective_total
-        map_total = round(sum(build_effective_mv_map(v.per_holding).values()), 2)
-        map_eq_eff = _near(map_total, eff, 0.01)
+        map_total = round(sum(build_effective_mv_map(v.per_holding, sess).values()), 2)
         ok = (
-            headlines_equal
+            _near(eff, exp_eff, 0.05)
             and da is not None and _near(da, exp_da, 0.05)
             and dp is not None and _near(dp, exp_dp, 0.05)
-            and map_eq_eff
+            and _near(map_total, eff, 0.01)   # Holdings ≡ Allocation ≡ BS
+            and live_inflated
             and cnt == 1
         )
         return (
-            f"eff==stored={stored:.2f}, da≈{exp_da:.2f}, dp≈{exp_dp:.1f}%, map==eff",
+            f"eff≈{exp_eff:.2f}>stored={stored:.2f}, da≈{exp_da:.2f}, dp≈{exp_dp:.1f}%, map==eff",
             f"eff={eff:.2f}, stored={stored:.2f}, da={da}, dp={dp}, map={map_total:.2f}, cnt={cnt}",
             ok,
         )
     results.append(_run("CS08",
-        "compute_effective_portfolio_mv pct/(100+pct): headline==stored; map_total==effective; Holdings≡Alloc≡BS",
+        "compute_effective_portfolio_mv: live overlay eff=mv×(1+pct/100)>stored; map_total==eff; Holdings≡Alloc≡BS",
         CAT, MOD, "P0", True, cs08))
 
-    # ── CS09: BS identity: port+cash+alts+fixed==total_assets; total_assets-debt==net ─
+    # ── CS09: BS identity after live overlay: total_assets & net recomputed from eff ──
     def cs09():
         import types as _types
         from portfolio.display_metrics import (
@@ -8284,7 +8283,7 @@ def _cat_consist() -> list[TestResult]:
             build_effective_local_mv_map,
         )
         # Simulate BS render: stored port = 10×100 = 1000 SAR; session pct = +10%
-        # effective_total == stored_total = 1000 (headline unchanged by pct/(100+pct))
+        # eff = 1100 (live-estimated); BS identity: total_assets uses eff, not stored.
         h = {"A": _holding("TST2", qty=10.0, avg_cost=100.0, price=100.0, ccy="SAR")}
         a = {"acc": _account("acc", cash=0.0, ccy="SAR")}
         v = _val(h, a, "SAR", {})
@@ -8292,25 +8291,28 @@ def _cat_consist() -> list[TestResult]:
         eff, stored, da, dp, cnt = compute_effective_portfolio_mv(v.per_holding, sess)
         # BS components (synthetic)
         cash = 500.0; alts = 200.0; fixed = 100.0; debt = 300.0
-        # headline: eff == stored (pct/(100+pct) only moves day_abs, not the KPI value)
-        headlines_equal = _near(eff, stored, 0.01)
-        # BS identity: total_assets = port + cash + alts + fixed; net = total_assets - debt
+        # eff > stored (10% overlay applied to portfolio)
+        overlay_ok = _near(eff, stored * 1.10, 0.05)
+        # BS identity with effective port: total_assets and net recomputed from eff
         total_assets = eff + cash + alts + fixed
         net = total_assets - debt
         identity_ok = _near(total_assets, eff + cash + alts + fixed, 0.01)
         net_ok      = _near(net, total_assets - debt, 0.01)
-        # Native-mode map (build_effective_local_mv_map) must also sum to per-holding stored local MV
-        local_map = build_effective_local_mv_map(v.per_holding)
+        # Stale total would be stored + components (lower by day's gain)
+        stale_total = stored + cash + alts + fixed
+        refreshed_differs = not _near(total_assets, stale_total, 0.5)
+        # Native-mode map: build_effective_local_mv_map with session should also be inflated
+        local_map = build_effective_local_mv_map(v.per_holding, sess)
         local_total = sum(local_map.values())
-        local_ok = len(local_map) == 1 and local_total > 0
-        ok = headlines_equal and identity_ok and net_ok and local_ok
+        local_inflated = local_total > stored   # native MV also uses live overlay
+        ok = overlay_ok and identity_ok and net_ok and refreshed_differs and local_inflated
         return (
-            f"BS identity: total_assets={eff+cash+alts+fixed:.2f}, net={net:.2f}; eff==stored",
-            f"eff={eff:.2f}, stored={stored:.2f}, total_assets={total_assets:.2f}, net={net:.2f}, local_ok={local_ok}",
+            f"eff={eff:.2f}>stored={stored:.2f}; total_assets={total_assets:.2f}≠stale={stale_total:.2f}",
+            f"eff={eff:.2f}, ta={total_assets:.2f}, net={net:.2f}, local_total={local_total:.2f}",
             ok,
         )
     results.append(_run("CS09",
-        "BS identity: port+cash+alts+fixed==total_assets; total_assets-debt==net; native map non-empty",
+        "BS identity after live overlay: total_assets uses eff(>stored); total_assets-debt==net; native map inflated",
         CAT, MOD, "P0", True, cs09))
 
     return results
