@@ -2464,6 +2464,10 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             "_mv":       _r.base_market_value,
             "_cb":       _r.base_cost_basis,
             "_pnl":      round(_r.base_market_value - _r.base_cost_basis, 2),
+            "_pnl_pct":  (
+                round((_r.base_market_value - _r.base_cost_basis) / _r.base_cost_basis * 100, 1)
+                if _r.base_cost_basis and _r.base_cost_basis != 0 else None
+            ),
             "_day_pct":  _alloc_day,
             "_wt":       _r.invested_weight_pct,
         })
@@ -2871,7 +2875,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         st.plotly_chart(_fig, use_container_width=True)
 
     # ── Build filtered display table (weights re-calculated within filtered set)
-    _disp = _filt[["Ticker","Company","Market","Sector","CCY","_mv","_pnl","_day_pct"]].copy()
+    _disp = _filt[["Ticker","Company","Market","Sector","CCY","_mv","_pnl","_pnl_pct","_day_pct"]].copy()
     _filt_total = _disp["_mv"].sum()
     _disp["Weight %"] = (
         (_disp["_mv"] / _filt_total * 100).round(1) if _filt_total > 0 else 0.0
@@ -2879,7 +2883,12 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _disp = _disp.sort_values("Weight %", ascending=False).reset_index(drop=True)
     _mv_col_label  = f"MV ({base_ccy})"
     _pnl_col_label = f"P&L ({base_ccy})"
-    _disp.rename(columns={"_mv": _mv_col_label, "_pnl": _pnl_col_label, "_day_pct": "Day %"}, inplace=True)
+    _disp.rename(columns={
+        "_mv":      _mv_col_label,
+        "_pnl":     _pnl_col_label,
+        "_pnl_pct": "P&L %",
+        "_day_pct": "Day %",
+    }, inplace=True)
 
     # ── Export Allocation Report ───────────────────────────────────────────────
     _ts         = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -3041,6 +3050,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         column_config={
             _mv_col_label:  st.column_config.NumberColumn(_mv_col_label,  format="%,.0f"),
             _pnl_col_label: st.column_config.NumberColumn(_pnl_col_label, format="%+,.0f"),
+            "P&L %":        st.column_config.NumberColumn("P&L %",        format="%+.1f%%"),
             "Day %":        st.column_config.NumberColumn("Day %",        format="%+.2f%%"),
             "Weight %":     st.column_config.NumberColumn("Weight %",     format="%.1f%%", width=_aw.get("Weight %")),
             "Ticker":       st.column_config.TextColumn("Ticker",         width=_aw.get("Ticker")),
