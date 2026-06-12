@@ -170,10 +170,13 @@ def get_routed_price(
             pass
 
     # ── Step 2: yfinance — yahoo_symbol ───────────────────────────────────────
-    # When SAHMK is disabled, auto-suffix bare Saudi tickers (e.g. "2222" → "2222.SR")
-    # so yfinance can resolve them on the Saudi exchange.
+    # Always auto-suffix bare Saudi tickers (e.g. "2222" → "2222.SR") so yfinance
+    # can resolve them on the Saudi exchange.  This applies both in Yahoo-only mode
+    # AND as the fallback when SAHMK mode is active but SAHMK fails for a ticker
+    # (e.g. Aramco 2222 returning no data) — without the suffix yfinance returns
+    # a stale cached price and marks source = "cached".
     yahoo_sym = ticker.strip()
-    if not sahmk_enabled and _re.match(r'^\d{4,5}$', yahoo_sym):
+    if _re.match(r'^\d{4,5}$', yahoo_sym):
         yahoo_sym = yahoo_sym + ".SR"
     if yahoo_sym:
         try:

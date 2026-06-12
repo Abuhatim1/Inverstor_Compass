@@ -553,6 +553,31 @@ with st.sidebar:
 
     # ── 3. Settings (collapsed by default) ───────────────────────────────────
     with st.expander("⚙️ Settings", expanded=False):
+        # ── Price Data Provider — shown first so it's visible immediately ─────
+        st.caption("📡 **Price Data Provider**")
+        _sahmk_key_present = bool(__import__("os").environ.get("SAHMK_API_KEY", "").strip())
+        _sahmk_opts = ["SAHMK + Yahoo", "Yahoo only"]
+        _sahmk_choice = st.radio(
+            "Provider",
+            _sahmk_opts,
+            index=1,   # Yahoo only by default — SAHMK requires an active subscription
+            key="sahmk_provider_mode",
+            label_visibility="collapsed",
+            help=(
+                "**SAHMK + Yahoo** — Saudi stocks fetched from SAHMK (requires active subscription); "
+                "all others via Yahoo Finance.\n\n"
+                "**Yahoo only** — all tickers via Yahoo Finance. Bare 4-5 digit Saudi symbols "
+                "(e.g. 2222) are auto-suffixed to .SR automatically."
+            ),
+        )
+        if _sahmk_key_present and _sahmk_choice == "SAHMK + Yahoo":
+            st.caption("✅ SAHMK active.")
+        elif not _sahmk_key_present and _sahmk_choice == "SAHMK + Yahoo":
+            st.caption("⚠️ SAHMK_API_KEY not set — add it in Secrets.")
+        else:
+            st.caption("ℹ️ Yahoo only — Discovery Console unavailable.")
+
+        st.divider()
         st.toggle(
             "Live FX Rates",
             value=False,
@@ -666,32 +691,6 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error(_msg, icon="❌")
-
-        st.divider()
-        st.caption("📡 **Price Data Provider**")
-        _sahmk_key_present = bool(__import__("os").environ.get("SAHMK_API_KEY", "").strip())
-        _sahmk_opts = ["SAHMK + Yahoo", "Yahoo only"]
-        _sahmk_default = 0 if _sahmk_key_present else 1
-        _sahmk_choice = st.radio(
-            "Provider",
-            _sahmk_opts,
-            index=_sahmk_default,
-            key="sahmk_provider_mode",
-            label_visibility="collapsed",
-            help=(
-                "**SAHMK + Yahoo** — Saudi stocks fetched from SAHMK (requires active subscription); "
-                "all others via Yahoo Finance.\n\n"
-                "**Yahoo only** — all tickers via Yahoo Finance. Use this if your SAHMK subscription "
-                "has expired. Saudi tickers need a .SR suffix (e.g. 2222.SR); bare 4-5 digit symbols "
-                "are auto-suffixed automatically."
-            ),
-        )
-        if not _sahmk_key_present and _sahmk_choice == "SAHMK + Yahoo":
-            st.caption("⚠️ SAHMK_API_KEY not set — using Yahoo only.")
-        elif _sahmk_key_present and _sahmk_choice == "SAHMK + Yahoo":
-            st.caption("✅ SAHMK active.")
-        else:
-            st.caption("ℹ️ Yahoo only — Discovery Console unavailable.")
 
         st.divider()
         st.checkbox(
@@ -865,10 +864,9 @@ def _run_price_refresh(*, force: bool = True) -> int:
             ok_list, _ = _apply_routed_prices(_routed_all, _holdings_inner)
             ok_count = len(ok_list)
 
-            # ── Bridge SAHMK change_pct into the yfinance session cache ──────
-            # The Holdings table Day % column reads from the session cache.
-            # SAHMK provides change_pct directly; bridge it so Saudi stocks show
-            # their daily Δ even when yfinance doesn't have previousClose data.
+            # ── Collect SAHMK change_pct entries to bridge into session cache ──
+            # Saved AFTER yfinance so SAHMK daily_change_pct is not overwritten
+            # by a yfinance entry that has daily_change_pct=None for Saudi tickers.
             _sahmk_md: dict[str, MarketData] = {}
             for _aid, _rp in _routed_all.items():
                 if (
@@ -887,8 +885,6 @@ def _run_price_refresh(*, force: bool = True) -> int:
                             daily_change_pct = _rp.change_pct,
                             currency         = _rp.currency or "SAR",
                         )
-            if _sahmk_md:
-                save_to_session(_sahmk_md)
 
         # ── yfinance session cache for watchlist / price-debug UI ─────────────
         raw_tickers = _collect_all_tickers()
@@ -896,6 +892,12 @@ def _run_price_refresh(*, force: bool = True) -> int:
             ticker_map = {_normalize_ticker(t): t for t in raw_tickers}
             results = refresh_all_prices(list(ticker_map.keys()), force=force)
             save_to_session(results)
+
+        # ── Bridge SAHMK change_pct AFTER yfinance so SAHMK wins ─────────────
+        # yfinance returns daily_change_pct=None for Saudi tickers; saving SAHMK
+        # data last ensures the Holdings table Day % column sees the real value.
+        if _sahmk_md:
+            save_to_session(_sahmk_md)
 
         return ok_count
     except Exception:
@@ -10217,6 +10219,21 @@ if True:
         _bs_d_debt_abs,   _bs_d_debt_pct   = _bs_comp_delta("debt",   _bs_debt)
         _bs_d_net_abs,    _bs_d_net_pct    = _bs_comp_delta("net",    _bs_net)
 
+        # ── Guard: suppress portfolio snapshot delta when FX is missing ───────
+        # missing_fx=True means a holding's FX rate defaulted to 1.0 — its
+        # contribution to _bs_port is artificially low vs. yesterday's snapshot,
+        # producing a phantom −20% (or similar) on the Investment Portfolio KPI.
+        # Also suppress when the snapshot is older than 4 days (Saudi Thu→Sun gap).
+        _bs_any_miss_fx = any(
+            getattr(r, "missing_fx", False)
+            for r in _shared_bundle["val"].per_holding
+        )
+        _bs_snap_date = (_bs_prev or {}).get("date", "")
+        from datetime import date as _bs_dt_date, timedelta as _bs_dt_td
+        _bs_cutoff = (_bs_dt_date.today() - _bs_dt_td(days=4)).isoformat()
+        if _bs_any_miss_fx or (_bs_snap_date and _bs_snap_date < _bs_cutoff):
+            _bs_d_port_abs, _bs_d_port_pct = None, None
+
         # ── Enrich portfolio delta with live session-cache prices ─────────
         _bs_d_port_src = "vs yday" if _bs_prev else ""
         try:
@@ -10248,9 +10265,14 @@ if True:
             d_abs, d_pct, label: str = "", invert_color: bool = False,
         ) -> str:
             """Compact day-change sub-line rendered below a Balance Sheet KPI value."""
-            if d_abs is None or d_pct is None:
-                return ('<div style="font-size:0.7rem;color:#94a3b8;'
+            _NEUTRAL = ('<div style="font-size:0.7rem;color:#94a3b8;'
                         'margin-top:2px">&#8212;</div>')
+            if d_abs is None or d_pct is None:
+                return _NEUTRAL
+            # Financial practice: zero change is neutral regardless of direction
+            # convention (e.g. liabilities showing ▲+0.0% in red is misleading).
+            if abs(d_abs) < 0.005:
+                return _NEUTRAL
             col_pos = "#22c55e" if not invert_color else "#ef4444"
             col_neg = "#ef4444" if not invert_color else "#22c55e"
             col     = col_pos if d_abs >= 0 else col_neg
