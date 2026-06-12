@@ -10221,8 +10221,12 @@ if True:
                         _bsccy = getattr(_bsh, "currency", _bs_ccy)
                         _bsfxr = _bs_rates.get(_bsccy)
                         _bsrt  = _bsfxr.rate if _bsfxr else 1.0
-                        _bs_live_acc += (_bsh.quantity * _bsh.current_price
-                                         * (_bsmd.daily_change_pct / 100.0) * _bsrt)
+                        _bspct = _bsmd.daily_change_pct
+                        # Use pct/(100+pct) — correct regardless of whether
+                        # current_price is today's or yesterday's price.
+                        # Matches the formula in _day_from_session (Allocation tab).
+                        _bs_mv_h = _bsh.quantity * _bsh.current_price * _bsrt
+                        _bs_live_acc += _bs_mv_h * _bspct / (100.0 + _bspct)
                         _bs_live_cnt += 1
                 if _bs_live_cnt > 0 and _bs_port > 0:
                     _bs_d_port_abs = round(_bs_live_acc, 2)

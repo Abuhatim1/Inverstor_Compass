@@ -7954,26 +7954,27 @@ def _cat_bs_snapshot() -> list[TestResult]:
                         CAT, MOD, "P1", False, bss01))
 
     def bss02():
-        """record_bs_snapshot_if_needed writes only once for the same day."""
+        """record_bs_snapshot_if_needed keeps exactly one entry per day and
+        always reflects the LATEST values (overwrite semantics), so post-refresh
+        prices replace the first-render prices in today's snapshot."""
         today = date.today().isoformat()
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "bs.json")
             record_bs_snapshot_if_needed(_COMPS, "SAR", path=p)
-            record_bs_snapshot_if_needed(
-                {"port": 999.0, "alts": 0.0, "fixed": 0.0,
-                 "assets": 999.0, "debt": 0.0, "net": 999.0},
-                "SAR", path=p,
-            )
+            updated_comps = {"port": 999.0, "alts": 0.0, "fixed": 0.0,
+                             "assets": 999.0, "debt": 0.0, "net": 999.0}
+            record_bs_snapshot_if_needed(updated_comps, "SAR", path=p)
             snaps = load_bs_snapshots(path=p)
             today_entries = [s for s in snaps if s.get("date") == today]
-            original_port = today_entries[0].get("port") if today_entries else None
-            ok = len(today_entries) == 1 and _near(float(original_port or 0), 1_000_000.0)
+            latest_port = today_entries[0].get("port") if today_entries else None
+            # Exactly one entry for today; value is the most recent (999.0 overwrite)
+            ok = len(today_entries) == 1 and _near(float(latest_port or 0), 999.0)
             return (
-                "today_entries=1, port=1000000.0",
-                f"today_entries={len(today_entries)}, port={original_port}",
+                "today_entries=1, port=999.0 (latest overwrite)",
+                f"today_entries={len(today_entries)}, port={latest_port}",
                 ok,
             )
-    results.append(_run("BSS02", "BS snapshot — idempotent (no duplicate same day)",
+    results.append(_run("BSS02", "BS snapshot — one entry per day, latest values kept",
                         CAT, MOD, "P1", False, bss02))
 
     def bss03():

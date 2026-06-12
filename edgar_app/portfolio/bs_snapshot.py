@@ -56,8 +56,14 @@ def record_bs_snapshot_if_needed(
     path:       str | None = None,
 ) -> dict | None:
     """
-    Write today's Balance Sheet snapshot if one does not yet exist for
-    (today's date, base_ccy).  Call once per render — safe to call repeatedly.
+    Write (or update) today's Balance Sheet snapshot on every render.
+
+    Today's entry is ALWAYS overwritten so the snapshot reflects the most
+    recent prices — including post-refresh prices.  This ensures tomorrow's
+    day-over-day delta compares today's post-refresh prices against yesterday's
+    post-refresh prices (= actual market movement), rather than comparing today's
+    post-refresh prices against the pre-refresh prices that were stored at the
+    very first render of the day.
 
     Parameters
     ----------
@@ -71,19 +77,19 @@ def record_bs_snapshot_if_needed(
     today = date.today().isoformat()
     snaps = load_bs_snapshots(path=path)
 
-    today_exists = any(
-        s.get("date") == today and s.get("ccy") == base_ccy
-        for s in snaps
-    )
-    if not today_exists:
-        snap = {"date": today, "ccy": base_ccy}
-        snap.update({
-            k: round(float(v), 4)
-            for k, v in components.items()
-            if k in ("port", "alts", "fixed", "assets", "debt", "net")
-        })
-        snaps.append(snap)
-        save_bs_snapshots(snaps, path=path)
+    # Always build the new today entry
+    snap = {"date": today, "ccy": base_ccy}
+    snap.update({
+        k: round(float(v), 4)
+        for k, v in components.items()
+        if k in ("port", "alts", "fixed", "assets", "debt", "net")
+    })
+
+    # Replace any existing entry for (today, ccy); preserve all prior-day entries
+    snaps = [s for s in snaps
+             if not (s.get("date") == today and s.get("ccy") == base_ccy)]
+    snaps.append(snap)
+    save_bs_snapshots(snaps, path=path)
 
     prev_snaps = [
         s for s in snaps
