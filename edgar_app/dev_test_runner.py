@@ -7984,9 +7984,9 @@ def _cat_bs_snapshot() -> list[TestResult]:
                         CAT, MOD, "P1", False, bss01))
 
     def bss02():
-        """record_bs_snapshot_if_needed keeps exactly one entry per day and
-        always reflects the LATEST values (overwrite semantics), so post-refresh
-        prices replace the first-render prices in today's snapshot."""
+        """record_bs_snapshot_if_needed is write-once-per-day: the FIRST call
+        writes today's entry; a second call with different values is a no-op.
+        This prevents dev/test re-renders from overwriting the day's baseline."""
         today = date.today().isoformat()
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "bs.json")
@@ -7996,15 +7996,16 @@ def _cat_bs_snapshot() -> list[TestResult]:
             record_bs_snapshot_if_needed(updated_comps, "SAR", path=p)
             snaps = load_bs_snapshots(path=p)
             today_entries = [s for s in snaps if s.get("date") == today]
-            latest_port = today_entries[0].get("port") if today_entries else None
-            # Exactly one entry for today; value is the most recent (999.0 overwrite)
-            ok = len(today_entries) == 1 and _near(float(latest_port or 0), 999.0)
+            first_port = today_entries[0].get("port") if today_entries else None
+            # Exactly one entry for today; value is the FIRST write (not 999.0)
+            ok = len(today_entries) == 1 and _near(float(first_port or 0),
+                                                    float(_COMPS["port"]))
             return (
-                "today_entries=1, port=999.0 (latest overwrite)",
-                f"today_entries={len(today_entries)}, port={latest_port}",
+                f"today_entries=1, port={_COMPS['port']} (first-render kept, second ignored)",
+                f"today_entries={len(today_entries)}, port={first_port}",
                 ok,
             )
-    results.append(_run("BSS02", "BS snapshot — one entry per day, latest values kept",
+    results.append(_run("BSS02", "BS snapshot — write-once-per-day (second call is no-op)",
                         CAT, MOD, "P1", False, bss02))
 
     def bss03():
