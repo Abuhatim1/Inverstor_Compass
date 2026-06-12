@@ -2430,6 +2430,10 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _h_by_ticker = {h.ticker: h for h in holdings.values()}
     _excluded: list[str] = []
     _rows: list[dict] = []
+    # Session cache for per-ticker Day % — populated after 🔄 refresh.
+    # Loaded once here so all row lookups share the same snapshot.
+    from market_prices import get_all_from_session as _alloc_get_sess
+    _alloc_sess = _alloc_get_sess()
     for _r in val.per_holding:
         _h = _h_by_ticker.get(_r.ticker)
         if _h is None:
@@ -2439,6 +2443,17 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             continue
         if _r.base_market_value <= 0:
             continue
+        _alloc_norm_tk = _normalize_ticker(_r.ticker)
+        _alloc_md = (
+            _alloc_sess.get(_alloc_norm_tk)
+            or _alloc_sess.get(_r.ticker.upper())
+            or _alloc_sess.get(_r.ticker)
+        )
+        _alloc_day = (
+            round(_alloc_md.daily_change_pct, 2)
+            if (_alloc_md and _alloc_md.daily_change_pct is not None)
+            else None
+        )
         _rows.append({
             "Ticker":    _r.ticker,
             "Company":   getattr(_h, "company_name", _r.ticker) or _r.ticker,
@@ -2448,6 +2463,8 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             "CCY":       _r.local_currency,
             "_mv":       _r.base_market_value,
             "_cb":       _r.base_cost_basis,
+            "_pnl":      round(_r.base_market_value - _r.base_cost_basis, 2),
+            "_day_pct":  _alloc_day,
             "_wt":       _r.invested_weight_pct,
         })
 
@@ -2854,14 +2871,15 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         st.plotly_chart(_fig, use_container_width=True)
 
     # ── Build filtered display table (weights re-calculated within filtered set)
-    _disp = _filt[["Ticker","Company","Market","Sector","CCY","_mv"]].copy()
+    _disp = _filt[["Ticker","Company","Market","Sector","CCY","_mv","_pnl","_day_pct"]].copy()
     _filt_total = _disp["_mv"].sum()
     _disp["Weight %"] = (
         (_disp["_mv"] / _filt_total * 100).round(1) if _filt_total > 0 else 0.0
     )
     _disp = _disp.sort_values("Weight %", ascending=False).reset_index(drop=True)
-    _mv_col_label = f"MV ({base_ccy})"
-    _disp.rename(columns={"_mv": _mv_col_label}, inplace=True)
+    _mv_col_label  = f"MV ({base_ccy})"
+    _pnl_col_label = f"P&L ({base_ccy})"
+    _disp.rename(columns={"_mv": _mv_col_label, "_pnl": _pnl_col_label, "_day_pct": "Day %"}, inplace=True)
 
     # ── Export Allocation Report ───────────────────────────────────────────────
     _ts         = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -2914,8 +2932,8 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _pdf.set_font("Helvetica", "B", 10)
         _pdf.cell(0, 6, f"Allocation Detail — {len(_disp)} holding(s)  ·  {base_ccy} {_total_mv:,.2f} total", ln=True)
         _pdf.ln(1)
-        _cols_pdf   = ["Ticker","Company","Market","Sector","CCY", _mv_col_label, "Weight %"]
-        _widths_pdf = [18, 54, 22, 32, 12, 28, 16]
+        _cols_pdf   = ["Ticker","Company","Market","Sector","CCY", _mv_col_label, _pnl_col_label, "Weight %"]
+        _widths_pdf = [18, 44, 20, 28, 10, 24, 22, 16]
         _pdf.set_fill_color(15, 23, 42)
         _pdf.set_text_color(255, 255, 255)
         _pdf.set_font("Helvetica", "B", 8)
@@ -2928,11 +2946,12 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
             _pdf.set_fill_color(248, 250, 252 if _i % 2 == 0 else 255)
             _vals_pdf = [
                 str(_row["Ticker"]),
-                str(_row["Company"])[:28],
+                str(_row["Company"])[:22],
                 str(_row["Market"]),
-                str(_row["Sector"])[:16],
+                str(_row["Sector"])[:14],
                 str(_row["CCY"]),
-                f"{_row[_mv_col_label]:,.2f}",
+                f"{_row[_mv_col_label]:,.0f}",
+                f"{_row[_pnl_col_label]:+,.0f}",
                 f"{_row['Weight %']:.1f}%",
             ]
             for _v, _w in zip(_vals_pdf, _widths_pdf):
@@ -3013,11 +3032,13 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         hide_index=True,
         use_container_width=True,
         column_config={
-            _mv_col_label: st.column_config.NumberColumn(_mv_col_label, format="%,.2f"),
-            "Weight %":    st.column_config.NumberColumn("Weight %",    format="%.1f%%", width=_aw.get("Weight %")),
-            "Ticker":      st.column_config.TextColumn("Ticker",        width=_aw.get("Ticker")),
-            "Company":     st.column_config.TextColumn("Company",       width=_aw.get("Company")),
-            "CCY":         st.column_config.TextColumn("CCY",           width=_aw.get("CCY")),
+            _mv_col_label:  st.column_config.NumberColumn(_mv_col_label,  format="%,.0f"),
+            _pnl_col_label: st.column_config.NumberColumn(_pnl_col_label, format="%+,.0f"),
+            "Day %":        st.column_config.NumberColumn("Day %",        format="%+.2f%%"),
+            "Weight %":     st.column_config.NumberColumn("Weight %",     format="%.1f%%", width=_aw.get("Weight %")),
+            "Ticker":       st.column_config.TextColumn("Ticker",         width=_aw.get("Ticker")),
+            "Company":      st.column_config.TextColumn("Company",        width=_aw.get("Company")),
+            "CCY":          st.column_config.TextColumn("CCY",            width=_aw.get("CCY")),
         },
     )
 
