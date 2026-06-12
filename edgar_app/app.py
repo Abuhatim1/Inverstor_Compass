@@ -2622,13 +2622,38 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _d_pct = _dsum / _prev * 100 if _prev > 0 else None
         return _d_abs, _d_pct
 
-    # Portfolio daily Δ — session cache only (same source as BS tab live enrichment).
-    # Snapshot comparison removed: it produces phantom large changes on startup
-    # because prices haven't been refreshed yet, so today's MV ≠ yesterday's snapshot.
-    # Session cache is populated only after 🔄 Refresh → before refresh show "—".
+    # Portfolio daily Δ — session cache first (live, after 🔄), snapshot as fallback.
+    # Priority 1: session cache weighted sum — most accurate, updated after refresh.
+    # Priority 2: BS snapshot comparison — shows "last saved" delta on startup before
+    #             any refresh has happened.  Guards A (missing_fx) and B (stale snap)
+    #             are applied to avoid phantom large values from provider-switching days.
     _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
     if _fas_day_pct is not None:
         _fas_day_approx = True
+    else:
+        # Fallback: BS snapshot comparison (startup / no session cache data yet)
+        from portfolio.bs_snapshot import load_bs_snapshots as _fbs_load
+        from datetime import date as _fbs_date, timedelta as _fbs_td
+        _fbs_snaps    = _fbs_load()
+        _fbs_today    = _fbs_date.today().isoformat()
+        _fbs_cutoff   = (_fbs_date.today() - _fbs_td(days=4)).isoformat()
+        _fbs_prev_snaps = [
+            s for s in _fbs_snaps
+            if s.get("ccy") == base_ccy and s.get("date", "") < _fbs_today
+        ]
+        if _fbs_prev_snaps:
+            _fbs_prev     = max(_fbs_prev_snaps, key=lambda s: s.get("date", ""))
+            _fbs_snap_date = _fbs_prev.get("date", "")
+            _fbs_prev_port = _fbs_prev.get("port")
+            _fbs_miss_fx  = any(r.missing_fx for r in val.per_holding)
+            if (
+                _fbs_prev_port
+                and float(_fbs_prev_port) > 0
+                and not _fbs_miss_fx             # Guard A — FX integrity
+                and _fbs_snap_date >= _fbs_cutoff # Guard B — snapshot freshness
+            ):
+                _fas_day_abs = _fas_mv - float(_fbs_prev_port)
+                _fas_day_pct = _fas_day_abs / float(_fbs_prev_port) * 100
 
     def _fmt_compact(v: float) -> str:
         """Round to 2 dp for M, nearest K for large numbers; keep sign."""
@@ -10186,15 +10211,12 @@ if True:
         _bs_d_net_abs,    _bs_d_net_pct    = _bs_comp_delta("net",    _bs_net)
 
         # ── Guard: suppress portfolio snapshot delta when data is unreliable ────
-        # Three conditions each null out the snapshot-based portfolio Δ:
+        # Two conditions null out the snapshot-based portfolio Δ:
         #   A) missing_fx — a holding's FX rate defaulted to 1.0, making today's MV
-        #      artificially low vs. yesterday's snapshot → phantom −20%.
+        #      artificially low vs. yesterday's snapshot → phantom large drop.
         #   B) Stale snapshot (>4 days) — covers the Saudi Thu→Sun gap.
-        #   C) Session cache empty — no price refresh this session means today's stored
-        #      prices may differ from what the snapshot captured (e.g. SAHMK vs Yahoo
-        #      price levels), producing a phantom large change on startup.
-        #   When C fires, the live enrichment block below will have _bs_live_cnt=0
-        #   and will NOT override, so the portfolio row correctly shows "—".
+        # On startup (no refresh yet) the snapshot value is intentionally shown as
+        # a "last saved" indicator; live enrichment below overrides it after 🔄.
         _bs_any_miss_fx = any(
             getattr(r, "missing_fx", False)
             for r in _shared_bundle["val"].per_holding
@@ -10202,9 +10224,7 @@ if True:
         _bs_snap_date = (_bs_prev or {}).get("date", "")
         from datetime import date as _bs_dt_date, timedelta as _bs_dt_td
         _bs_cutoff = (_bs_dt_date.today() - _bs_dt_td(days=4)).isoformat()
-        from market_prices import get_all_from_session as _bs_gass
-        _bs_sess_empty = not bool(_bs_gass())
-        if _bs_any_miss_fx or (_bs_snap_date and _bs_snap_date < _bs_cutoff) or _bs_sess_empty:
+        if _bs_any_miss_fx or (_bs_snap_date and _bs_snap_date < _bs_cutoff):
             _bs_d_port_abs, _bs_d_port_pct = None, None
 
         # ── Enrich portfolio delta with live session-cache prices ─────────
@@ -10233,6 +10253,27 @@ if True:
                     _bs_d_port_src = ""          # live feed — no qualifier needed
         except Exception:
             pass
+
+        # ── Recompute totals from component sums for math consistency ─────────
+        # When the portfolio row was updated by live enrichment, Total Assets and
+        # Net Worth must be re-derived from component deltas — NOT from independent
+        # snapshot comparisons — so the arithmetic always adds up visually.
+        # (e.g. Portfolio +5,944 live → Total Assets must also show ≥+5,944)
+        if _bs_d_port_abs is not None:
+            _bsc_cash  = _bs_d_cash_abs  if _bs_d_cash_abs  is not None else 0.0
+            _bsc_alts  = _bs_d_alts_abs  if _bs_d_alts_abs  is not None else 0.0
+            _bsc_fixed = _bs_d_fixed_abs if _bs_d_fixed_abs is not None else 0.0
+            _bs_d_assets_abs = round(_bs_d_port_abs + _bsc_cash + _bsc_alts + _bsc_fixed, 2)
+            _bs_d_assets_pct = (
+                round(_bs_d_assets_abs / _bs_total_assets * 100.0, 2)
+                if _bs_total_assets > 0 else None
+            )
+            _bsc_debt = _bs_d_debt_abs if _bs_d_debt_abs is not None else 0.0
+            _bs_d_net_abs = round(_bs_d_assets_abs - _bsc_debt, 2)
+            _bs_d_net_pct = (
+                round(_bs_d_net_abs / abs(_bs_net) * 100.0, 2)
+                if _bs_net != 0 else None
+            )
 
         def _bs_delta_html(
             d_abs, d_pct, label: str = "", invert_color: bool = False,
