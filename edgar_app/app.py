@@ -3098,6 +3098,18 @@ def render_holdings_tab(bundle: dict) -> None:
         )
         live_cache = get_all_from_session()
 
+        # ── Authoritative MV maps from the valuation engine ───────────────────
+        # Using val.per_holding ensures Holdings row values sum to the SAME total
+        # as the Allocation "Market Value" KPI and the Balance Sheet
+        # "Investment Portfolio" KPI. Never recompute h.market_value × fx_rate
+        # independently — that risks FX-rounding drift from the engine total.
+        from portfolio.display_metrics import (
+            build_mv_map as _hld_bmv,
+            build_local_mv_map as _hld_blmv,
+        )
+        _val_mv_map       = _hld_bmv(_val.per_holding)
+        _val_local_mv_map = _hld_blmv(_val.per_holding)
+
         # ── Build the holdings table ───────────────────────────────────────────
         _native_mode    = st.session_state.get("_native_mode", False)
         _mv_col         = "MV (CCY)" if _native_mode else f"MV ({_base_ccy})"
@@ -3112,8 +3124,12 @@ def render_holdings_tab(bundle: dict) -> None:
             ccy     = getattr(h, "currency", "USD")
             fx_r    = _fx.get(ccy)
             fx_rate = fx_r.rate if fx_r else 1.0
-            # Native mode: show local value (qty×price in asset's own CCY, no FX conversion)
-            mv_base = round(h.market_value, 2) if _native_mode else round(h.market_value * fx_rate, 2)
+            # MV from the engine's per_holding (by asset_id) — same data source as
+            # Allocation and Balance Sheet, so Holdings rows sum to the headline exactly.
+            if _native_mode:
+                mv_base = round(_val_local_mv_map.get(asset_id, h.market_value), 2)
+            else:
+                mv_base = round(_val_mv_map.get(asset_id, h.market_value * fx_rate), 2)
             pnl_pct = h.unrealized_pnl_pct
             status  = "🟢" if pnl_pct > 0.01 else ("🔴" if pnl_pct < -0.01 else "⚪")
 

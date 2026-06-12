@@ -129,3 +129,33 @@ def compute_portfolio_day_change(
         round(day_pct, 2) if day_pct is not None else None,
         live_cnt,
     )
+
+
+def build_mv_map(per_holding: Iterable) -> dict:
+    """Return ``{asset_id: base_market_value}`` from the valuation engine's
+    per-holding rows.
+
+    **Use this as the authoritative MV source for Holdings table row display**
+    so that the sum of all displayed row values equals the Allocation tab's
+    "Market Value" KPI and the Balance Sheet tab's "Investment Portfolio" KPI
+    exactly. Both of those headlines are derived from the same
+    ``val.per_holding.base_market_value`` data, so using this map in the
+    Holdings table rows guarantees three-way equality by construction rather
+    than by coincidence of independent re-computations.
+
+    Falls back gracefully (empty dict) when ``per_holding`` is ``None`` or
+    empty, which allows Holdings tab code to provide a safe fallback.
+    """
+    return {r.asset_id: r.base_market_value for r in (per_holding or [])}
+
+
+def build_local_mv_map(per_holding: Iterable) -> dict:
+    """Return ``{asset_id: local_market_value}`` from the valuation engine's
+    per-holding rows.
+
+    Use for Holdings table **native-currency display mode** (``_native_mode``),
+    where row MV is shown in the holding's own CCY without FX conversion.
+    Keeping this in the same module as :func:`build_mv_map` ensures both
+    display modes share the engine's source of truth.
+    """
+    return {r.asset_id: r.local_market_value for r in (per_holding or [])}

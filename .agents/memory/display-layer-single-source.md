@@ -4,7 +4,7 @@ description: >
   Rule and pattern for preventing KPI mismatch across tabs: any metric shown in
   ≥2 places must be computed by ONE shared function with identical inputs, using
   ONE shared formatter. Learned from the Holdings/Allocation ↔ Balance Sheet
-  divergence (Task #64).
+  divergence (Holdings vs BS KPI mismatch fix).
 ---
 
 ## The Rule

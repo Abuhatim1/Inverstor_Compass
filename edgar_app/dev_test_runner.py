@@ -8215,6 +8215,51 @@ def _cat_consist() -> list[TestResult]:
         "helper: empty session → day_abs=None, day_pct=None, live_cnt=0",
         CAT, MOD, "P0", True, cs06))
 
+    # ── CS07: build_mv_map sum == holdings_value_base (cold-start) ───────────
+    def cs07():
+        from portfolio.display_metrics import build_mv_map
+        h  = {
+            "A": _holding("AAPL",    qty=10.0,  avg_cost=150.0, price=160.0, ccy="USD"),
+            "B": _holding("2222.SE", qty=100.0, avg_cost=30.0,  price=35.0,  ccy="SAR"),
+        }
+        a  = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        fx = {"USD": _fx("USD", "SAR", 3.75)}
+        v  = _val(h, a, "SAR", fx)
+        mv_map = build_mv_map(v.per_holding)
+        total  = sum(mv_map.values())
+        ok     = _near(total, v.holdings_value_base, 0.01) and len(mv_map) == 2
+        return (
+            f"sum(build_mv_map)≈{v.holdings_value_base:.2f}, len=2",
+            f"sum={total:.2f}, len={len(mv_map)}",
+            ok,
+        )
+    results.append(_run("CS07",
+        "build_mv_map: sum of map values == holdings_value_base (three-way equality guarantee)",
+        CAT, MOD, "P0", True, cs07))
+
+    # ── CS08: build_mv_map total == compute_portfolio_day_change port_value ───
+    def cs08():
+        import types as _types
+        from portfolio.display_metrics import build_mv_map, compute_portfolio_day_change
+        h    = {"A": _holding("TST", qty=5.0, avg_cost=100.0, price=110.0, ccy="SAR")}
+        a    = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        v    = _val(h, a, "SAR", {})
+        sess = {"TST": _types.SimpleNamespace(daily_change_pct=5.0)}
+        # Holdings table total (what the Holdings tab will display via build_mv_map)
+        holdings_total = sum(build_mv_map(v.per_holding).values())
+        # Allocation / Balance Sheet total (from the shared day-change helper)
+        pv, _, _, _ = compute_portfolio_day_change(v.per_holding, sess)
+        # Both must be identical — guarantees Holdings table == Allocation == BS
+        ok = _near(holdings_total, pv, 0.01)
+        return (
+            f"holdings_table_total == alloc_bs_total ({pv:.2f})",
+            f"holdings_total={holdings_total:.2f}, pv={pv:.2f}",
+            ok,
+        )
+    results.append(_run("CS08",
+        "build_mv_map total == compute_portfolio_day_change port_value (Holdings ≡ Allocation ≡ BS)",
+        CAT, MOD, "P0", True, cs08))
+
     return results
 
 
