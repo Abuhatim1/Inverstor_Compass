@@ -2609,13 +2609,17 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     if _no_filters:
         try:
             from portfolio.display_metrics import (
-                compute_portfolio_day_change as _fas_day_calc,
+                compute_effective_portfolio_mv as _fas_eff_calc,
             )
             from market_prices import get_all_from_session as _fas_get_sess
-            _fas_pv, _fas_sda, _fas_sdp, _fas_live_cnt = _fas_day_calc(
+            _fas_eff_total, _fas_stored, _fas_sda, _fas_sdp, _fas_live_cnt = _fas_eff_calc(
                 val.per_holding, _fas_get_sess(), _normalize_ticker
             )
-            _fas_mv = _fas_pv                          # == holdings_value_base
+            # Effective live-overlay MV: base_mv × (1+pct/100) per holding when
+            # session has daily_change_pct, otherwise stored base_market_value.
+            # Equals holdings_value_base on cold-start; moves with the session
+            # on the first render after 🔄, guaranteeing Allocation == BS headline.
+            _fas_mv = _fas_eff_total
             _fas_cb = getattr(val, "total_cost_basis_base", _filt["_cb"].sum())
             if _fas_live_cnt > 0:
                 _fas_shared_day = (_fas_sda, _fas_sdp)
@@ -3104,10 +3108,13 @@ def render_holdings_tab(bundle: dict) -> None:
         # "Investment Portfolio" KPI. Never recompute h.market_value × fx_rate
         # independently — that risks FX-rounding drift from the engine total.
         from portfolio.display_metrics import (
-            build_mv_map as _hld_bmv,
+            build_effective_mv_map as _hld_bemv,
             build_local_mv_map as _hld_blmv,
         )
-        _val_mv_map       = _hld_bmv(_val.per_holding)
+        # Apply the same live-overlay as Allocation and BS: row MV = effective
+        # (base_mv × (1+pct/100) when session has daily_change_pct, stored otherwise).
+        # live_cache is already the session dict fetched above.
+        _val_mv_map       = _hld_bemv(_val.per_holding, live_cache, _normalize_ticker)
         _val_local_mv_map = _hld_blmv(_val.per_holding)
 
         # ── Build the holdings table ───────────────────────────────────────────
@@ -10292,27 +10299,27 @@ if True:
         if _bs_any_miss_fx or (_bs_snap_date and _bs_snap_date < _bs_cutoff):
             _bs_d_port_abs, _bs_d_port_pct = None, None
 
-        # ── Enrich portfolio delta with live session-cache prices ─────────
+        # ── Enrich portfolio headline + delta with live session-cache prices ─────
         _bs_d_port_src = "vs yday" if _bs_prev else ""
-        _bs_live_cnt = 0          # initialised here; set > 0 only when live enrichment fires
-        _bs_live_acc = 0.0
+        _bs_live_cnt = 0
         try:
             from market_prices import get_all_from_session as _bs_get_sess
             from portfolio.display_metrics import (
-                compute_portfolio_day_change as _bs_day_calc,
+                compute_effective_portfolio_mv as _bs_eff_calc,
             )
             _bs_sess = _bs_get_sess()
             if _bs_sess:
-                # Same shared helper as the Allocation tab — fed the SAME
-                # val.per_holding (engine output) and the SAME session cache, so
-                # both tabs render an identical Investment-Portfolio day-Δ.
-                _bs_pv, _bs_da, _bs_dp, _bs_live_cnt = _bs_day_calc(
+                # Same shared helper as the Allocation tab — same val.per_holding
+                # + same session cache → identical effective_total and day-Δ on
+                # both tabs, guaranteeing Allocation KPI ≡ BS headline by construction.
+                _bs_eff_total, _bs_stored, _bs_da, _bs_dp, _bs_live_cnt = _bs_eff_calc(
                     _shared_bundle["val"].per_holding, _bs_sess, _normalize_ticker
                 )
                 if _bs_live_cnt > 0:
+                    _bs_port = _bs_eff_total   # headline: effective live MV
                     _bs_d_port_abs = _bs_da
                     _bs_d_port_pct = _bs_dp
-                    _bs_d_port_src = ""          # live feed — no qualifier needed
+                    _bs_d_port_src = ""
         except Exception:
             pass
 
