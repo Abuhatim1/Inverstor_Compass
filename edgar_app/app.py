@@ -2622,38 +2622,15 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _d_pct = _dsum / _prev * 100 if _prev > 0 else None
         return _d_abs, _d_pct
 
-    # Portfolio daily Δ — session cache first (live, after 🔄), snapshot as fallback.
-    # Priority 1: session cache weighted sum — most accurate, updated after refresh.
-    # Priority 2: BS snapshot comparison — shows "last saved" delta on startup before
-    #             any refresh has happened.  Guards A (missing_fx) and B (stale snap)
-    #             are applied to avoid phantom large values from provider-switching days.
+    # Portfolio daily Δ — session cache only (live, after 🔄).
+    # The BS snapshot stores the TOTAL unfiltered portfolio value, but _fas_mv is
+    # the FILTERED allocation MV (subset of accounts / asset types). Comparing them
+    # produces a phantom large delta proportional to the excluded portion.
+    # There is no safe per-filter snapshot baseline, so we only show a delta after
+    # the user taps 🔄 and the session cache is populated. Before refresh → "—".
     _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
     if _fas_day_pct is not None:
         _fas_day_approx = True
-    else:
-        # Fallback: BS snapshot comparison (startup / no session cache data yet)
-        from portfolio.bs_snapshot import load_bs_snapshots as _fbs_load
-        from datetime import date as _fbs_date, timedelta as _fbs_td
-        _fbs_snaps    = _fbs_load()
-        _fbs_today    = _fbs_date.today().isoformat()
-        _fbs_cutoff   = (_fbs_date.today() - _fbs_td(days=4)).isoformat()
-        _fbs_prev_snaps = [
-            s for s in _fbs_snaps
-            if s.get("ccy") == base_ccy and s.get("date", "") < _fbs_today
-        ]
-        if _fbs_prev_snaps:
-            _fbs_prev     = max(_fbs_prev_snaps, key=lambda s: s.get("date", ""))
-            _fbs_snap_date = _fbs_prev.get("date", "")
-            _fbs_prev_port = _fbs_prev.get("port")
-            _fbs_miss_fx  = any(r.missing_fx for r in val.per_holding)
-            if (
-                _fbs_prev_port
-                and float(_fbs_prev_port) > 0
-                and not _fbs_miss_fx             # Guard A — FX integrity
-                and _fbs_snap_date >= _fbs_cutoff # Guard B — snapshot freshness
-            ):
-                _fas_day_abs = _fas_mv - float(_fbs_prev_port)
-                _fas_day_pct = _fas_day_abs / float(_fbs_prev_port) * 100
 
     def _fmt_compact(v: float) -> str:
         """Round to 2 dp for M, nearest K for large numbers; keep sign."""

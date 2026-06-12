@@ -5,3 +5,4 @@
 - [Transaction identity](transaction-identity.md) — Transaction has transaction_id (TXN_xxxxxxxx) and asset_id fields; auto-generated in record_transaction(); back-filled for old records in load_transactions().
 - [Opening cash ↔ ledger](cash-ledger-opening-balance.md) — any path setting opening cash must also append an INITIAL_BALANCE ledger entry; performance/XIRR reads contributions from the ledger.
 - [Bousala deployment config](bousala-deployment.md) — Streamlit deploys as a second service in api-server artifact.toml; must use /_stcore/health not / for healthcheck; apple-touch-icon needs JS via components.v1.html into window.parent.document.head.
+- [Allocation tab phantom daily Δ](allocation-phantom-delta.md) — never compare filtered _fas_mv against unfiltered BS snapshot port; session-cache only in Allocation tab, snapshot only in BS tab.
