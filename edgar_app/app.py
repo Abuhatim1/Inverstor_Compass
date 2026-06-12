@@ -7859,7 +7859,7 @@ def render_global_header() -> str:
     _prices_stale = False
     if _has_any:
         if not st.session_state.get("mp_last_refresh_epoch"):
-            from market_prices import load_refresh_ts as _lrts
+            from market_prices import load_refresh_ts as _lrts, load_price_cache as _lpc
             _persisted_ep = _lrts()
             if _persisted_ep:
                 st.session_state["mp_last_refresh_epoch"] = _persisted_ep
@@ -7870,6 +7870,15 @@ def render_global_header() -> str:
                         _dt2.utcfromtimestamp(_persisted_ep).strftime("%H:%M") + " UTC"
                     )
                 _gh_ref = st.session_state.get("mp_last_refresh") or "—"
+                # Restore persisted price cache so daily-Δ shows on cold start.
+                # Only load when within the 60-min freshness window — stale data
+                # would show a misleading delta badge.
+                import time as _t_cold
+                if (_t_cold.time() - _persisted_ep) < 3600:
+                    if not st.session_state.get("mp_price_cache"):
+                        _cold_cache = _lpc()
+                        if _cold_cache:
+                            st.session_state["mp_price_cache"] = _cold_cache
         import time as _t_stale
         _ref_ep = st.session_state.get("mp_last_refresh_epoch")
         _prices_stale = (not _ref_ep) or (_t_stale.time() - _ref_ep > 3600)

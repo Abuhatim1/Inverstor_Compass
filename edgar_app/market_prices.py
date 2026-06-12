@@ -35,7 +35,9 @@ _SESSION_CACHE_KEY        = "mp_price_cache"
 _SESSION_LAST_REFRESH_KEY = "mp_last_refresh"
 
 # Persistent refresh timestamp — survives app restarts
-_REFRESH_TS_FILE = os.path.join(os.path.dirname(__file__), "portfolio", "price_refresh_ts.json")
+_REFRESH_TS_FILE   = os.path.join(os.path.dirname(__file__), "portfolio", "price_refresh_ts.json")
+# Persistent price cache — survives app restarts so daily-Δ shows on cold start
+_PRICE_CACHE_FILE  = os.path.join(os.path.dirname(__file__), "portfolio", "price_cache.json")
 
 
 def save_refresh_ts(epoch: float) -> None:
@@ -56,6 +58,51 @@ def load_refresh_ts() -> Optional[float]:
             return float(ts) if ts is not None else None
     except Exception:
         return None
+
+
+def save_price_cache(results: dict[str, "MarketData"]) -> None:
+    """Persist the price cache to disk so daily-Δ values survive app restarts.
+
+    Only the fields needed for display (current_price, daily_change_pct,
+    price_source, price_timestamp, currency, error) are stored — not raw probes.
+    Failures are silently swallowed so the app never crashes on a disk write.
+    """
+    try:
+        import dataclasses as _dc
+        serialisable = {
+            ticker: _dc.asdict(md)
+            for ticker, md in (results or {}).items()
+        }
+        with open(_PRICE_CACHE_FILE, "w") as _f:
+            json.dump(serialisable, _f)
+    except Exception:
+        pass
+
+
+def load_price_cache() -> dict[str, "MarketData"]:
+    """Restore the persisted price cache from disk.
+
+    Returns an empty dict if the file is missing, corrupt, or unreadable.
+    Reconstructs full ``MarketData`` objects so callers get the same interface
+    as a live-session cache hit.
+    """
+    try:
+        with open(_PRICE_CACHE_FILE) as _f:
+            raw: dict = json.load(_f)
+        result: dict[str, "MarketData"] = {}
+        for ticker, d in raw.items():
+            if not isinstance(d, dict):
+                continue
+            try:
+                result[ticker] = MarketData(**{
+                    k: v for k, v in d.items()
+                    if k in MarketData.__dataclass_fields__
+                })
+            except Exception:
+                pass
+        return result
+    except Exception:
+        return {}
 
 PRICE_SOURCES = {
     "last_price":              "fast_info.last_price",
@@ -341,7 +388,8 @@ def market_session_label() -> tuple[str, str]:
 # ── Session-state helpers ─────────────────────────────────────────────────────
 
 def save_to_session(results: dict[str, "MarketData"]) -> None:
-    """Persist ALL fetched MarketData (ok and failed) into Streamlit session state."""
+    """Persist ALL fetched MarketData (ok and failed) into Streamlit session state
+    and to disk so daily-Δ values survive app restarts."""
     try:
         import streamlit as st
         existing: dict = st.session_state.get(_SESSION_CACHE_KEY, {})
@@ -351,7 +399,8 @@ def save_to_session(results: dict[str, "MarketData"]) -> None:
         st.session_state[_SESSION_CACHE_KEY]          = existing
         st.session_state[_SESSION_LAST_REFRESH_KEY]   = now_str
         st.session_state["mp_last_refresh_epoch"]     = _ep
-        save_refresh_ts(_ep)          # persist so 60-min window survives restarts
+        save_refresh_ts(_ep)          # persist timestamp so 60-min window survives restarts
+        save_price_cache(existing)    # persist prices so daily-Δ survives restarts
     except Exception:
         pass
 
