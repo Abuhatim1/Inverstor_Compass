@@ -170,14 +170,18 @@ def get_routed_price(
             pass
 
     # ── Step 2: yfinance — yahoo_symbol ───────────────────────────────────────
-    # Always auto-suffix bare Saudi tickers (e.g. "2222" → "2222.SR") so yfinance
-    # can resolve them on the Saudi exchange.  This applies both in Yahoo-only mode
-    # AND as the fallback when SAHMK mode is active but SAHMK fails for a ticker
-    # (e.g. Aramco 2222 returning no data) — without the suffix yfinance returns
-    # a stale cached price and marks source = "cached".
+    # Normalize ANY Saudi-looking ticker (bare digits, or with any exchange suffix
+    # like .SE / .SA / .SR) to the Yahoo Finance form <digits>.SR.  This covers:
+    #   "2222"     → "2222.SR"   (bare Saudi ticker)
+    #   "2222.SE"  → "2222.SR"   (SAHMK/Tadawul internal suffix → Yahoo suffix)
+    #   "2222.SA"  → "2222.SR"   (alternative suffix)
+    #   "2222.SR"  → "2222.SR"   (already correct, no change)
+    # Without this, tickers stored with a .SE/.SA suffix produce a yfinance 404
+    # and fall through to "cached" source.
     yahoo_sym = ticker.strip()
-    if _re.match(r'^\d{4,5}$', yahoo_sym):
-        yahoo_sym = yahoo_sym + ".SR"
+    _saudi_base = _saudi_local_sym("", yahoo_sym)   # strips any suffix; "" if not Saudi
+    if _saudi_base:
+        yahoo_sym = _saudi_base + ".SR"
     if yahoo_sym:
         try:
             from market_prices import get_market_data

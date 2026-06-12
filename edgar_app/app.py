@@ -2622,47 +2622,13 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _d_pct = _dsum / _prev * 100 if _prev > 0 else None
         return _d_abs, _d_pct
 
-    if _no_filters:
-        # Priority 1 — BS snapshot vs previous day (exact, consistent with BS tab)
-        # Guards:
-        #   A) Skip if any holding has missing_fx — the snapshot used a real FX rate
-        #      but today's fallback (1.0) makes _fas_mv lower → phantom large drop.
-        #   B) Skip if snapshot is older than 4 calendar days — covers the Saudi
-        #      Thu→Sun gap (3 days) plus one buffer day.  Older snapshots reflect
-        #      multi-day changes, not a single-day move.
-        from portfolio.bs_snapshot import load_bs_snapshots
-        from datetime import date as _dt_date, timedelta as _dt_td
-        _bs_snaps = load_bs_snapshots()
-        _today_str   = _dt_date.today().isoformat()
-        _cutoff_str  = (_dt_date.today() - _dt_td(days=4)).isoformat()
-        _prev_snaps = [
-            s for s in _bs_snaps
-            if s.get("ccy") == base_ccy and s.get("date", "") < _today_str
-        ]
-        if _prev_snaps:
-            _prev_snap  = max(_prev_snaps, key=lambda s: s.get("date", ""))
-            _snap_date  = _prev_snap.get("date", "")
-            _prev_port  = _prev_snap.get("port")
-            _any_miss_fx = any(r.missing_fx for r in val.per_holding)
-            if (
-                _prev_port
-                and float(_prev_port) > 0
-                and not _any_miss_fx          # Guard A — FX integrity
-                and _snap_date >= _cutoff_str # Guard B — snapshot freshness
-            ):
-                _fas_day_abs = _fas_mv - float(_prev_port)
-                _fas_day_pct = _fas_day_abs / float(_prev_port) * 100
-
-        # Priority 2 — session cache (works immediately after 🔄, same as BS tab)
-        if _fas_day_pct is None:
-            _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
-            if _fas_day_pct is not None:
-                _fas_day_approx = True
-    else:
-        # Filters active — session cache only (no full-portfolio snapshot applies)
-        _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
-        if _fas_day_pct is not None:
-            _fas_day_approx = True
+    # Portfolio daily Δ — session cache only (same source as BS tab live enrichment).
+    # Snapshot comparison removed: it produces phantom large changes on startup
+    # because prices haven't been refreshed yet, so today's MV ≠ yesterday's snapshot.
+    # Session cache is populated only after 🔄 Refresh → before refresh show "—".
+    _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
+    if _fas_day_pct is not None:
+        _fas_day_approx = True
 
     def _fmt_compact(v: float) -> str:
         """Round to 2 dp for M, nearest K for large numbers; keep sign."""
@@ -10219,11 +10185,16 @@ if True:
         _bs_d_debt_abs,   _bs_d_debt_pct   = _bs_comp_delta("debt",   _bs_debt)
         _bs_d_net_abs,    _bs_d_net_pct    = _bs_comp_delta("net",    _bs_net)
 
-        # ── Guard: suppress portfolio snapshot delta when FX is missing ───────
-        # missing_fx=True means a holding's FX rate defaulted to 1.0 — its
-        # contribution to _bs_port is artificially low vs. yesterday's snapshot,
-        # producing a phantom −20% (or similar) on the Investment Portfolio KPI.
-        # Also suppress when the snapshot is older than 4 days (Saudi Thu→Sun gap).
+        # ── Guard: suppress portfolio snapshot delta when data is unreliable ────
+        # Three conditions each null out the snapshot-based portfolio Δ:
+        #   A) missing_fx — a holding's FX rate defaulted to 1.0, making today's MV
+        #      artificially low vs. yesterday's snapshot → phantom −20%.
+        #   B) Stale snapshot (>4 days) — covers the Saudi Thu→Sun gap.
+        #   C) Session cache empty — no price refresh this session means today's stored
+        #      prices may differ from what the snapshot captured (e.g. SAHMK vs Yahoo
+        #      price levels), producing a phantom large change on startup.
+        #   When C fires, the live enrichment block below will have _bs_live_cnt=0
+        #   and will NOT override, so the portfolio row correctly shows "—".
         _bs_any_miss_fx = any(
             getattr(r, "missing_fx", False)
             for r in _shared_bundle["val"].per_holding
@@ -10231,7 +10202,9 @@ if True:
         _bs_snap_date = (_bs_prev or {}).get("date", "")
         from datetime import date as _bs_dt_date, timedelta as _bs_dt_td
         _bs_cutoff = (_bs_dt_date.today() - _bs_dt_td(days=4)).isoformat()
-        if _bs_any_miss_fx or (_bs_snap_date and _bs_snap_date < _bs_cutoff):
+        from market_prices import get_all_from_session as _bs_gass
+        _bs_sess_empty = not bool(_bs_gass())
+        if _bs_any_miss_fx or (_bs_snap_date and _bs_snap_date < _bs_cutoff) or _bs_sess_empty:
             _bs_d_port_abs, _bs_d_port_pct = None, None
 
         # ── Enrich portfolio delta with live session-cache prices ─────────
