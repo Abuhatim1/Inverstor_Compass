@@ -10243,11 +10243,12 @@ if True:
             pass
 
         # ── Recompute totals from component sums for math consistency ─────────
-        # When the portfolio row was updated by live enrichment, Total Assets and
-        # Net Worth must be re-derived from component deltas — NOT from independent
-        # snapshot comparisons — so the arithmetic always adds up visually.
-        # (e.g. Portfolio +5,944 live → Total Assets must also show ≥+5,944)
-        if _bs_d_port_abs is not None:
+        # Only when live enrichment actually fired (_bs_live_cnt > 0): Total
+        # Assets and Net Worth must be re-derived from component deltas so the
+        # arithmetic adds up visually (e.g. Portfolio +5,944 live → Total
+        # Assets must also show ≥+5,944). Skip this recompute for snapshot-only
+        # startup deltas — each component already has its own snapshot value.
+        if _bs_live_cnt > 0 and _bs_d_port_abs is not None:
             _bsc_cash  = _bs_d_cash_abs  if _bs_d_cash_abs  is not None else 0.0
             _bsc_alts  = _bs_d_alts_abs  if _bs_d_alts_abs  is not None else 0.0
             _bsc_fixed = _bs_d_fixed_abs if _bs_d_fixed_abs is not None else 0.0
