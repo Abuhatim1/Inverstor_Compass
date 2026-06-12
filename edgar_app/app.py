@@ -3114,18 +3114,14 @@ def render_holdings_tab(bundle: dict) -> None:
         # independently — that risks FX-rounding drift from the engine total.
         from portfolio.display_metrics import (
             build_effective_mv_map as _hld_bemv,
-            build_effective_local_mv_map as _hld_blmv,
         )
-        # Both maps read from val.per_holding (same engine source as Allocation
-        # and BS), so Holdings row values sum to holdings_value_base exactly —
-        # matching both KPI headlines. The "effective" helpers also accept the
-        # session and normalize_fn args for API symmetry with the aggregate helper.
-        _val_mv_map       = _hld_bemv(_val.per_holding, live_cache, _normalize_ticker)
-        _val_local_mv_map = _hld_blmv(_val.per_holding, live_cache, _normalize_ticker)
+        # Map reads from val.per_holding (same engine source as Allocation and
+        # Balance Sheet), so Holdings row values sum to holdings_value_base
+        # exactly — matching both KPI headlines.
+        _val_mv_map = _hld_bemv(_val.per_holding, live_cache, _normalize_ticker)
 
         # ── Build the holdings table ───────────────────────────────────────────
-        _native_mode    = st.session_state.get("_native_mode", False)
-        _mv_col         = "MV (CCY)" if _native_mode else f"MV ({_base_ccy})"
+        _mv_col         = f"MV ({_base_ccy})"
         rows            = []
         _asset_id_order: list[str] = []    # parallel to rows; tracks asset_id per row
         manual_tickers:  list[str] = []    # asset_ids of holdings without live ticker
@@ -3139,10 +3135,7 @@ def render_holdings_tab(bundle: dict) -> None:
             fx_rate = fx_r.rate if fx_r else 1.0
             # MV from the engine's per_holding (by asset_id) — same data source as
             # Allocation and Balance Sheet, so Holdings rows sum to the headline exactly.
-            if _native_mode:
-                mv_base = round(_val_local_mv_map.get(asset_id, h.market_value), 2)
-            else:
-                mv_base = round(_val_mv_map.get(asset_id, h.market_value * fx_rate), 2)
+            mv_base = round(_val_mv_map.get(asset_id, h.market_value * fx_rate), 2)
             pnl_pct = h.unrealized_pnl_pct
             status  = "🟢" if pnl_pct > 0.01 else ("🔴" if pnl_pct < -0.01 else "⚪")
 
@@ -3290,6 +3283,26 @@ def render_holdings_tab(bundle: dict) -> None:
                 },
             )
             st.caption("👆 Tap a row for quick actions  ·  🟢 profit  🔴 loss  ⚪ flat")
+
+        # ── Per-currency native breakdown (mixed portfolios only) ──────────────
+        # Aggregate local_market_value per local_currency from the engine's
+        # per_holding rows — these are exact (no FX conversion involved).
+        # Only shown when the portfolio spans more than one currency, so a
+        # single-currency portfolio sees no extra noise.
+        _ph_ccy_totals: dict[str, float] = {}
+        for _ph in _val.per_holding:
+            _ph_ccy = getattr(_ph, "local_currency", _base_ccy)
+            _ph_lmv = float(getattr(_ph, "local_market_value", 0.0) or 0.0)
+            _ph_ccy_totals[_ph_ccy] = _ph_ccy_totals.get(_ph_ccy, 0.0) + _ph_lmv
+        if len(_ph_ccy_totals) > 1:
+            _ccy_lines = "  ·  ".join(
+                f"**{_c}** {_v:,.0f}" for _c, _v in sorted(_ph_ccy_totals.items())
+            )
+            _fx_note = " *(estimated FX)*" if _manual_fx else " *(current FX)*"
+            st.caption(
+                f"💱 By currency: {_ccy_lines}  ·  "
+                f"Total ({_base_ccy}) {_val.holdings_value_base:,.0f}{_fx_note}"
+            )
 
         # ── Secondary tools row ───────────────────────────────────────────────
         _tb2, _tb3 = st.columns(2)
@@ -7787,19 +7800,19 @@ def render_global_header() -> str:
         with _hc1:
             _selected_ccy = st.selectbox(
                 "Currency",
-                options=["SAR", "USD", "EUR", "GBP", "— Native —"],
+                options=["SAR", "USD", "EUR", "GBP"],
                 key="global_base_ccy",
                 label_visibility="collapsed",
                 help=(
-                    "Base currency for portfolio totals. "
-                    "'— Native —' shows each holding in its own original currency "
-                    "(totals stay in SAR since mixed currencies cannot be summed)."
+                    "Base currency for portfolio totals and KPIs. "
+                    "Each holding's own currency is shown in the CCY column."
                 ),
             )
-            _native_mode = (_selected_ccy == "— Native —")
-            # Engine always needs a real ISO code — fall back to SAR in native mode
-            _base_ccy = "SAR" if _native_mode else _selected_ccy
-            st.session_state["_native_mode"] = _native_mode
+            # Safety guard: stale session state from an older app version
+            if _selected_ccy == "— Native —":
+                _selected_ccy = "SAR"
+            _base_ccy = _selected_ccy
+            st.session_state["_native_mode"] = False   # legacy flag — retired
         with _hc2:
             _do_refresh_prices = st.button(
                 "🔄",
