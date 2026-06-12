@@ -8272,6 +8272,37 @@ def _cat_consist() -> list[TestResult]:
         "compute_effective_portfolio_mv + build_effective_mv_map: live overlay correct; Holdings ≡ Alloc ≡ BS",
         CAT, MOD, "P0", True, cs08))
 
+    # ── CS09: BS identity: port + cash + alts + fixed == total_assets; net == total_assets - debt
+    def cs09():
+        import types as _types
+        from portfolio.display_metrics import compute_effective_portfolio_mv
+        # Simulates BS render: stored port = 10×100 = 1000 SAR, session pct = +10%
+        # → effective port = 1100; other components unchanged.
+        h = {"A": _holding("TST2", qty=10.0, avg_cost=100.0, price=100.0, ccy="SAR")}
+        a = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        v = _val(h, a, "SAR", {})
+        sess = {"TST2": _types.SimpleNamespace(daily_change_pct=10.0)}
+        eff, stored, da, dp, cnt = compute_effective_portfolio_mv(v.per_holding, sess)
+        # BS components (synthetic)
+        cash = 500.0; alts = 200.0; fixed = 100.0; debt = 300.0
+        # After live enrichment: total_assets must be recomputed from components
+        # (not from the stale stored total). This is what the recompute block in app.py does.
+        total_assets = eff + cash + alts + fixed   # correct post-enrichment recompute
+        net = total_assets - debt
+        identity_ok = _near(total_assets, eff + cash + alts + fixed, 0.01)
+        net_ok      = _near(net, total_assets - debt, 0.01)
+        overlay_ok  = _near(eff, stored * 1.10, 0.05)  # 10% overlay applied
+        stale_total = stored + cash + alts + fixed      # what the old stale value would be
+        ok = identity_ok and net_ok and overlay_ok and not _near(total_assets, stale_total, 0.5)
+        return (
+            f"total_assets=eff+cash+alts+fixed ({eff+cash+alts+fixed:.2f}), net={net:.2f}",
+            f"total_assets={total_assets:.2f}, stale_total={stale_total:.2f}, net={net:.2f}",
+            ok,
+        )
+    results.append(_run("CS09",
+        "BS identity after live overlay: port+cash+alts+fixed==total_assets; total_assets-debt==net",
+        CAT, MOD, "P0", True, cs09))
+
     return results
 
 

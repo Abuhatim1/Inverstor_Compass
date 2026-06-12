@@ -10330,6 +10330,12 @@ if True:
         # Assets must also show ≥+5,944). Skip this recompute for snapshot-only
         # startup deltas — each component already has its own snapshot value.
         if _bs_live_cnt > 0 and _bs_d_port_abs is not None:
+            # _bs_port was promoted to effective live MV by the enrichment block above.
+            # Recompute headline totals from components NOW so Total Assets and Net
+            # Worth are consistent with the updated portfolio value before any delta
+            # percentages or donut values are computed below.
+            _bs_total_assets = _bs_port + _bs_cash + _bs_alts + _bs_fixed
+            _bs_net          = _bs_total_assets - _bs_debt
             _bsc_cash  = _bs_d_cash_abs  if _bs_d_cash_abs  is not None else 0.0
             _bsc_alts  = _bs_d_alts_abs  if _bs_d_alts_abs  is not None else 0.0
             _bsc_fixed = _bs_d_fixed_abs if _bs_d_fixed_abs is not None else 0.0
