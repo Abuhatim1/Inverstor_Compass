@@ -48,6 +48,7 @@ from ai.market_intel import (
     MarketIntelResult,
 )
 from command_center import render_command_center_tab
+from portfolio.display_metrics import fmt_money_compact
 from portfolio import (
     # state
     PortfolioEntry,
@@ -502,17 +503,15 @@ def _fmt_pct(val: float | None, decimals: int = 1, suffix: str = "%") -> str:
 def _fmt_compact(v: float) -> str:
     """Compact money label: 2dp millions, 1dp thousands, 2dp otherwise.
 
+    Delegates to the shared canonical formatter (portfolio.display_metrics) so
+    the Holdings/Allocation and Balance Sheet KPIs can never drift apart.
+
     Examples:
         _fmt_compact(1_234_567.8)  → "1.23M"
         _fmt_compact(12_345.6)     → "12.3K"
         _fmt_compact(999.99)       → "999.99"
     """
-    av = abs(v)
-    if av >= 1_000_000:
-        return f"{v / 1_000_000:.2f}M"
-    if av >= 10_000:
-        return f"{v / 1_000:.1f}K"
-    return f"{v:,.2f}"
+    return fmt_money_compact(v)
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -2454,8 +2453,10 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 
     if _excluded:
         st.caption(
-            f"⚠️ Excluded from allocation (missing price or FX): "
-            f"**{', '.join(_excluded)}** — tap 🔄 to refresh prices."
+            f"⚠️ Excluded from allocation charts (missing price or FX): "
+            f"**{', '.join(_excluded)}** — tap 🔄 to refresh prices. "
+            f"Holdings missing only FX are still counted in the unfiltered "
+            f"Market Value (fallback rate 1.0), matching the Balance Sheet."
         )
 
     if not _rows:
@@ -2586,21 +2587,10 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         return
 
     # ── Filtered Allocation Summary ───────────────────────────────────────────
-    _fas_mv       = _filt["_mv"].sum()
-    _fas_cb       = _filt["_cb"].sum()
-    _fas_pnl      = _fas_mv - _fas_cb
-    _fas_pnl_pct  = (_fas_pnl / _fas_cb * 100) if _fas_cb > 0 else 0.0
-    _total_mv_all = getattr(val, "holdings_value_base", _fas_mv)
-    _fas_weight   = (_fas_mv / _total_mv_all * 100) if _total_mv_all > 0 else 0.0
-    _fas_n        = len(_filt)
-    _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
-    _pnl_sign     = "+" if _fas_pnl >= 0 else ""
-
-    # ── Daily change ──────────────────────────────────────────────────────────
-    # Strategy:
-    #   · No active filters (All) → BS snapshot port value (consistent with
-    #     Balance Sheet tab — same single source of truth).
-    #   · Any filter active      → per-ticker yfinance cache (approximate, ~).
+    # Detect "no filters active" FIRST: in the unfiltered view the Market Value
+    # KPI represents the WHOLE portfolio, so it must equal the Balance Sheet
+    # tab's "Investment Portfolio" headline (holdings_value_base) and share its
+    # live day-Δ. A filtered view keeps its own subtotal (a subset, by design).
     _no_filters = (
         not _cur_mkt                                            # market = All
         and set(_sel_sectors)   == set(_all_sectors)
@@ -2608,6 +2598,45 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         and set(_sel_companies) == set(_all_companies)
         and set(_sel_atypes)    == set(_all_atypes)
     )
+
+    _total_mv_all = getattr(val, "holdings_value_base", _filt["_mv"].sum())
+
+    # Unfiltered → use the shared display helper so the Market Value headline and
+    # the live day-Δ are derived from the SAME val.per_holding + session cache as
+    # the Balance Sheet tab (identical figures to the cent). Filtered → keep the
+    # filtered subtotal.
+    _fas_shared_day: tuple | None = None
+    if _no_filters:
+        try:
+            from portfolio.display_metrics import (
+                compute_portfolio_day_change as _fas_day_calc,
+            )
+            from market_prices import get_all_from_session as _fas_get_sess
+            _fas_pv, _fas_sda, _fas_sdp, _fas_live_cnt = _fas_day_calc(
+                val.per_holding, _fas_get_sess(), _normalize_ticker
+            )
+            _fas_mv = _fas_pv                          # == holdings_value_base
+            _fas_cb = getattr(val, "total_cost_basis_base", _filt["_cb"].sum())
+            if _fas_live_cnt > 0:
+                _fas_shared_day = (_fas_sda, _fas_sdp)
+        except Exception:
+            _fas_mv = _filt["_mv"].sum()
+            _fas_cb = _filt["_cb"].sum()
+    else:
+        _fas_mv = _filt["_mv"].sum()
+        _fas_cb = _filt["_cb"].sum()
+
+    _fas_pnl      = _fas_mv - _fas_cb
+    _fas_pnl_pct  = (_fas_pnl / _fas_cb * 100) if _fas_cb > 0 else 0.0
+    _fas_weight   = (_fas_mv / _total_mv_all * 100) if _total_mv_all > 0 else 0.0
+    _fas_n        = len(_filt)
+    _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
+    _pnl_sign     = "+" if _fas_pnl >= 0 else ""
+
+    # ── Daily change ──────────────────────────────────────────────────────────
+    # Strategy:
+    #   · No active filters (All) → shared helper (matches Balance Sheet exactly).
+    #   · Any filter active      → per-ticker yfinance cache (approximate, ~).
     _fas_day_abs: float | None = None
     _fas_day_pct: float | None = None
     _fas_day_approx = False  # True when using per-ticker estimate
@@ -2639,9 +2668,14 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         return _d_abs, _d_pct
 
     # ── Portfolio daily Δ — Priority 1: session cache (live, after 🔄) ─────────
-    _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
-    if _fas_day_abs is not None:
-        _fas_day_approx = True  # per-ticker weighted estimate
+    if _no_filters and _fas_shared_day is not None:
+        # Unfiltered: shared helper → identical to the Balance Sheet day-Δ.
+        _fas_day_abs, _fas_day_pct = _fas_shared_day
+        _fas_day_approx = False
+    else:
+        _fas_day_abs, _fas_day_pct = _day_from_session(_filt)
+        if _fas_day_abs is not None:
+            _fas_day_approx = True  # per-ticker weighted estimate
 
     # ── Priority 2: snapshot fallback at startup (unfiltered view only) ─────────
     # The BS snapshot 'port' key = total holdings MV.  This equals _fas_mv exactly
@@ -2699,7 +2733,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
         _day_html = (
             f'<div style="font-size:0.72em;color:{_dc_color};margin-top:2px;">'
             f'{_dc_arrow} {_dc_approx}{_dc_sign}{_fmt_compact(_fas_day_abs)}'
-            f'&nbsp;<span style="opacity:0.85">({_dc_approx}{_dc_sign}{_fas_day_pct:.2f}%)</span>'
+            f'&nbsp;<span style="opacity:0.85">({_dc_approx}{_dc_sign}{_fas_day_pct:.1f}%)</span>'
             f'</div>'
         )
     else:
@@ -10176,10 +10210,9 @@ if True:
 
         # ── Format helper ──────────────────────────────────────────────────
         def _bs_fmt(v: float) -> str:
-            av = abs(v)
-            if av >= 1_000_000: return f"{v / 1_000_000:.2f}M"
-            if av >= 1_000:     return f"{v:,.0f}"
-            return f"{v:,.2f}"
+            # Delegate to the shared canonical formatter so the Balance Sheet
+            # KPIs render identically to the Holdings/Allocation KPIs.
+            return fmt_money_compact(v)
 
         _net_col = "#22c55e" if _bs_net >= 0 else "#ef4444"
 
@@ -10249,29 +10282,20 @@ if True:
         _bs_live_acc = 0.0
         try:
             from market_prices import get_all_from_session as _bs_get_sess
+            from portfolio.display_metrics import (
+                compute_portfolio_day_change as _bs_day_calc,
+            )
             _bs_sess = _bs_get_sess()
             if _bs_sess:
-                _bs_live_acc = 0.0
-                _bs_live_cnt = 0
-                for _bsh in _shared_bundle["holdings"].values():
-                    if _bsh.quantity <= 1e-9:
-                        continue
-                    _bstk = _normalize_ticker(_bsh.ticker)
-                    _bsmd = _bs_sess.get(_bstk) or _bs_sess.get(_bsh.ticker)
-                    if _bsmd and getattr(_bsmd, "daily_change_pct", None) is not None:
-                        _bsccy = getattr(_bsh, "currency", _bs_ccy)
-                        _bsfxr = _bs_rates.get(_bsccy)
-                        _bsrt  = _bsfxr.rate if _bsfxr else 1.0
-                        _bspct = _bsmd.daily_change_pct
-                        # Use pct/(100+pct) — correct regardless of whether
-                        # current_price is today's or yesterday's price.
-                        # Matches the formula in _day_from_session (Allocation tab).
-                        _bs_mv_h = _bsh.quantity * _bsh.current_price * _bsrt
-                        _bs_live_acc += _bs_mv_h * _bspct / (100.0 + _bspct)
-                        _bs_live_cnt += 1
-                if _bs_live_cnt > 0 and _bs_port > 0:
-                    _bs_d_port_abs = round(_bs_live_acc, 2)
-                    _bs_d_port_pct = round(_bs_live_acc / _bs_port * 100.0, 2)
+                # Same shared helper as the Allocation tab — fed the SAME
+                # val.per_holding (engine output) and the SAME session cache, so
+                # both tabs render an identical Investment-Portfolio day-Δ.
+                _bs_pv, _bs_da, _bs_dp, _bs_live_cnt = _bs_day_calc(
+                    _shared_bundle["val"].per_holding, _bs_sess, _normalize_ticker
+                )
+                if _bs_live_cnt > 0:
+                    _bs_d_port_abs = _bs_da
+                    _bs_d_port_pct = _bs_dp
                     _bs_d_port_src = ""          # live feed — no qualifier needed
         except Exception:
             pass
@@ -10287,15 +10311,19 @@ if True:
             _bsc_alts  = _bs_d_alts_abs  if _bs_d_alts_abs  is not None else 0.0
             _bsc_fixed = _bs_d_fixed_abs if _bs_d_fixed_abs is not None else 0.0
             _bs_d_assets_abs = round(_bs_d_port_abs + _bsc_cash + _bsc_alts + _bsc_fixed, 2)
+            # %-of-previous (current − Δ), matching the portfolio day-Δ and the
+            # snapshot-delta convention, so the percentages stay coherent.
+            _bs_assets_prev  = _bs_total_assets - _bs_d_assets_abs
             _bs_d_assets_pct = (
-                round(_bs_d_assets_abs / _bs_total_assets * 100.0, 2)
-                if _bs_total_assets > 0 else None
+                round(_bs_d_assets_abs / _bs_assets_prev * 100.0, 2)
+                if _bs_assets_prev > 0 else None
             )
             _bsc_debt = _bs_d_debt_abs if _bs_d_debt_abs is not None else 0.0
             _bs_d_net_abs = round(_bs_d_assets_abs - _bsc_debt, 2)
+            _bs_net_prev  = _bs_net - _bs_d_net_abs
             _bs_d_net_pct = (
-                round(_bs_d_net_abs / abs(_bs_net) * 100.0, 2)
-                if _bs_net != 0 else None
+                round(_bs_d_net_abs / abs(_bs_net_prev) * 100.0, 2)
+                if _bs_net_prev != 0 else None
             )
 
         def _bs_delta_html(

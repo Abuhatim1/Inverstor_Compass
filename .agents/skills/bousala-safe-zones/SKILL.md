@@ -139,6 +139,26 @@ Every implementation review must identify the highest applicable risk level.
 
 ────────────────────────────
 
+## KPI Duplication Rule
+
+Before building any new KPI panel or adding a metric to a tab:
+
+1. `grep` for the underlying field name (`holdings_value_base`, `daily_change_pct`,
+   `base_market_value`, etc.) across all render functions.
+2. If the metric is already rendered elsewhere, **reuse the already-computed
+   variable or shared helper** — do not re-derive independently.
+3. Any metric shown in ≥2 tabs must route through ONE function in
+   `portfolio/display_metrics.py` (no `st.*`, takes data as args so tests can
+   exercise it without Streamlit).
+4. Use `fmt_money_compact` from `portfolio.display_metrics` as the canonical
+   formatter for all monetary KPIs. Do not add a new money formatter.
+
+Independent re-derivation is the root cause of cross-tab mismatch bugs. The
+`_cat_consist()` test category in `dev_test_runner.py` is the regression guard
+for this contract — never remove or reduce it.
+
+────────────────────────────
+
 ## Escalation Rule
 
 If implementation requires touching a protected zone:

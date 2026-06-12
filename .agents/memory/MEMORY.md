@@ -7,3 +7,4 @@
 - [Bousala deployment config](bousala-deployment.md) — Streamlit deploys as a second service in api-server artifact.toml; must use /_stcore/health not / for healthcheck; apple-touch-icon needs JS via components.v1.html into window.parent.document.head.
 - [Allocation tab phantom daily Δ](allocation-phantom-delta.md) — never compare filtered _fas_mv against unfiltered BS snapshot port; Priority 2 fallback gated by _no_filters.
 - [BS snapshot write-once design](bs-snapshot-write-once.md) — snapshot must be write-once-per-day; always-overwrite causes dev/test renders to corrupt the baseline with temporarily inflated portfolio states.
+- [Display-layer single source of truth](display-layer-single-source.md) — any metric shown in ≥2 tabs must use ONE shared helper + ONE formatter; never re-derive independently; _cat_consist() is the regression guard.

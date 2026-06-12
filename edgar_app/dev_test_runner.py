@@ -8079,6 +8079,145 @@ def _cat_bs_snapshot() -> list[TestResult]:
     return results
 
 
+# ════════════════════════════════════════════════════════════════════════════════
+# Category CONSIST — Cross-tab display consistency
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _cat_consist() -> list[TestResult]:
+    """CONSIST — Cross-tab KPI consistency: shared display helper + formatter.
+
+    Verifies that ``compute_portfolio_day_change`` and ``fmt_money_compact``
+    produce the correct output so the Holdings/Allocation and Balance Sheet KPIs
+    can never silently diverge from each other.
+
+    Governance: these tests are the regression guard for the dual-tab consistency
+    contract. Count must never decrease and all must PASS before release.
+    """
+    import types as _types
+    results: list[TestResult] = []
+    CAT = "Cross-Tab Consistency"
+    MOD = "portfolio.display_metrics"
+
+    from portfolio.display_metrics import compute_portfolio_day_change, fmt_money_compact
+
+    # ── CS01: canonical formatter produces expected strings ───────────────────
+    def cs01():
+        cases = [
+            (1_234_567.8, "1.23M"),
+            (12_345.6,    "12.3K"),
+            (10_000.0,    "10.0K"),
+            (9_999.99,    "9,999.99"),
+            (999.99,      "999.99"),
+            (0.0,         "0.00"),
+        ]
+        fails = [
+            f"{v}→{fmt_money_compact(v)!r}≠{exp!r}"
+            for v, exp in cases
+            if fmt_money_compact(v) != exp
+        ]
+        return (
+            "all canonical strings match",
+            ", ".join(fails) if fails else "all match",
+            not fails,
+        )
+    results.append(_run("CS01",
+        "fmt_money_compact: canonical formatter produces expected strings",
+        CAT, MOD, "P0", True, cs01))
+
+    # ── CS02: port_value == holdings_value_base (no session) ─────────────────
+    def cs02():
+        h  = {"A": _holding("AAPL", qty=10.0, avg_cost=150.0, price=160.0, ccy="USD")}
+        a  = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        fx = {"USD": _fx("USD", "SAR", 3.75)}
+        v  = _val(h, a, "SAR", fx)
+        pv, da, dp, cnt = compute_portfolio_day_change(v.per_holding, {})
+        ok = _near(pv, v.holdings_value_base, 0.01) and da is None and cnt == 0
+        return (
+            f"port_value≈{v.holdings_value_base:.2f}, da=None, cnt=0",
+            f"port_value={pv:.2f}, da={da}, cnt={cnt}",
+            ok,
+        )
+    results.append(_run("CS02",
+        "helper port_value == holdings_value_base; no session → da=None",
+        CAT, MOD, "P0", True, cs02))
+
+    # ── CS03: day_abs and day_pct correct (%-of-previous convention) ──────────
+    def cs03():
+        # SAR holding: MV = 10 × 100 × 1.0 = 1000 SAR
+        # daily_change_pct = +10 %  →  day_abs = 1000 × 10/110 ≈ 90.91
+        # prev = 1000 − 90.91 = 909.09   day_pct = 90.91/909.09 × 100 = 10.0 %
+        h    = {"A": _holding("TST", qty=10.0, avg_cost=90.0, price=100.0, ccy="SAR")}
+        a    = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        v    = _val(h, a, "SAR", {})
+        sess = {"TST": _types.SimpleNamespace(daily_change_pct=10.0)}
+        pv, da, dp, cnt = compute_portfolio_day_change(v.per_holding, sess)
+        exp_da = round(1000.0 * 10.0 / 110.0, 2)
+        exp_dp = round(exp_da / (1000.0 - exp_da) * 100.0, 2)
+        ok = (da is not None and _near(da, exp_da, 0.05)
+              and dp is not None and _near(dp, exp_dp, 0.05)
+              and cnt == 1)
+        return (
+            f"da≈{exp_da:.2f}, dp≈{exp_dp:.2f}, cnt=1",
+            f"da={da}, dp={dp}, cnt={cnt}",
+            ok,
+        )
+    results.append(_run("CS03",
+        "helper: day_abs and day_pct correct (%-of-previous convention)",
+        CAT, MOD, "P0", True, cs03))
+
+    # ── CS04: .SE ticker normalized to .SR for session lookup ─────────────────
+    def cs04():
+        h    = {"A": _holding("2222.SE", qty=10.0, avg_cost=30.0, price=35.0, ccy="SAR")}
+        a    = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        v    = _val(h, a, "SAR", {})
+        sess = {"2222.SR": _types.SimpleNamespace(daily_change_pct=5.0)}
+        pv, da, dp, cnt = compute_portfolio_day_change(v.per_holding, sess)
+        return (
+            "cnt=1 (.SE → .SR lookup hit)",
+            f"cnt={cnt}",
+            cnt == 1,
+        )
+    results.append(_run("CS04",
+        "helper: .SE ticker normalized to .SR for session lookup",
+        CAT, MOD, "P0", True, cs04))
+
+    # ── CS05: missing-FX holding counted in port_value at rate 1.0 ───────────
+    def cs05():
+        # USD holding, no FX rates → engine uses rate 1.0 (missing-FX fallback).
+        # The helper must still count the holding in port_value so it matches
+        # holdings_value_base (which also includes it at 1.0).
+        h  = {"A": _holding("AAPL", qty=10.0, avg_cost=150.0, price=160.0, ccy="USD")}
+        a  = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        v  = _val(h, a, "SAR", {})   # no FX → missing-FX fallback
+        pv, da, dp, cnt = compute_portfolio_day_change(v.per_holding, {})
+        ok = pv > 0 and _near(pv, v.holdings_value_base, 0.01)
+        return (
+            f"port_value>0 and ≈holdings_value_base({v.holdings_value_base:.2f})",
+            f"port_value={pv:.2f}",
+            ok,
+        )
+    results.append(_run("CS05",
+        "helper: missing-FX holding included in port_value at fallback rate 1.0",
+        CAT, MOD, "P0", True, cs05))
+
+    # ── CS06: empty session → None guards fire ───────────────────────────────
+    def cs06():
+        h  = {"A": _holding("TST", qty=5.0, avg_cost=100.0, price=110.0, ccy="SAR")}
+        a  = {"acc": _account("acc", cash=0.0, ccy="SAR")}
+        v  = _val(h, a, "SAR", {})
+        pv, da, dp, cnt = compute_portfolio_day_change(v.per_holding, {})
+        return (
+            "da=None, dp=None, cnt=0",
+            f"da={da}, dp={dp}, cnt={cnt}",
+            da is None and dp is None and cnt == 0,
+        )
+    results.append(_run("CS06",
+        "helper: empty session → day_abs=None, day_pct=None, live_cnt=0",
+        CAT, MOD, "P0", True, cs06))
+
+    return results
+
+
 def run_all_tests() -> TestReport:
     """
     Execute all pre-release tests and return a TestReport.
@@ -8103,6 +8242,7 @@ def run_all_tests() -> TestReport:
         + _cat_perf() + _cat_inc() + _cat_zak() + _cat_tax() + _cat_recon()
         + _cat_acct_inline()
         + _cat_bs_snapshot()
+        + _cat_consist()
     )
 
     punch_list: list[PunchListItem] = []
