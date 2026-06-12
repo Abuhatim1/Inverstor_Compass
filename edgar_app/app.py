@@ -2632,7 +2632,12 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
 
     _fas_pnl      = _fas_mv - _fas_cb
     _fas_pnl_pct  = (_fas_pnl / _fas_cb * 100) if _fas_cb > 0 else 0.0
-    _fas_weight   = (_fas_mv / _total_mv_all * 100) if _total_mv_all > 0 else 0.0
+    # When no filters are active every holding is included → weight is 100% by
+    # definition.  When a filter is active _fas_mv is the stored filtered subtotal
+    # and _total_mv_all is the stored full total — both are on the same basis so
+    # the ratio is consistent.  Using effective (live-overlay) _fas_mv against
+    # the stored _total_mv_all would produce > 100% on up-days, which is wrong.
+    _fas_weight   = 100.0 if _no_filters else ((_fas_mv / _total_mv_all * 100) if _total_mv_all > 0 else 0.0)
     _fas_n        = len(_filt)
     _pnl_color    = "normal" if _fas_pnl >= 0 else "inverse"
     _pnl_sign     = "+" if _fas_pnl >= 0 else ""
