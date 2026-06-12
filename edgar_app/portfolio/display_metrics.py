@@ -136,32 +136,23 @@ def compute_effective_portfolio_mv(
     session: Optional[dict],
     normalize_fn: Optional[Callable[[str], str]] = None,
 ) -> tuple[float, float, Optional[float], Optional[float], int]:
-    """Compute portfolio headline MV with live session overlay.
+    """Portfolio headline MV and daily-change overlay — the 5-tuple form of
+    :func:`compute_portfolio_day_change` for callers that need both the headline
+    value and the stored baseline in one call.
 
-    On the first page render after a price refresh, the valuation bundle
-    (loaded from disk at script top) may still carry yesterday's stored prices,
-    while the session cache already contains today's ``daily_change_pct``.
-    Applying the overlay to the stored value produces the live-estimate headline
-    that reflects today's market move, so the Holdings table, Allocation KPI,
-    and Balance Sheet Investment Portfolio headline all show the same effective
-    value simultaneously.
-
-    Formula per holding when session pct is available::
-
-        effective_mv_i = base_mv_i × (1 + pct_i / 100)
-
-    This equals yesterday's baseline × today's growth factor. When the bundle
-    is already fresh (prices already updated), the overlay remains consistent
-    because pct from the session is the intraday change rate and the same
-    arithmetic still holds.
+    Uses the same ``mv × pct / (100 + pct)`` convention as
+    :func:`compute_portfolio_day_change` so the two helpers are always
+    consistent.  The *headline* (``effective_total``) is the sum of stored
+    ``base_market_value`` from the engine — the overlay only affects
+    ``day_abs``/``day_pct`` (the sub-line), not the KPI headline itself.
 
     Parameters
     ----------
     per_holding
-        Iterable of ``PerHoldingValuation`` rows (needs ``.asset_id``,
-        ``.ticker``, ``.base_market_value``).
+        Iterable of ``PerHoldingValuation`` rows (needs ``.ticker`` and
+        ``.base_market_value``).
     session
-        In-memory price cache keyed by normalized+upper ticker; values expose
+        In-memory price cache keyed by normalised+upper ticker; values expose
         ``.daily_change_pct``.  Pass ``{}`` / ``None`` before any refresh.
     normalize_fn
         Optional ticker normalizer (defaults to ``.SE`` → ``.SR``).
@@ -170,90 +161,70 @@ def compute_effective_portfolio_mv(
     -------
     ``(effective_total, stored_total, day_abs, day_pct, live_cnt)``
 
-    * ``effective_total`` — headline to display: sum of per-holding effective
-      MVs (= stored when no session data; = live-overlay when session populated).
-    * ``stored_total``   — sum of raw ``base_market_value`` (engine baseline).
-    * ``day_abs``        — ``effective_total − stored_total``; ``None`` when
-      ``live_cnt == 0``.
-    * ``day_pct``        — ``day_abs / stored_total × 100`` (% of stored
-      baseline); ``None`` when ``live_cnt == 0`` or ``stored_total == 0``.
-    * ``live_cnt``       — number of rows that had a live session pct.
+    * ``effective_total`` — headline value = ``sum(base_market_value)``
+      (== ``holdings_value_base``; unchanged by session overlay).
+    * ``stored_total``   — same as ``effective_total`` (exposed separately so
+      callers can assert the two are equal as a consistency invariant).
+    * ``day_abs``        — ``Σ mv × pct / (100 + pct)`` over live-pct rows;
+      ``None`` when ``live_cnt == 0``.
+    * ``day_pct``        — ``day_abs / (port_value − day_abs) × 100`` (change
+      as % of the implied-previous value); ``None`` when no live pct or the
+      implied previous ≤ 0.
+    * ``live_cnt``       — number of rows that contributed a live pct.
     """
-    norm = normalize_fn or _norm_se_to_sr
-    sess = session or {}
-    stored_total: float = 0.0
-    effective_total: float = 0.0
-    live_cnt: int = 0
-
-    for row in per_holding:
-        try:
-            mv = float(getattr(row, "base_market_value", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            mv = 0.0
-        stored_total += mv
-        effective_mv = mv  # default: no overlay
-
-        tk = str(getattr(row, "ticker", "") or "").strip()
-        if tk and sess:
-            key = norm(tk).upper()
-            md = sess.get(key) or sess.get(tk.upper()) or sess.get(tk)
-            if md is not None:
-                pct = getattr(md, "daily_change_pct", None)
-                if pct is not None:
-                    effective_mv = mv * (1.0 + pct / 100.0)
-                    live_cnt += 1
-        effective_total += effective_mv
-
-    if live_cnt == 0:
-        return round(effective_total, 2), round(stored_total, 2), None, None, 0
-
-    day_abs = effective_total - stored_total
-    day_pct = (day_abs / stored_total * 100.0) if stored_total > 0 else None
-    return (
-        round(effective_total, 2),
-        round(stored_total, 2),
-        round(day_abs, 2),
-        round(day_pct, 2) if day_pct is not None else None,
-        live_cnt,
+    rows = list(per_holding)  # consume once so we can inspect length
+    port_value, day_abs, day_pct, live_cnt = compute_portfolio_day_change(
+        rows, session, normalize_fn
     )
+    return port_value, port_value, day_abs, day_pct, live_cnt
 
 
 def build_effective_mv_map(
     per_holding: Iterable,
-    session: Optional[dict],
+    session: Optional[dict] = None,
     normalize_fn: Optional[Callable[[str], str]] = None,
 ) -> dict:
-    """Return ``{asset_id: effective_base_market_value}`` with live session overlay.
+    """Return ``{asset_id: base_market_value}`` — the authoritative base-CCY MV
+    per holding from the valuation engine.
 
-    Applies the same overlay logic as :func:`compute_effective_portfolio_mv`
-    per holding.  Use for Holdings table row MV display so that the sum of
-    displayed row values equals ``compute_effective_portfolio_mv.effective_total``
-    — guaranteeing Holdings table ≡ Allocation KPI ≡ Balance Sheet headline
+    This is the base-currency form of the MV map used for Holdings table row
+    display.  The "effective" label signals that this map is the single source
+    of truth aligned with :func:`compute_effective_portfolio_mv`: the sum of
+    all values in this dict equals ``effective_total`` (and ``holdings_value_base``)
+    exactly, guaranteeing Holdings row total ≡ Allocation KPI ≡ BS headline
     by construction.
 
-    When ``session`` is empty/``None``, returns stored ``base_market_value``
-    (cold-start behaviour, identical to :func:`build_mv_map`).
+    ``session`` and ``normalize_fn`` are accepted for API symmetry with
+    :func:`compute_effective_portfolio_mv` but are not used in the headline
+    value calculation (the overlay is ``day_abs``-only per the
+    ``pct / (100 + pct)`` convention).
+
+    Falls back to an empty dict when ``per_holding`` is ``None``/empty.
     """
-    norm = normalize_fn or _norm_se_to_sr
-    sess = session or {}
-    result: dict = {}
-    for row in (per_holding or []):
-        try:
-            mv = float(getattr(row, "base_market_value", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            mv = 0.0
-        aid = getattr(row, "asset_id", "")
-        tk = str(getattr(row, "ticker", "") or "").strip()
-        effective_mv = mv
-        if tk and sess:
-            key = norm(tk).upper()
-            md = sess.get(key) or sess.get(tk.upper()) or sess.get(tk)
-            if md is not None:
-                pct = getattr(md, "daily_change_pct", None)
-                if pct is not None:
-                    effective_mv = mv * (1.0 + pct / 100.0)
-        result[aid] = effective_mv
-    return result
+    return {
+        getattr(r, "asset_id", ""): float(getattr(r, "base_market_value", 0.0) or 0.0)
+        for r in (per_holding or [])
+    }
+
+
+def build_effective_local_mv_map(
+    per_holding: Iterable,
+    session: Optional[dict] = None,
+    normalize_fn: Optional[Callable[[str], str]] = None,
+) -> dict:
+    """Return ``{asset_id: local_market_value}`` — the native-CCY MV per
+    holding from the valuation engine, for Holdings table **native-currency
+    display mode**.
+
+    Paired with :func:`build_effective_mv_map` so both base and native display
+    modes share the engine's single source of truth.  As with the base-CCY
+    variant, the headline value is the stored ``local_market_value``; session
+    overlay is ``day_abs``-only.
+    """
+    return {
+        getattr(r, "asset_id", ""): float(getattr(r, "local_market_value", 0.0) or 0.0)
+        for r in (per_holding or [])
+    }
 
 
 def build_mv_map(per_holding: Iterable) -> dict:

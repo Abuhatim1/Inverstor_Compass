@@ -1,10 +1,8 @@
 ---
 name: Display-layer single source of truth
 description: >
-  Rule and pattern for preventing KPI mismatch across tabs: any metric shown in
-  ≥2 places must be computed by ONE shared function with identical inputs, using
-  ONE shared formatter. Learned from the Holdings/Allocation ↔ Balance Sheet
-  divergence (Holdings vs BS KPI mismatch fix).
+  Architectural rule for preventing KPI mismatch across tabs: one shared function,
+  one shared formatter, identical inputs. Includes the day-change overlay convention.
 ---
 
 ## The Rule
@@ -24,61 +22,51 @@ Dual independent computations silently diverge when:
    is bit-identical).
 3. Day-change % uses different denominators (% of current vs % of previous).
 
-All three were present in the Holdings/Allocation vs Balance Sheet bug.
+All three were present in the Holdings/Allocation vs Balance Sheet KPI mismatch.
 
 ## How to Apply
 
-**Before building a new KPI:**
-- `grep` for the underlying field name (`holdings_value_base`, `daily_change_pct`,
-  `base_market_value`, etc.) across all `render_*` functions and tab bodies.
-- If the field is already rendered elsewhere, **reuse the computed variable** —
-  do not recompute it.
+**Before building a new KPI:** `grep` for the underlying engine field across all
+render functions. If it is already rendered elsewhere, **reuse the computed
+variable** — do not recompute it.
 
-**When two render locations need the same computed value:**
-- Add a pure function to `edgar_app/portfolio/display_metrics.py` (no `st.*`,
-  no file I/O, takes data as arguments so `dev_test_runner` can exercise it).
-- Both consumers `import` and call it with the **same source object** (e.g.
-  `val.per_holding` from the engine, not re-derived quantities).
-- Both consumers apply `fmt_money_compact` from `display_metrics` for the
-  rendered string — never two different formatters on the same value.
+**When two locations need the same value:** Add a pure function to
+`edgar_app/portfolio/display_metrics.py` (no Streamlit, no file I/O, takes data
+as arguments so `dev_test_runner` can exercise it with synthetic data).
 
-**Formatter rule:**
-- `fmt_money_compact(v)` is the canonical compact formatter for monetary KPIs.
-- `_fmt_compact` in `app.py` delegates to it (behavior-preserving, single source
-  of truth).
-- `_bs_fmt` in the Balance Sheet render delegates to it.
-- Do NOT add a new money formatter anywhere. Extend `fmt_money_compact` if
-  needed.
+**Formatter:** Use the canonical compact formatter in `display_metrics` for all
+monetary KPIs. Do not add a second formatter; extend the existing one if needed.
 
-## Pattern: shared helper
+## Day-change overlay convention
 
-```python
-# edgar_app/portfolio/display_metrics.py
-def compute_portfolio_day_change(per_holding, session, normalize_fn=None):
-    """Returns (port_value, day_abs, day_pct, live_cnt) — %-of-previous."""
-    ...
+The established convention for the daily-change sub-line is:
 
-def fmt_money_compact(v):
-    """Canonical: ≥1M → '1.23M', ≥10K → '12.3K', else '1,234.56'."""
-    ...
-```
+    day_abs_i = mv_i × pct_i / (100 + pct_i)   # "%-of-current" formula
 
-```python
-# In app.py (both Allocation and Balance Sheet tabs):
-from portfolio.display_metrics import compute_portfolio_day_change, fmt_money_compact
-pv, da, dp, cnt = compute_portfolio_day_change(val.per_holding, session, normalize)
-# Render: fmt_money_compact(pv), fmt_money_compact(da), f"{dp:.1f}%"
-```
+where `mv_i` is today's stored `base_market_value` (the value after the last
+price refresh), and the implied-previous value is `mv - day_abs`. The **headline
+KPI value remains the stored MV** — the overlay only affects the sub-line delta,
+not the headline figure itself.
 
-## Cross-tab consistency test
+**Why this formula:** Treats `base_market_value` as today's live price (correct
+after refresh) and back-computes yesterday's value. Using `mv × pct/100` instead
+would assume `mv` is yesterday's price and risk double-counting after a refresh
+bundle is already updated.
+
+**How to apply:** Any new day-Δ computation must use this formula and derive
+`day_pct = day_abs / (mv - day_abs) × 100`. Never use two different denominators
+for the same conceptual delta across tabs.
+
+## Regression guard
 
 The `_cat_consist()` test category in `dev_test_runner.py` exercises the shared
-helper with synthetic data and verifies:
-- `port_value == holdings_value_base` (reconciliation invariant).
-- day-Δ math (%-of-previous formula).
-- `.SE → .SR` ticker normalization.
-- missing-FX holdings counted at rate 1.0 (matches BS).
-- empty session → `None` guards fire.
+display-layer helpers with synthetic in-memory data and verifies:
+- Portfolio total == `holdings_value_base` (reconciliation invariant).
+- Day-Δ math uses the correct `pct/(100+pct)` formula.
+- `.SE → .SR` ticker normalization works.
+- Empty-session guards return `None` for optional fields.
+- Holdings map total == aggregate total (three-way equality invariant).
+- BS identity: `port + cash + alts + fixed == total_assets`; `total_assets - debt == net`.
 
 **Never remove or reduce this category** — it is the regression guard for the
 dual-tab consistency contract.

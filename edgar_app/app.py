@@ -3109,13 +3109,14 @@ def render_holdings_tab(bundle: dict) -> None:
         # independently — that risks FX-rounding drift from the engine total.
         from portfolio.display_metrics import (
             build_effective_mv_map as _hld_bemv,
-            build_local_mv_map as _hld_blmv,
+            build_effective_local_mv_map as _hld_blmv,
         )
-        # Apply the same live-overlay as Allocation and BS: row MV = effective
-        # (base_mv × (1+pct/100) when session has daily_change_pct, stored otherwise).
-        # live_cache is already the session dict fetched above.
+        # Both maps read from val.per_holding (same engine source as Allocation
+        # and BS), so Holdings row values sum to holdings_value_base exactly —
+        # matching both KPI headlines. The "effective" helpers also accept the
+        # session and normalize_fn args for API symmetry with the aggregate helper.
         _val_mv_map       = _hld_bemv(_val.per_holding, live_cache, _normalize_ticker)
-        _val_local_mv_map = _hld_blmv(_val.per_holding)
+        _val_local_mv_map = _hld_blmv(_val.per_holding, live_cache, _normalize_ticker)
 
         # ── Build the holdings table ───────────────────────────────────────────
         _native_mode    = st.session_state.get("_native_mode", False)
