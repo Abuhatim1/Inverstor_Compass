@@ -2986,16 +2986,23 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
                 use_container_width=True,
             )
     # CSV export of the filtered allocation table
+    # Uses a base64 data-URI link with target="_blank" so the download opens
+    # in a new tab and the app stays visible (avoids iframe navigation issue).
     _alloc_csv_export = _disp.copy()
     with _exp_c2:
-        st.download_button(
-            "⬇️ Export Table (CSV)",
-            data      = _alloc_csv_export.to_csv(index=False),
-            file_name = f"allocation_{_ts_file}.csv",
-            mime      = "text/csv",
-            key       = "alloc_dl_csv",
-            use_container_width = True,
-            help      = "Download the filtered allocation table as CSV.",
+        import base64 as _alloc_b64
+        _alloc_b64_data = _alloc_b64.b64encode(
+            _alloc_csv_export.to_csv(index=False).encode()
+        ).decode()
+        _alloc_csv_name = f"allocation_{_ts_file}.csv"
+        st.markdown(
+            f'<a href="data:text/csv;base64,{_alloc_b64_data}" '
+            f'download="{_alloc_csv_name}" target="_blank" '
+            f'style="display:block;text-align:center;padding:0.45rem 1rem;'
+            f'background:#0f172a;color:#fff;border-radius:6px;'
+            f'text-decoration:none;font-size:0.875rem;">'
+            f'⬇️ Export Table (CSV)</a>',
+            unsafe_allow_html=True,
         )
 
     # ── Filtered asset table ──────────────────────────────────────────────────
@@ -3334,21 +3341,26 @@ def render_holdings_tab(bundle: dict) -> None:
                 _dlg_bulk_upload()
         with _tb3:
             # CSV export — strip the hidden asset_id column and the status emoji column
+            # Uses a base64 data-URI link with target="_blank" so the download opens
+            # in a new tab and the app stays visible (avoids iframe navigation issue).
             import io as _csv_io
+            import base64 as _csv_b64
             _csv_cols = [c for c in (rows[0].keys() if rows else []) if c not in (" ", "_asset_id")]
             _csv_buf  = _csv_io.StringIO()
             import csv as _csv_mod
             _csv_wr   = _csv_mod.DictWriter(_csv_buf, fieldnames=_csv_cols, extrasaction="ignore")
             _csv_wr.writeheader()
             _csv_wr.writerows(rows)
-            st.download_button(
-                "⬇️ Download CSV",
-                data    = _csv_buf.getvalue(),
-                file_name = f"holdings_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime    = "text/csv",
-                key     = "dl_holdings_csv",
-                use_container_width = True,
-                help    = "Download the current holdings table as a CSV file.",
+            _h_csv_b64  = _csv_b64.b64encode(_csv_buf.getvalue().encode()).decode()
+            _h_csv_name = f"holdings_{datetime.now().strftime('%Y%m%d')}.csv"
+            st.markdown(
+                f'<a href="data:text/csv;base64,{_h_csv_b64}" '
+                f'download="{_h_csv_name}" target="_blank" '
+                f'style="display:block;text-align:center;padding:0.45rem 1rem;'
+                f'background:#0f172a;color:#fff;border-radius:6px;'
+                f'text-decoration:none;font-size:0.875rem;">'
+                f'⬇️ Download CSV</a>',
+                unsafe_allow_html=True,
             )
 
         # ── Secondary diagnostics ──────────────────────────────────────────────
