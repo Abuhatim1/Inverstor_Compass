@@ -60,7 +60,7 @@ _HAVE_AMIRI = os.path.isfile(_AMIRI_R) and os.path.isfile(_AMIRI_B)
 _AR: dict[str, str] = {
     # Cover
     "app_name":      "بوصلة - بوصلة المستثمر",
-    "doc_title":     "كشف الثروة العائلية",
+    "doc_title":     "تقرير كشف الثروة",
     "prepared":      "أُعِدَّ بتاريخ",
     "base_ccy_lbl":  "العملة الأساسية",
     "confidential":  "سري",

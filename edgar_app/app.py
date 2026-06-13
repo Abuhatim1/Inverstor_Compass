@@ -528,12 +528,8 @@ with st.sidebar:
     )
     st.divider()
 
-    # ── 1. Family Wealth Statement ────────────────────────────────────────────
-    st.caption("📄 **Family Wealth Statement**")
-    st.caption(
-        "A professional PDF your family can open and understand — "
-        "all assets, values, and account locations in one document."
-    )
+    # ── 1. Wealth Statement Report ────────────────────────────────────────────
+    st.caption("📄 **Wealth Statement Report**")
     _ws_notes = st.text_area(
         "Personal note (optional)",
         key="ws_notes",
@@ -548,8 +544,7 @@ with st.sidebar:
     if _ws_base_ccy == "— Native —":
         _ws_base_ccy = "SAR"
 
-    # Cache PDF in session state so it is only rebuilt when inputs change,
-    # not on every Streamlit re-run.
+    # Cache PDF bytes — only rebuild when base_ccy or notes content changes.
     _ws_cache_key = f"_ws_pdf_{_ws_base_ccy}_{hash(_ws_notes or '')}"
     if _ws_cache_key not in st.session_state:
         for _k in [k for k in list(st.session_state.keys()) if str(k).startswith("_ws_pdf_")]:
@@ -565,20 +560,16 @@ with st.sidebar:
 
     _ws_bytes = st.session_state.get(_ws_cache_key)
     if _ws_bytes:
-        import base64 as _b64ws
         import datetime as _wdt
         _ws_fname = f"bousala_wealth_{_wdt.date.today().strftime('%Y%m%d')}.pdf"
-        _ws_b64 = _b64ws.b64encode(_ws_bytes).decode()
-        st.markdown(
-            f'<a href="data:application/pdf;base64,{_ws_b64}" '
-            f'download="{_ws_fname}" target="_blank" '
-            f'style="display:block;text-align:center;padding:9px 12px;'
-            f'background:#1e3a8a;color:#ffffff;border-radius:6px;'
-            f'text-decoration:none;font-weight:600;font-size:13px;margin-top:6px;">'
-            f'📥 Download Wealth Statement PDF</a>',
-            unsafe_allow_html=True,
+        st.download_button(
+            "📥 Download Wealth Statement Report",
+            data=_ws_bytes,
+            file_name=_ws_fname,
+            mime="application/pdf",
+            use_container_width=True,
+            key="ws_download_btn",
         )
-        st.caption("↗️ Opens in a new browser tab — close that tab to return here.")
 
     st.divider()
 
