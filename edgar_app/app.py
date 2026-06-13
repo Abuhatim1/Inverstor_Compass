@@ -547,22 +547,38 @@ with st.sidebar:
     _ws_base_ccy = st.session_state.get("global_base_ccy", "SAR")
     if _ws_base_ccy == "— Native —":
         _ws_base_ccy = "SAR"
-    try:
-        from portfolio.wealth_statement import build_wealth_statement as _build_ws
+
+    # Cache PDF in session state so it is only rebuilt when inputs change,
+    # not on every Streamlit re-run.
+    _ws_cache_key = f"_ws_pdf_{_ws_base_ccy}_{hash(_ws_notes or '')}"
+    if _ws_cache_key not in st.session_state:
+        for _k in [k for k in list(st.session_state.keys()) if str(k).startswith("_ws_pdf_")]:
+            del st.session_state[_k]
+        try:
+            from portfolio.wealth_statement import build_wealth_statement as _build_ws
+            st.session_state[_ws_cache_key] = _build_ws(
+                base_ccy=_ws_base_ccy, notes=_ws_notes or ""
+            )
+        except Exception as _ws_err:
+            st.session_state[_ws_cache_key] = None
+            st.error(f"Could not generate PDF: {_ws_err}", icon="⚠️")
+
+    _ws_bytes = st.session_state.get(_ws_cache_key)
+    if _ws_bytes:
+        import base64 as _b64ws
         import datetime as _wdt
         _ws_fname = f"bousala_wealth_{_wdt.date.today().strftime('%Y%m%d')}.pdf"
-        _ws_bytes = _build_ws(base_ccy=_ws_base_ccy, notes=_ws_notes or "")
-        st.download_button(
-            "📥 Download Wealth Statement PDF",
-            data=_ws_bytes,
-            file_name=_ws_fname,
-            mime="application/pdf",
-            use_container_width=True,
-            key="ws_download_btn",
-            help="Downloads a family-friendly Arabic wealth summary PDF.",
+        _ws_b64 = _b64ws.b64encode(_ws_bytes).decode()
+        st.markdown(
+            f'<a href="data:application/pdf;base64,{_ws_b64}" '
+            f'download="{_ws_fname}" target="_blank" '
+            f'style="display:block;text-align:center;padding:9px 12px;'
+            f'background:#1e3a8a;color:#ffffff;border-radius:6px;'
+            f'text-decoration:none;font-weight:600;font-size:13px;margin-top:6px;">'
+            f'📥 Download Wealth Statement PDF</a>',
+            unsafe_allow_html=True,
         )
-    except Exception as _ws_err:
-        st.error(f"Could not generate PDF: {_ws_err}", icon="⚠️")
+        st.caption("↗️ Opens in a new browser tab — close that tab to return here.")
 
     st.divider()
 

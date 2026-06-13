@@ -155,6 +155,10 @@ _AR: dict[str, str] = {
     ),
     # Footer  ({date} and {page} are filled at render time; {{nb}} → {nb} for fpdf2)
     "footer_tpl": "بوصلة المستثمر  |  سري  |  {date}  |  صفحة {page} من {{nb}}",
+    # Detail / sub-rows (location & notes)
+    "detail_held_at": "محتجز في",
+    "detail_note":    "ملاحظة",
+    "detail_inst":    "المؤسسة",
     # Section 5 — Liabilities
     "sec5_liab_title": "القسم الخامس - الالتزامات والمديونيات",
     "sec5_liab_sub":   "الأرصدة القائمة المُستحقة للسداد بعملاتها الأصلية وبالعملة الأساسية.",
@@ -389,6 +393,23 @@ class _WealthPDF(FPDF):
         self._smart_cell(_W - 60, 5, value, fill=True, base_size=8)
         self.ln()
 
+    def detail_row(self, text: str) -> None:
+        """
+        Muted sub-row spanning full width — used for custodian, institution,
+        or free-text notes beneath each main table row.
+        Skipped automatically when text is blank.
+        """
+        if not str(text).strip():
+            return
+        self.set_fill_color(245, 247, 250)
+        self.set_text_color(*_MUTED)
+        # Prefix uses Helvetica (ASCII-safe); text body uses smart font detection.
+        self._hv("", 7)
+        self.cell(10, 4, "   >>", fill=True, align="L")
+        self._smart_cell(_W - 10, 4, str(text), fill=True, align="R", base_size=7)
+        self.ln()
+        self.set_text_color(0, 0, 0)
+
 
 # ── RTL column helper ──────────────────────────────────────────────────────────
 
@@ -598,6 +619,17 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
                 _clip(h.company_name or h.ticker, 32),
             ]
             pdf.table_row(vals_r, _wids_r, i % 2 == 0, ["R"] * 6)
+            # ── Custodian sub-row ─────────────────────────────────────────────
+            _h_acct = accounts.get(getattr(h, "default_account_id", "") or "")
+            if _h_acct:
+                _held = f"{_AR['detail_held_at']}: {_h_acct.account_name or ''}"
+                if _h_acct.institution:
+                    _held += f"  |  {_h_acct.institution}"
+                pdf.detail_row(_held)
+            # ── Notes sub-row ─────────────────────────────────────────────────
+            _h_notes = getattr(h, "notes", "") or ""
+            if _h_notes.strip():
+                pdf.detail_row(f"{_AR['detail_note']}: {_h_notes.strip()}")
 
         pdf.total_row(
             _AR["total_hld"].format(n=len(holdings)),
@@ -642,6 +674,14 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
                 _clip(inv.investment_name, 34),
             ]
             pdf.table_row(vals_r, _wids_r, i % 2 == 0, ["R"] * 6)
+            # ── Institution sub-row ───────────────────────────────────────────
+            _inv_inst = getattr(inv, "institution", "") or ""
+            if _inv_inst.strip():
+                pdf.detail_row(f"{_AR['detail_inst']}: {_inv_inst.strip()}")
+            # ── Notes sub-row ─────────────────────────────────────────────────
+            _inv_notes = getattr(inv, "notes", "") or ""
+            if _inv_notes.strip():
+                pdf.detail_row(f"{_AR['detail_note']}: {_inv_notes.strip()}")
 
         pdf.total_row(
             _AR["total_inv"].format(n=len(igi)),
@@ -761,6 +801,10 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
                 _clip(asset.name, 26),
             ]
             pdf.table_row(vals_r, _wids_r, i % 2 == 0, ["R"] * 7)
+            # ── Notes sub-row (physical location, custodian, etc.) ────────────
+            _fa_notes = getattr(asset, "notes", "") or ""
+            if _fa_notes.strip():
+                pdf.detail_row(f"{_AR['detail_note']}: {_fa_notes.strip()}")
 
         pdf.total_row(
             _AR["total_assets"].format(n=len(fa)),
