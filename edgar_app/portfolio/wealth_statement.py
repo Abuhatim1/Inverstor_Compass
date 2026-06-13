@@ -156,7 +156,7 @@ _AR: dict[str, str] = {
     # Footer  ({date} and {page} are filled at render time; {{nb}} → {nb} for fpdf2)
     "footer_tpl": "بوصلة المستثمر  |  سري  |  {date}  |  صفحة {page} من {{nb}}",
     # Detail / sub-rows (location & notes)
-    "detail_held_at": "محتجز في",
+    "detail_held_at": "موجود في",
     "detail_note":    "ملاحظة",
     "detail_inst":    "المؤسسة",
     # Section 5 — Liabilities
