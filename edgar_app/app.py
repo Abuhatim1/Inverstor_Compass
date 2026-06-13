@@ -7884,6 +7884,53 @@ def render_global_header() -> str:
     _gh_snaps          = record_nw_snapshot_if_needed(_gh_nw, _base_ccy)
     _gh_delta_abs, _gh_delta_pct = get_monthly_trend(_gh_nw, _base_ccy, _gh_snaps)
 
+    # ── Toolbar sparkline — tiny SVG injected into the top bar strip ────────
+    # Sits between the sidebar >> arrows and the ⋮ menu using position:fixed.
+    # pointer-events:none so it never blocks toolbar clicks.
+    _sp_raw = sorted(
+        [s for s in _gh_snaps if s.get("ccy") == _base_ccy],
+        key=lambda x: x["month"],
+    )
+    _sp_today_mo = __import__("datetime").date.today().strftime("%Y-%m")
+    _sp_pts = [s for s in _sp_raw if s["month"] != _sp_today_mo]
+    _sp_pts.append({"month": _sp_today_mo, "value": _gh_nw, "ccy": _base_ccy})
+    _sp_pts.sort(key=lambda x: x["month"])
+    _sp_pts = _sp_pts[-12:]   # at most 12 months
+
+    if len(_sp_pts) >= 2:
+        _sp_w, _sp_h = 140, 20
+        _sp_vals = [p["value"] for p in _sp_pts]
+        _sp_mn, _sp_mx = min(_sp_vals), max(_sp_vals)
+        _sp_rng  = (_sp_mx - _sp_mn) or 1
+        _sp_step = _sp_w / (len(_sp_vals) - 1)
+        _sp_xy   = []
+        for _si, _sv in enumerate(_sp_vals):
+            _sx = round(_si * _sp_step, 1)
+            _sy = round(_sp_h - (_sv - _sp_mn) / _sp_rng * (_sp_h - 4) - 2, 1)
+            _sp_xy.append((_sx, _sy))
+        _sp_col  = "#22c55e" if _sp_vals[-1] >= _sp_vals[0] else "#ef4444"
+        _sp_fill = "rgba(34,197,94,0.20)" if _sp_col == "#22c55e" else "rgba(239,68,68,0.20)"
+        _sp_line_pts = " ".join(f"{x},{y}" for x, y in _sp_xy)
+        _sp_poly_pts = (
+            " ".join(f"{x},{y}" for x, y in _sp_xy)
+            + f" {_sp_w},{_sp_h} 0,{_sp_h}"
+        )
+        _sp_svg = (
+            f'<svg width="{_sp_w}" height="{_sp_h}" '
+            f'xmlns="http://www.w3.org/2000/svg" style="display:block">'
+            f'<polygon points="{_sp_poly_pts}" fill="{_sp_fill}" stroke="none"/>'
+            f'<polyline points="{_sp_line_pts}" fill="none" stroke="{_sp_col}" '
+            f'stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'
+            f'</svg>'
+        )
+        st.markdown(
+            f'<div style="position:fixed;top:9px;left:50%;'
+            f'transform:translateX(-50%);z-index:999990;'
+            f'pointer-events:none;opacity:0.80;">'
+            f'{_sp_svg}</div>',
+            unsafe_allow_html=True,
+        )
+
     # ── Invested (holdings MV only) P&L colour ─────────────────────────────
     _gh_inv_pc = "#22c55e" if _gh_val.unrealized_pnl_base >= 0 else "#ef4444"
     _gh_inv_ps = "+" if _gh_val.unrealized_pnl_base >= 0 else ""
