@@ -10077,12 +10077,13 @@ if st.session_state.get("show_help", False):
     st.stop()
 
 if True:
-    (tab_fixed, tab_portfolio, tab_alt, tab_accounts, tab_activity,
+    (tab_portfolio, tab_alt, tab_other_assets, tab_fixed, tab_accounts, tab_activity,
      tab_analysis, tab_research,
      tab_test) = st.tabs([
-        "🏦 Balance Sheet",
         "💼 Portfolio",
         "🏦 Alt Investments",
+        "🏠 Other Assets & Liabilities",
+        "🏦 Balance Sheet",
         "💳 Accounts",
         "📜 Activity",
         "🧭 Analysis",
@@ -10246,6 +10247,20 @@ if True:
 
     with tab_alt:
         render_alt_investments_tab()
+
+    with tab_other_assets:
+        _oa_page = st.pills(
+            "oa_nav",
+            ["🏛️ Assets", "📋 Liabilities"],
+            default="🏛️ Assets",
+            label_visibility="collapsed",
+            key="oa_subnav",
+        )
+        st.divider()
+        if _oa_page == "📋 Liabilities":
+            render_liabilities_tab()
+        else:
+            render_fixed_assets_tab()
 
     with tab_fixed:
         # ── True Balance Sheet: all asset classes vs all liabilities ──────────
@@ -10644,19 +10659,6 @@ if True:
             else:
                 st.info("Net worth trend will appear after the first month of data.", icon="📈")
 
-        # ── Sub-page pills ─────────────────────────────────────────────────
-        _bs_page = st.pills(
-            "bs_nav",
-            ["🏛️ Assets", "📋 Liabilities"],
-            default="🏛️ Assets",
-            label_visibility="collapsed",
-            key="bs_subnav",
-        )
-        st.divider()
-        if _bs_page == "📋 Liabilities":
-            render_liabilities_tab()
-        else:
-            render_fixed_assets_tab()
 
     with tab_test:
         render_test_runner_tab()
