@@ -5162,6 +5162,39 @@ def render_accounts_tab() -> None:
     import pandas as pd
     from datetime import date as _date_cls
 
+    @st.dialog("✏️ Edit Account")
+    def _dlg_edit_account(ea_id: str, ea):
+        with st.form("dlg_edit_account_form"):
+            ee1, ee2 = st.columns(2)
+            with ee1:
+                ea_name = st.text_input("Account name", value=ea.account_name)
+                ea_inst = st.text_input("Institution",  value=ea.institution or "")
+                ea_type = st.selectbox(
+                    "Account type", ACCOUNT_TYPES,
+                    index=ACCOUNT_TYPES.index(ea.account_type)
+                    if ea.account_type in ACCOUNT_TYPES else 0,
+                )
+            with ee2:
+                ea_ccy  = st.selectbox(
+                    "Base currency", CURRENCIES,
+                    index=CURRENCIES.index(ea.base_currency)
+                    if ea.base_currency in CURRENCIES else 0,
+                )
+                ea_note = st.text_input("Notes", value=ea.notes or "")
+                ea_act  = st.checkbox("Active", value=ea.active)
+            if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                upsert_account(
+                    account_id=ea_id,
+                    account_name=ea_name.strip() or ea.account_name,
+                    institution=ea_inst.strip(),
+                    account_type=ea_type,
+                    base_currency=ea_ccy,
+                    notes=ea_note.strip(),
+                    active=ea_act,
+                )
+                st.toast("Account updated.", icon="💾")
+                st.rerun()
+
     st.header("💳 Accounts")
     st.caption(
         "Manage your investment accounts, bank accounts, and cash wallets. "
@@ -5217,6 +5250,8 @@ def render_accounts_tab() -> None:
                         st.session_state[f"dep_open_{aid}"] = not st.session_state.get(f"dep_open_{aid}", False)
                     if st.button("− Withdraw", key=f"wdr_btn_{aid}"):
                         st.session_state[f"wdr_open_{aid}"] = not st.session_state.get(f"wdr_open_{aid}", False)
+                    if st.button("✏️ Edit", key=f"edit_acct_btn_{aid}", use_container_width=True):
+                        _dlg_edit_account(aid, a)
 
                 if st.session_state.get(f"dep_open_{aid}"):
                     with st.form(f"dep_form_{aid}"):
@@ -5320,42 +5355,6 @@ def render_accounts_tab() -> None:
                     st.toast(f"Account '{na_name}' created.", icon="✅")
                     st.rerun()
 
-    # ── Edit / Deactivate ─────────────────────────────────────────────────────
-    if active:
-        st.divider()
-        with st.expander("✏️ Edit Account", expanded=False):
-            _ea_opts = {account_display_name(a): aid for aid, a in active.items()}
-            _ea_lbl  = st.selectbox("Select account to edit", list(_ea_opts.keys()))
-            _ea_id   = _ea_opts[_ea_lbl]
-            _ea      = active[_ea_id]
-            with st.form("edit_account_form"):
-                ee1, ee2 = st.columns(2)
-                with ee1:
-                    ea_name = st.text_input("Account name", value=_ea.account_name)
-                    ea_inst = st.text_input("Institution",  value=_ea.institution)
-                    ea_type = st.selectbox("Account type", ACCOUNT_TYPES,
-                                           index=ACCOUNT_TYPES.index(_ea.account_type)
-                                           if _ea.account_type in ACCOUNT_TYPES else 0)
-                with ee2:
-                    ea_ccy  = st.selectbox("Base currency", CURRENCIES,
-                                           index=CURRENCIES.index(_ea.base_currency)
-                                           if _ea.base_currency in CURRENCIES else 0)
-                    ea_note = st.text_input("Notes", value=_ea.notes)
-                    ea_act  = st.checkbox("Active", value=_ea.active)
-                ea_sub1, ea_sub2 = st.columns(2)
-                with ea_sub1:
-                    if st.form_submit_button("💾 Save", type="primary"):
-                        upsert_account(
-                            account_id=_ea_id,
-                            account_name=ea_name.strip() or _ea.account_name,
-                            institution=ea_inst.strip(),
-                            account_type=ea_type,
-                            base_currency=ea_ccy,
-                            notes=ea_note.strip(),
-                            active=ea_act,
-                        )
-                        st.toast("Account updated.", icon="💾")
-                        st.rerun()
 
 
 def render_transactions_tab() -> None:
