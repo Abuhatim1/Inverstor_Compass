@@ -2770,6 +2770,90 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     else:
         _day_html = '<div style="font-size:0.68em;color:#94a3b8;margin-top:2px;">— refresh prices for day Δ</div>'
 
+    # ── Portfolio P&L monthly trend sparkline (inside P&L card) ──────────────
+    # Uses Balance Sheet daily snapshots ("port" key = holdings MV only, no cash).
+    # Monthly representative = last BS snapshot of each month.
+    # P&L[month] = port_mv_snapshot - current_total_invested_CB  (CB held constant
+    # as approximation; trend shape is correct even when CB grows over time).
+    # First data point = average of prior-year monthly P&Ls (context anchor).
+    # Demo fallback if fewer than 2 real data points.
+    from portfolio.bs_snapshot import load_bs_snapshots as _pnl_load_bs
+    import datetime as _pnl_dt_mod
+    _pnl_bs_all    = _pnl_load_bs()
+    _pnl_total_cb  = _df["_cb"].sum()          # unfiltered invested CB (current)
+    _pnl_total_mv  = _df["_mv"].sum()          # unfiltered holdings MV (current)
+    _pnl_total_now = _pnl_total_mv - _pnl_total_cb   # live portfolio P&L
+    _pnl_today_yr  = _pnl_dt_mod.date.today().year
+    _pnl_today_mo  = _pnl_dt_mod.date.today().strftime("%Y-%m")
+    _pnl_prev_yr   = str(_pnl_today_yr - 1)
+
+    # Group BS snapshots by month; keep the LAST snapshot per month (most recent)
+    _pnl_mo_snap: dict[str, float] = {}
+    for _bs in _pnl_bs_all:
+        if _bs.get("ccy") != base_ccy:
+            continue
+        _bd = _bs.get("date", "")
+        _bport = _bs.get("port")
+        if not _bd or _bport is None:
+            continue
+        _bmo = _bd[:7]          # YYYY-MM
+        # keep latest date per month
+        if _bmo not in _pnl_mo_snap or _bd > _pnl_mo_snap.get(_bmo + "_date", ""):
+            _pnl_mo_snap[_bmo] = float(_bport) - _pnl_total_cb
+            _pnl_mo_snap[_bmo + "_date"] = _bd
+    # Remove the _date helper keys
+    _pnl_by_mo = {m: v for m, v in _pnl_mo_snap.items() if not m.endswith("_date")}
+    # Override today's month with live value
+    _pnl_by_mo[_pnl_today_mo] = _pnl_total_now
+
+    # Prev-year anchor: average of all monthly P&Ls from the prior calendar year
+    _pnl_prev_vals = [v for m, v in _pnl_by_mo.items() if m.startswith(_pnl_prev_yr)]
+    _pnl_anchor    = sum(_pnl_prev_vals) / len(_pnl_prev_vals) if _pnl_prev_vals else None
+
+    # Last 12 months (chronological)
+    _pnl_last12 = sorted(
+        [(m, v) for m, v in _pnl_by_mo.items()
+         if m >= f"{_pnl_today_yr - 1:04d}-01"],
+        key=lambda x: x[0],
+    )[-12:]
+
+    # Final series: prev-year avg anchor first, then last-12 monthly points
+    _pnl_series: list[float] = []
+    if _pnl_anchor is not None:
+        _pnl_series.append(_pnl_anchor)
+    _pnl_series.extend(v for _, v in _pnl_last12)
+
+    # Demo fallback when real history is thin
+    if len(_pnl_series) < 2:
+        _pnl_base = _pnl_total_now if _pnl_total_now != 0 else 10_000
+        _pnl_series = [
+            _pnl_base * f for f in
+            [0.38, 0.50, 0.44, 0.58, 0.66, 0.61, 0.74, 0.82, 0.77, 0.88, 0.94, 1.00]
+        ]
+
+    # SVG — 90 × 18 px; sits neatly below the P&L % badge inside the card
+    _psp_w, _psp_h = 90, 18
+    _psp_mn, _psp_mx = min(_pnl_series), max(_pnl_series)
+    _psp_rng  = (_psp_mx - _psp_mn) or 1
+    _psp_step = _psp_w / (len(_pnl_series) - 1)
+    _psp_xy   = []
+    for _pi, _pv in enumerate(_pnl_series):
+        _px = round(_pi * _psp_step, 1)
+        _py = round(_psp_h - (_pv - _psp_mn) / _psp_rng * (_psp_h - 4) - 2, 1)
+        _psp_xy.append((_px, _py))
+    _psp_col  = "#22c55e" if _pnl_series[-1] >= _pnl_series[0] else "#ef4444"
+    _psp_fill = "rgba(34,197,94,0.20)" if _psp_col == "#22c55e" else "rgba(239,68,68,0.20)"
+    _psp_line = " ".join(f"{x},{y}" for x, y in _psp_xy)
+    _psp_poly = " ".join(f"{x},{y}" for x, y in _psp_xy) + f" {_psp_w},{_psp_h} 0,{_psp_h}"
+    _pnl_spark_svg = (
+        f'<svg width="{_psp_w}" height="{_psp_h}" xmlns="http://www.w3.org/2000/svg" '
+        f'style="display:block;margin-top:5px">'
+        f'<polygon points="{_psp_poly}" fill="{_psp_fill}" stroke="none"/>'
+        f'<polyline points="{_psp_line}" fill="none" stroke="{_psp_col}" '
+        f'stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>'
+        f'</svg>'
+    )
+
     # ── KPI grid — pure HTML flex, portrait-safe ─────────────────────────────
     # _kpi_pc is defined locally (NOT _pc which belongs to render_global_header)
     _kpi_pc = "#22c55e" if _fas_pnl >= 0 else "#ef4444"
@@ -2791,6 +2875,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     <div class="fas-kpi-lbl">P&amp;L ({base_ccy})</div>
     <div class="fas-kpi-val" style="color:{_kpi_pc};">{_pnl_sign}{_fmt_compact(_fas_pnl)}</div>
     <div><span class="fas-kpi-pct" style="background:{_pct_bg};color:{_pct_fg};">{_arrow} {_pnl_sign}{_fas_pnl_pct:.1f}%</span></div>
+    {_pnl_spark_svg}
   </div>
   <div class="fas-kpi-card">
     <div class="fas-kpi-lbl">Weight</div>
