@@ -4650,6 +4650,12 @@ def render_holdings_tab(bundle: dict) -> None:
             # ── Account selector ──────────────────────────────────────────────
             _ed_accts   = {aid: a for aid, a in _ed_load_accts().items() if a.active}
             _cur_aid    = getattr(dlg_h, "default_account_id", "") or ""
+            # Always include the holding's current account even if inactive,
+            # so the dropdown pre-selects it and no false warning fires.
+            if _cur_aid and _cur_aid not in _ed_accts:
+                _all_accts = _ed_load_accts()
+                if _cur_aid in _all_accts:
+                    _ed_accts[_cur_aid] = _all_accts[_cur_aid]
             _ed_opts    = [""] + list(_ed_accts.keys())
             _ed_labels  = {
                 "": "— Select account —",
