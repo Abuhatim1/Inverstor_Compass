@@ -10222,7 +10222,7 @@ if st.session_state.get("show_help", False):
     st.stop()
 
 if True:
-    (tab_portfolio, tab_alt, tab_other_assets, tab_fixed, tab_accounts, tab_activity,
+    (tab_portfolio, tab_alt, tab_other_assets, tab_fixed, tab_accounts,
      tab_analysis, tab_research,
      tab_test) = st.tabs([
         "💼 Portfolio",
@@ -10230,7 +10230,6 @@ if True:
         "🏠 Other Assets & Liabilities",
         "🏦 Balance Sheet",
         "💳 Accounts",
-        "📜 Activity",
         "🧭 Analysis",
         "🔍 Research",
         "🧪 Test Runner",
@@ -10241,7 +10240,7 @@ if True:
     with tab_portfolio:
         _port_page = st.pills(
             "portfolio_nav",
-            ["📊 Allocation", "💼 Holdings", "📁 Closed Holdings"],
+            ["📊 Allocation", "💼 Holdings", "📁 Closed Holdings", "📜 Trade Log"],
             default="📊 Allocation",
             label_visibility="collapsed",
             key="portfolio_subnav",
@@ -10251,6 +10250,8 @@ if True:
             render_holdings_tab(_shared_bundle)
         elif _port_page == "📁 Closed Holdings":
             render_closed_holdings_tab()
+        elif _port_page == "📜 Trade Log":
+            render_transactions_tab()
         else:
             render_allocation_tab(_shared_bundle)
 
@@ -10267,20 +10268,6 @@ if True:
             render_cash_ledger_tab()
         else:
             render_accounts_tab()
-
-    with tab_activity:
-        _act_page = st.pills(
-            "activity_nav",
-            ["📜 Transaction History", "💹 Cashflow"],
-            default="📜 Transaction History",
-            label_visibility="collapsed",
-            key="activity_subnav",
-        )
-        st.divider()
-        if _act_page == "💹 Cashflow":
-            render_cashflow_tab()
-        else:
-            render_transactions_tab()
 
     with tab_analysis:
         _analysis_page = st.pills(
