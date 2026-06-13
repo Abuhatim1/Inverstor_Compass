@@ -10692,9 +10692,9 @@ if True:
                 'Asset Distribution</p>',
                 unsafe_allow_html=True,
             )
-            _bs_donut_labels = ["📈 Portfolio", "🏦 Alt Investments", "🏛️ Fixed Assets"]
-            _bs_donut_values = [_bs_port, _bs_alts, _bs_fixed]
-            _bs_donut_colors = ["#0ea5e9", "#8b5cf6", "#f59e0b"]
+            _bs_donut_labels = ["📈 Portfolio", "🏦 Alt Investments", "🏛️ Fixed Assets", "💰 Cash / Banks"]
+            _bs_donut_values = [_bs_port, _bs_alts, _bs_fixed, _bs_cash]
+            _bs_donut_colors = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#10b981"]
             # Only show slices with value > 0
             _bs_dv = [(l, v, c) for l, v, c in
                       zip(_bs_donut_labels, _bs_donut_values, _bs_donut_colors) if v > 0]
