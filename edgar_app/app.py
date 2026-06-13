@@ -2546,6 +2546,7 @@ def _render_allocation_section(val, holdings: dict, base_ccy: str) -> None:
     _view = st.selectbox(
         "Chart view",
         ["By Market", "By Asset", "By Asset Type", "By Sector", "By Currency"],
+        index=1,
         key="alloc_chart_view",
     )
     _grp = {
