@@ -7897,6 +7897,19 @@ def render_global_header() -> str:
     _sp_pts.sort(key=lambda x: x["month"])
     _sp_pts = _sp_pts[-12:]   # at most 12 months
 
+    # Demo fallback — shown only when real history is thin (< 2 snapshots).
+    # Anchors to the live net worth as the final point so the scale is realistic.
+    # Disappears automatically once two real monthly snapshots exist.
+    if len(_sp_pts) < 2:
+        _sp_base = _gh_nw if _gh_nw else 100_000
+        _sp_demo_factors = [0.84, 0.88, 0.91, 0.87, 0.93, 0.96,
+                            0.94, 0.98, 1.01, 1.05, 1.02, 1.00]
+        _sp_pts = [
+            {"month": f"demo-{i:02d}", "value": _sp_base * f, "ccy": _base_ccy}
+            for i, f in enumerate(_sp_demo_factors)
+        ]
+        _sp_pts[-1]["value"] = _sp_base   # last point = exact live value
+
     if len(_sp_pts) >= 2:
         _sp_w, _sp_h = 140, 20
         _sp_vals = [p["value"] for p in _sp_pts]
