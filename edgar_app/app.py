@@ -8910,8 +8910,8 @@ def render_alt_investments_tab() -> None:
         _f_mat_from = st.session_state.get("igi_f_mat_from")
         _f_mat_to   = st.session_state.get("igi_f_mat_to")
 
-        # Apply all filters (AND logic)
-        _filtered_igi = _igi_all
+        # Apply all filters (AND logic) — exclude Closed investments from the active list
+        _filtered_igi = _igi_open
         if _f_inst and set(_f_inst) != set(_igi_institutions):
             _filtered_igi = [i for i in _filtered_igi if i.institution in _f_inst]
         if _f_sharia and set(_f_sharia) != set(_igi_sharia_opts):
