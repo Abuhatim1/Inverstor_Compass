@@ -545,9 +545,9 @@ with st.sidebar:
         _ws_base_ccy = "SAR"
 
     # Cache PDF bytes — only rebuild when base_ccy or notes content changes.
-    _ws_cache_key = f"_ws_pdf_{_ws_base_ccy}_{hash(_ws_notes or '')}"
+    _ws_cache_key = f"_ws_pdf2_{_ws_base_ccy}_{hash(_ws_notes or '')}"
     if _ws_cache_key not in st.session_state:
-        for _k in [k for k in list(st.session_state.keys()) if str(k).startswith("_ws_pdf_")]:
+        for _k in [k for k in list(st.session_state.keys()) if str(k).startswith("_ws_pdf")]:
             del st.session_state[_k]
         try:
             from portfolio.wealth_statement import build_wealth_statement as _build_ws
