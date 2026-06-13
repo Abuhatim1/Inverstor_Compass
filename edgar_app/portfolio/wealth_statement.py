@@ -453,8 +453,8 @@ def build_wealth_statement(base_ccy: str = "SAR", notes: str = "") -> bytes:
     from portfolio.valuation import calculate_portfolio_valuation
     from fx_rates import get_rates_for_holdings
 
-    # Load & filter
-    holdings = load_holdings()
+    # Load & filter — exclude zero-quantity (sold/closed) holdings
+    holdings = {k: v for k, v in load_holdings().items() if v.quantity > 0}
     accounts = load_accounts()
     igi  = {k: v for k, v in load_igi_investments().items() if v.status != "Closed"}
     cf   = {k: v for k, v in load_cf_accounts().items()    if v.status == "Active"}
